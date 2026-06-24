@@ -575,7 +575,7 @@ export function BuildView() {
     }
     if (action.kind === "retry") {
       const retryPrompt = prompt.trim();
-      if (retryPrompt.length >= 4) void startAgent(retryPrompt);
+      if (retryPrompt.length >= 4) dispatchPrompt(retryPrompt);
       else dispatchPrompt();
       return;
     }
@@ -586,13 +586,13 @@ export function BuildView() {
     if (action.kind === "switch_provider") {
       await api.saveProviderSettings({ provider: action.provider });
       const retryPrompt = prompt.trim();
-      if (retryPrompt.length >= 4) void startAgent(retryPrompt);
+      if (retryPrompt.length >= 4) dispatchPrompt(retryPrompt);
       return;
     }
     if (action.kind === "stronger_model") {
       await api.saveProviderSettings(strongerModelSettingsPatch(action.step));
       const retryPrompt = prompt.trim();
-      if (retryPrompt.length >= 4) void startAgent(retryPrompt);
+      if (retryPrompt.length >= 4) dispatchPrompt(retryPrompt);
       return;
     }
     if (action.kind === "view_details" || action.kind === "open_diagnostic_report") {

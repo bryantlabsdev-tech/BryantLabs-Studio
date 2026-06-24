@@ -11,7 +11,6 @@ import {
   openFixtureProject,
   waitForComposerReady,
   waitForPatchReviewReady,
-  waitForWorkbenchDiffTab,
 } from "./helpers/studio";
 
 test.describe("Follow-up edit (mock provider)", () => {
@@ -58,8 +57,31 @@ test.describe("Follow-up review (mock provider)", () => {
     await app.close();
   });
 
+  test("simulated review panel shows actions and inline diff", async () => {
+    const simulated = await page.evaluate(() => {
+      return window.__studioTestHooks?.simulatePatchReadyForReview?.();
+    });
+    expect(simulated?.ok).toBe(true);
+    await waitForPatchReviewReady(page);
+
+    const review = page.getByTestId("run-review-actions");
+    await expect(review).toBeVisible();
+    await expect(review.getByText("src/App.tsx")).toBeVisible();
+    await expect(review.getByRole("button", { name: "Approve" })).toBeEnabled();
+    await expect(review.getByRole("button", { name: "Reject" })).toBeVisible();
+
+    const inlineDiff = review.getByTestId("run-inline-diff");
+    if (!(await inlineDiff.isVisible().catch(() => false))) {
+      await review.getByRole("button", { name: "Review file" }).click();
+    }
+    await expect(inlineDiff).toBeVisible();
+  });
+
   test("mock provider reaches review after gameplay follow-up", async () => {
     test.setTimeout(120_000);
+
+    await openFixtureProject(page);
+    await waitForComposerReady(page);
 
     await page.evaluate(() => {
       localStorage.setItem("bryantlabs.followUpReviewFirst", "1");
@@ -82,38 +104,5 @@ test.describe("Follow-up review (mock provider)", () => {
       expect(routing?.intent).toBe("feature_addition");
       expect(routing?.files_allowed?.some((p) => p.includes("App.tsx"))).toBe(true);
     }
-  });
-
-  test("review actions render in run conversation block", async () => {
-    const simulated = await page.evaluate(() => {
-      return window.__studioTestHooks?.simulatePatchReadyForReview?.();
-    });
-    expect(simulated?.ok).toBe(true);
-    await waitForPatchReviewReady(page);
-    const review = page.getByTestId("run-review-actions");
-    await expect(review).toBeVisible();
-    await expect(review.getByText("src/App.tsx")).toBeVisible();
-    await expect(review.getByRole("button", { name: "Approve" })).toBeEnabled();
-    await expect(review.getByRole("button", { name: "Reject" })).toBeVisible();
-  });
-
-  test("view changes opens diff in workbench", async () => {
-    const simulated = await page.evaluate(() => {
-      return window.__studioTestHooks?.simulatePatchReadyForReview?.();
-    });
-    expect(simulated?.ok).toBe(true);
-    await waitForPatchReviewReady(page);
-    await dismissBlockingDialogs(page);
-
-    await page
-      .locator("article")
-      .filter({ has: page.getByTestId("run-review-actions") })
-      .getByRole("button", { name: "View changes" })
-      .click();
-    await waitForWorkbenchDiffTab(page);
-
-    const diffPanel = page.locator(".center-diff");
-    await expect(diffPanel).toBeVisible();
-    await expect(diffPanel.getByText("src/App.tsx")).toBeVisible();
   });
 });
