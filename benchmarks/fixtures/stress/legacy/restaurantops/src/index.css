@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-gray-900 text-gray-100 antialiased;
+}
+
+@layer components {
+  .panel-card {
+    @apply rounded-lg border border-gray-700 bg-gray-800 p-4 min-h-[80px] min-w-[120px];
+  }
+}
+
+/* ui-audit:dashboard-layout — ensures KPI tiles measure on first preview paint */
+.panel-card,
+.panel,
+.card,
+.widget,
+.dashboard-panel,
+[class*="rounded-lg"][class*="border"],
+main [class*="grid"] > div {
+  min-width: 120px;
+  min-height: 80px;
+  display: block;
+}

@@ -1,0 +1,589 @@
+/* ---------- File tree ---------- */
+.tree {
+  list-style: none;
+  padding: var(--space-2) 0;
+  width: 100%;
+}
+
+.tree__children {
+  list-style: none;
+}
+
+.tree__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 5px var(--space-3) 5px 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tree__row:hover {
+  background: var(--bg-surface-2);
+}
+
+.tree__row--active {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.tree__chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 120ms ease;
+}
+
+.tree__chevron--open {
+  transform: rotate(90deg);
+}
+
+.tree__chevron--spacer {
+  visibility: hidden;
+}
+
+.tree__icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.tree__icon--dir {
+  color: var(--accent);
+}
+
+.tree__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree__hint {
+  list-style: none;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: var(--space-2) var(--space-4);
+}
+
+/* ---------- Editor (read-only viewer) ---------- */
+.editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.editor__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.editor__path {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.editor__lang {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.editor__readonly {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.editor__save-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.editor__patch-badge--dirty {
+  color: var(--warning, #f59e0b);
+}
+
+.btn--sm {
+  padding: 2px 10px;
+  font-size: 11px;
+  min-height: 24px;
+}
+
+.editor--monaco {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.editor__monaco-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.inline-edit {
+  position: absolute;
+  left: var(--space-4);
+  right: var(--space-4);
+  top: var(--space-3);
+  z-index: 20;
+  padding: var(--space-3);
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.inline-edit__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.inline-edit__label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.inline-edit__close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.inline-edit__input {
+  width: 100%;
+  margin-bottom: var(--space-2);
+}
+
+.inline-edit__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.inline-edit__hint {
+  font-size: 11px;
+}
+
+.monaco-editor-root {
+  flex: 1;
+  min-height: 280px;
+  overflow: hidden;
+}
+
+.monaco-editor-root__loading {
+  padding: var(--space-3);
+}
+
+.editor-embedded .editor--monaco {
+  min-height: 0;
+}
+
+.editor__scroll {
+  display: flex;
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  background: var(--bg-base);
+}
+
+.editor__gutter {
+  flex-shrink: 0;
+  margin: 0;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  user-select: none;
+  border-right: 1px solid var(--border);
+}
+
+.editor__code {
+  flex: 1;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre;
+  user-select: text;
+}
+
+.editor__code .hljs {
+  background: transparent;
+  padding: 0;
+}
+
+/* ---------- Terminal ---------- */
+.terminal-view {
+  height: 100%;
+  min-height: 0;
+  margin: calc(-1 * var(--space-2));
+  padding: var(--space-1);
+  overflow: hidden;
+  background: #0d1117;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-view__connect {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-1) 0;
+}
+
+.terminal-view__connect-btn {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle, #30363d);
+  background: #21262d;
+  color: var(--text-primary, #c9d1d9);
+  cursor: pointer;
+}
+
+.terminal-view__connect-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.terminal-view__connect-hint,
+.terminal-view__connect-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary, #8b949e);
+}
+
+.terminal-view__connect-error {
+  color: #f85149;
+}
+
+.terminal-view__surface {
+  flex: 1;
+  min-height: 0;
+}
+
+.terminal-view--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: var(--space-4);
+  background: transparent;
+}
+
+.terminal-view .xterm {
+  height: 100%;
+}
+
+.terminal-view .xterm-viewport {
+  overflow-y: auto !important;
+}
+
+.terminal__output {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.terminal__line {
+  display: block;
+}
+
+.terminal__line--muted {
+  color: var(--text-muted);
+}
+
+/* ---------- Edit toolbar ---------- */
+.edit-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-surface-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.edit-toolbar__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.edit-toolbar__kind,
+.edit-toolbar__input {
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.edit-toolbar__input {
+  flex: 1;
+  min-width: 120px;
+}
+
+.edit-toolbar__kind:focus,
+.edit-toolbar__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.edit-toolbar__actions {
+  gap: var(--space-2);
+}
+
+.edit-toolbar__undo {
+  margin-left: auto;
+}
+
+.edit-toolbar__msg {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.edit-toolbar__msg--error {
+  color: #fecaca;
+}
+
+.edit-toolbar__msg--ok {
+  color: #86efac;
+}
+
+.editor__readonly--edit {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------- Diff view ---------- */
+.editor__scroll--diff {
+  display: block;
+  background: var(--bg-base);
+}
+
+.diff {
+  padding: var(--space-3) 0;
+}
+
+.diff__desc {
+  padding: 0 var(--space-4) var(--space-3);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.diff__rows {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.diff-row {
+  display: flex;
+  white-space: pre;
+}
+
+.diff-row__num {
+  flex-shrink: 0;
+  width: 38px;
+  padding-right: var(--space-2);
+  text-align: right;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.diff-row__sign {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.diff-row__text {
+  flex: 1;
+  padding-right: var(--space-4);
+  color: var(--text-secondary);
+}
+
+.diff-row--add {
+  background: rgba(74, 222, 128, 0.1);
+}
+
+.diff-row--add .diff-row__sign,
+.diff-row--add .diff-row__text {
+  color: #bbf7d0;
+}
+
+.diff-row--remove {
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.diff-row--remove .diff-row__sign,
+.diff-row--remove .diff-row__text {
+  color: #fecaca;
+}
+
+/* ---------- Editor file tabs ---------- */
+.editor-tabs {
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+}
+
+.editor-tabs__tab {
+  display: inline-flex;
+  align-items: center;
+  border-right: 1px solid var(--border);
+  max-width: 200px;
+}
+
+.editor-tabs__tab--on {
+  background: var(--bg-surface-2);
+}
+
+.editor-tabs__label {
+  all: unset;
+  cursor: pointer;
+  font-size: 12px;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-tabs__tab--on .editor-tabs__label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.editor-tabs__close {
+  all: unset;
+  cursor: pointer;
+  padding: 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.editor-tabs__close:hover {
+  color: var(--text-primary);
+}
+
+.editor__patch-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fbbf24;
+}
+
+/* ---------- Inline patch review ---------- */
+.patch-line--add {
+  background: rgba(74, 222, 128, 0.12);
+}
+
+.patch-line--remove {
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.patch-gutter--add::before,
+.patch-gutter--remove::before {
+  content: "";
+  display: block;
+  width: 4px;
+  height: 100%;
+  margin-left: 3px;
+}
+
+.patch-gutter--add::before {
+  background: #34d399;
+}
+
+.patch-gutter--remove::before {
+  background: #f87171;
+}
+
+.patch-gutter-widget {
+  display: inline-flex;
+  gap: var(--space-2);
+  padding: 2px 4px;
+  margin-left: 28px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.patch-gutter-widget__accept,
+.patch-gutter-widget__reject {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.patch-gutter-widget__accept {
+  background: #34d399;
+  color: #052e1a;
+}
+
+.patch-gutter-widget__reject {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.patch-gutter-widget__reject:hover {
+  color: #f87171;
+}
+

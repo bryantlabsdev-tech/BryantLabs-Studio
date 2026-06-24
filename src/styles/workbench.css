@@ -1,0 +1,184 @@
+/* Center workbench — tabs, overflow menu, diff panel shell */
+
+.panel.panel--center {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  align-self: stretch;
+}
+
+.panel.panel--center > .panel__body.center-panel__body {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.center-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 var(--space-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.center-tabs::-webkit-scrollbar {
+  height: 4px;
+}
+
+.center-tabs__tab {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.center-tabs__tab:hover {
+  color: var(--text-primary);
+}
+
+.center-tabs__tab--on {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.center-tabs__tab--live {
+  color: var(--accent-hover);
+}
+
+.center-tabs__tab--live.center-tabs__tab--on {
+  border-bottom-color: var(--accent-hover);
+}
+
+.center-panel__body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.center-panel__body:has(.preview-view),
+.center-panel__body:has(.editor--monaco),
+.center-panel__body:has(.gf-logs-center),
+.center-panel__body:has(.gf-inspector-center),
+.center-panel__body:has(.studio-run-log) {
+  overflow: hidden;
+}
+
+.center-panel__body > .view-suspense {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.center-panel__body:has(.preview-view) .view-suspense,
+.center-panel__body:has(.preview-view) .preview-view,
+.center-panel__body:has(.gf-logs-center) .view-suspense,
+.center-panel__body:has(.gf-inspector-center) .view-suspense,
+.center-panel__body:has(.studio-run-log) .view-suspense {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.view-suspense:has(.gf-logs-center),
+.view-suspense:has(.gf-inspector-center),
+.view-suspense:has(.studio-run-log) {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace > .panel.panel--center {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.center-panel__hint {
+  padding: var(--space-4);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.center-diff {
+  height: 100%;
+  min-height: 200px;
+  overflow: auto;
+  padding: var(--space-2);
+}
+
+.center-diff--ai-patch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.center-diff--ai-patch .diff {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.center-tabs__more {
+  position: relative;
+  margin-left: auto;
+}
+
+.center-tabs__tab--more {
+  font-size: 11px;
+}
+
+.center-tabs__menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 20;
+  min-width: 140px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: var(--space-1);
+}
+
+.center-tabs__menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 11px;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.center-tabs__menu-item:hover,
+.center-tabs__menu-item--on {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}

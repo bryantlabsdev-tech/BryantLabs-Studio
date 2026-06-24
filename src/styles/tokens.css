@@ -1,0 +1,89 @@
+/**
+ * BryantLabs Studio — design tokens (Phase 3)
+ * Single accent: Deep Indigo. All surfaces derive from these variables.
+ */
+:root {
+  /* ── Surfaces ── */
+  --bg: #0a0b10;
+  --bg-elevated: #181b24;
+  --surface: #12151c;
+  --surface-hover: #1c212b;
+
+  /* Legacy aliases (existing components) */
+  --bg-base: var(--bg);
+  --bg-surface: var(--surface);
+  --bg-surface-2: var(--surface-hover);
+
+  /* ── Borders ── */
+  --border: #252b36;
+  --border-strong: #343d4d;
+
+  /* ── Text ── */
+  --text-primary: #eef1f6;
+  --text-secondary: #9aa3b2;
+  --text-muted: #5c6675;
+
+  /* ── Semantic ── */
+  --success: #34d399;
+  --success-soft: color-mix(in srgb, var(--success) 14%, transparent);
+  --warning: #fbbf24;
+  --warning-soft: color-mix(in srgb, var(--warning) 14%, transparent);
+  --danger: #f87171;
+  --danger-soft: color-mix(in srgb, var(--danger) 12%, transparent);
+
+  /* ── Accent — Deep Indigo ── */
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --accent-strong: #4f46e5;
+  --accent-muted: #a5b4fc;
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-border: color-mix(in srgb, var(--accent) 35%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent) 40%, transparent);
+
+  /* ── Typography scale ── */
+  --font-heading-size: 15px;
+  --font-heading-weight: 600;
+  --font-heading-leading: 1.35;
+  --font-subheading-size: 13px;
+  --font-subheading-weight: 600;
+  --font-subheading-leading: 1.4;
+  --font-body-size: 14px;
+  --font-body-weight: 400;
+  --font-body-leading: 1.5;
+  --font-caption-size: 11px;
+  --font-caption-weight: 500;
+  --font-caption-leading: 1.45;
+
+  /* ── Radii ── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  /* ── Spacing (unchanged) ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* ── Motion ── */
+  --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --duration-slow: 320ms;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.32);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.4);
+
+  color-scheme: dark;
+
+  /* Aliases used by agent-conversation.css and legacy App.css regions */
+  --surface-raised: var(--bg-elevated);
+  --border-subtle: var(--border);
+  --accent-primary: var(--accent);
+}

@@ -1,0 +1,101 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--bg-base);
+}
+
+/* ---------- Bottom dock (height set by ResizableWorkspace) ---------- */
+.dock {
+  padding: 0;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-top: none;
+  background: var(--bg-surface);
+  min-height: 0;
+}
+
+.panel--dock {
+  height: 100%;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dock-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 var(--space-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.dock-tabs__tab {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dock-tabs__tab--on {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+
+.dock-tabs__badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.dock-tabs__badge--error {
+  background: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+}
+
+.dock-tabs__badge--warn {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+}
+
+.dock__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-2);
+}
+
+.dock-runlog__empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: var(--space-3);
+}
+
+.gf-runlog--compact {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.gf-runlog--compact .gf-runlog__list {
+  max-height: 140px;
+}
+
+.gf-runlog__list--center {
+  max-height: none;
+}
+

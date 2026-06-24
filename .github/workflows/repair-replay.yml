@@ -1,0 +1,42 @@
+name: Repair replay
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Frozen repair replay (5/5)
+        run: npm run greenfield:stress:replay
+        env:
+          CI: "1"
+          BRYANTLABS_STRESS_REPLAY_STRICT: "1"
+
+      - name: Legacy repair replay (10/10)
+        run: npm run greenfield:stress:replay:legacy
+        env:
+          CI: "1"
+          BRYANTLABS_STRESS_REPLAY_STRICT: "1"
+
+      - name: Upload replay report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repair-replay-report
+          path: benchmarks/results/repair-replay-latest.md
+          if-no-files-found: ignore

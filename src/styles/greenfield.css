@@ -1,0 +1,449 @@
+/**
+ * BryantLabs Studio — greenfield run diagnostics & summary (Phase 10)
+ */
+/* Greenfield TypeScript failure diagnostics */
+.gf-tsc {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.gf-tsc__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+.gf-tsc__copynote {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.gf-tsc__meta {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-3);
+  font-size: 12px;
+}
+
+.gf-tsc__row {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  gap: var(--space-2);
+}
+
+.gf-tsc__row dt {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.gf-tsc__row dd {
+  margin: 0;
+}
+
+.gf-tsc__mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.gf-tsc__heading {
+  margin: 0 0 var(--space-2);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.gf-tsc__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.gf-tsc__item {
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.gf-tsc__item--error {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+
+.gf-tsc__loc {
+  display: block;
+  font-size: 11px;
+  margin-bottom: var(--space-1);
+  word-break: break-all;
+}
+
+.gf-tsc__code {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.gf-tsc__code--error {
+  color: var(--danger);
+}
+
+.gf-tsc__code--warning {
+  color: var(--warning, #c9a227);
+}
+
+.gf-tsc__msg {
+  margin: var(--space-1) 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.gf-tsc__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-2);
+}
+
+.gf-tsc__stream {
+  margin-top: var(--space-2);
+  font-size: 12px;
+}
+
+.gf-tsc__stream > summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.gf-tsc__pre {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  max-height: 280px;
+  overflow: auto;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* Greenfield live + summary run log */
+.gf-runlog {
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.gf-runlog__title {
+  margin: 0 0 var(--space-2);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.gf-runlog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.gf-runlog__copynote {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.gf-runlog__summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.gf-runlog__live,
+.gf-runlog__summarybox {
+  margin-top: var(--space-2);
+}
+
+.gf-runlog__list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.gf-runlog--compact .gf-runlog__list,
+.gf-runlog__live .gf-runlog__list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.gf-runlog__list--center {
+  max-height: none;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-1);
+}
+
+.gf-live-log__anchor {
+  height: 1px;
+  flex-shrink: 0;
+}
+
+.gf-runlog__item {
+  display: grid;
+  grid-template-columns: 5.5rem 6.5rem 4.5rem 1fr;
+  gap: var(--space-2);
+  align-items: start;
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2);
+  font-size: 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.gf-runlog__item--failed {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
+.gf-runlog__item--running {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.gf-runlog__item--success {
+  border-color: color-mix(in srgb, var(--success, #3d9a5c) 25%, var(--border));
+}
+
+.gf-runlog__time {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.gf-runlog__stage {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.gf-runlog__status {
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.gf-runlog__status--failed {
+  color: var(--danger);
+}
+
+.gf-runlog__status--running {
+  color: var(--accent);
+}
+
+.gf-runlog__status--success {
+  color: var(--success, #3d9a5c);
+}
+
+.gf-runlog__role {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.gf-runlog__role--root {
+  color: #fff;
+  background: var(--danger, #c53030);
+}
+
+.gf-runlog__role--downstream {
+  color: var(--text-muted);
+  background: var(--surface-elevated);
+}
+
+.gf-runlog__role--skipped {
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px dashed var(--border);
+}
+
+.gf-failure-diag {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.gf-failure-diag--compact {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+}
+
+.gf-failure-diag__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.gf-failure-diag__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.gf-failure-diag__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.gf-failure-diag__copynote {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.gf-failure-diag__stage-hint {
+  margin: var(--space-1) 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.gf-failure-diag__stages {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.gf-failure-diag__stage {
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.gf-failure-diag__stage--root {
+  border-color: var(--danger, #c53030);
+}
+
+.gf-failure-diag__stage-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.gf-failure-diag__stage-name {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.gf-failure-diag__stage-outcome {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.gf-failure-diag__role {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.gf-failure-diag__role--root {
+  color: #fff;
+  background: var(--danger, #c53030);
+}
+
+.gf-failure-diag__role--downstream {
+  color: var(--text-muted);
+  background: var(--surface-elevated);
+}
+
+.gf-failure-diag__headline {
+  margin: 0;
+  font-size: 12px;
+}
+
+.gf-failure-diag__detail {
+  margin: var(--space-1) 0 0;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.gf-failure-diag__cmd summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.gf-runlog__msg {
+  word-break: break-word;
+}
+
+.gf-runlog__details {
+  grid-column: 1 / -1;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface-elevated);
+  border-radius: var(--radius-sm);
+}
+
+.gf-runlog__meta {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+}
+
+.gf-runlog__row {
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.gf-runlog__row dt {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.gf-runlog__row dd {
+  margin: 0;
+}
+
+.gf-runlog__mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
+}

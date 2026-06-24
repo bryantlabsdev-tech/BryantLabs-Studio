@@ -1,0 +1,96 @@
+{
+  "name": "bryantlabs-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BryantLabs Studio — a local-first AI app builder for macOS.",
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run prebuild && vite build && npm run build:electron",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "prebuild": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/prebuild-typecheck.mjs",
+    "typecheck": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/prebuild-typecheck.mjs --check-only",
+    "electron:dev": "concurrently -k -n vite,electron -c blue,green \"vite\" \"wait-on tcp:5173 && npm run prebuild && npm run build:electron && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 node scripts/run-electron-app.mjs\"",
+    "preview": "vite preview",
+    "test:unit": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs --test 'src/**/*.test.ts'",
+    "test:electron": "node ./scripts/run-electron-tests.mjs",
+    "test:all": "npm run test:unit && npm run test:electron",
+    "test:smoke": "node ./scripts/e2e-smoke.mjs",
+    "test:e2e": "cross-env BRYANTLABS_MOCK_PROVIDER=1 playwright test",
+    "test:e2e:headed": "cross-env BRYANTLABS_MOCK_PROVIDER=1 playwright test --headed",
+    "test:e2e:dist": "cross-env BRYANTLABS_MOCK_PROVIDER=1 PLAYWRIGHT_USE_DIST=1 playwright test",
+    "test:e2e:onboarding": "cross-env BRYANTLABS_MOCK_PROVIDER=1 PLAYWRIGHT_USE_DIST=1 VITE_BRYANTLABS_ONBOARDING_E2E=1 playwright test e2e/onboarding.spec.ts",
+    "test:e2e:real": "cross-env BRYANTLABS_E2E_REAL_PROVIDER=1 playwright test e2e/provider.real.spec.ts",
+    "test:e2e:real:dist": "cross-env BRYANTLABS_E2E_REAL_PROVIDER=1 PLAYWRIGHT_USE_DIST=1 playwright test e2e/provider.real.spec.ts",
+    "test:e2e:report": "playwright show-report e2e/playwright-report",
+    "test:gate": "npm run test:smoke && npm run test:e2e:dist",
+    "bench": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/run-benchmarks.mjs",
+    "bench:json": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/run-benchmarks.mjs --json",
+    "bench:unit": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs --test 'benchmarks/**/*.test.ts'",
+    "greenfield:a19": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-fieldflow-a19.mjs",
+    "greenfield:a19:live": "BRYANTLABS_A19_LIVE=1 node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-fieldflow-a19.mjs",
+    "greenfield:a22": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-fleetops-a22.mjs",
+    "greenfield:a22:live": "BRYANTLABS_A22_LIVE=1 node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-fleetops-a22.mjs",
+    "greenfield:stress": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress.mjs",
+    "greenfield:stress:live": "BRYANTLABS_STRESS_LIVE=1 node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress.mjs",
+    "greenfield:stress:live:5": "BRYANTLABS_STRESS_LIVE=1 BRYANTLABS_STRESS_FAST=1 node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress.mjs --fast",
+    "greenfield:stress:replay": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress-replay.mjs",
+    "greenfield:stress:replay:legacy": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress-replay-legacy.mjs",
+    "greenfield:stress:lock-replay": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress-lock-replay.mjs",
+    "greenfield:stress:sync-fixtures": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress-sync-fixtures.mjs",
+    "release:verify": "npm run typecheck && npm run test:all && npm run build && cross-env BRYANTLABS_MOCK_PROVIDER=1 PLAYWRIGHT_USE_DIST=1 npm run test:e2e",
+    "rebuild:native": "electron-rebuild -f -w node-pty",
+    "electron:dist": "npm run build && electron-builder --mac",
+    "electron:release": "npm run build && electron-builder --mac dmg zip"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "highlight.js": "^11.11.1",
+    "monaco-editor": "^0.55.1",
+    "node-pty": "^1.1.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
+    "@playwright/test": "^1.52.0",
+    "@types/node": "^25.9.1",
+    "@types/react": "^19.2.16",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "concurrently": "^10.0.3",
+    "cross-env": "^10.1.0",
+    "electron": "^42.3.2",
+    "electron-builder": "^26.15.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "dev.bryantlabs.studio",
+    "productName": "BryantLabs Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "artifactName": "${productName}.${ext}"
+    }
+  }
+}
