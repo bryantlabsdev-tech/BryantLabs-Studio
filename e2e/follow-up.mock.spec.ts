@@ -11,6 +11,7 @@ import {
   openFixtureProject,
   waitForComposerReady,
   waitForPatchReviewReady,
+  waitForWorkbenchDiffTab,
 } from "./helpers/studio";
 
 test.describe("Follow-up edit (mock provider)", () => {
@@ -57,24 +58,39 @@ test.describe("Follow-up review (mock provider)", () => {
     await app.close();
   });
 
-  test("simulated review panel shows actions and inline diff", async () => {
+  test("simulated review chip opens workbench review panel", async () => {
     const simulated = await page.evaluate(() => {
       return window.__studioTestHooks?.simulatePatchReadyForReview?.();
     });
     expect(simulated?.ok).toBe(true);
     await waitForPatchReviewReady(page);
 
-    const review = page.getByTestId("run-review-actions");
-    await expect(review).toBeVisible();
-    await expect(review.getByText("src/App.tsx")).toBeVisible();
-    await expect(review.getByRole("button", { name: "Approve" })).toBeEnabled();
-    await expect(review.getByRole("button", { name: "Reject" })).toBeVisible();
+    const reviewPrompt = page.getByTestId("agent-review-chip");
+    await expect(reviewPrompt).toBeVisible();
+    await reviewPrompt.getByRole("button", { name: /Review changes/i }).click();
+    await waitForWorkbenchDiffTab(page);
 
-    const inlineDiff = review.getByTestId("run-inline-diff");
-    if (!(await inlineDiff.isVisible().catch(() => false))) {
-      await review.getByRole("button", { name: "Review file" }).click();
-    }
-    await expect(inlineDiff).toBeVisible();
+    const review = page.getByTestId("patch-review-panel");
+    await expect(review).toBeVisible();
+    await expect(review.getByTestId("patch-review-file-chips")).toContainText("src/App.tsx");
+    await expect(review.getByRole("button", { name: "Accept all" })).toBeEnabled();
+    await expect(review.getByRole("button", { name: "Reject all" })).toBeVisible();
+  });
+
+  test("shows live execution flow and compact summary in agent conversation", async () => {
+    await openFixtureProject(page);
+    await waitForComposerReady(page);
+
+    const simulated = await page.evaluate(() =>
+      window.__studioTestHooks?.simulateLiveActivityStream?.({ complete: true }),
+    );
+    expect(simulated?.ok).toBe(true);
+
+    const stream = page.getByTestId("agent-execution-flow");
+    await expect(stream).toBeVisible();
+    await expect(page.getByTestId("agent-turn-footer")).toBeVisible();
+    await expect(stream).toContainText("App.tsx");
+    await expect(page.getByTestId("agent-execution-details")).toBeVisible();
   });
 
   test("mock provider reaches review after gameplay follow-up", async () => {
@@ -95,10 +111,23 @@ test.describe("Follow-up review (mock provider)", () => {
     expect(["waiting_for_review", "ready_for_apply", "apply_failed"]).toContain(outcome);
 
     if (outcome === "waiting_for_review") {
-      const review = page.getByTestId("run-review-actions");
+      // A successful run can surface the modal "Save to memory?" dialog, which
+      // overlays the conversation and intercepts pointer events. Dismiss only
+      // that dialog (not the broad helper, which would click "Reject all").
+      const dismissMemory = page.getByRole("button", { name: /^Dismiss$/i });
+      if (await dismissMemory.isVisible().catch(() => false)) {
+        await dismissMemory.click();
+      }
+
+      const reviewPrompt = page.getByTestId("agent-review-chip");
+      await expect(reviewPrompt).toBeVisible();
+      await reviewPrompt.getByRole("button", { name: /Review changes/i }).click();
+      await waitForWorkbenchDiffTab(page);
+
+      const review = page.getByTestId("patch-review-panel");
       await expect(review).toBeVisible();
-      await expect(review.getByText("src/App.tsx")).toBeVisible();
-      await expect(review.getByRole("button", { name: "Approve" })).toBeEnabled();
+      await expect(review.getByTestId("patch-review-file-chips")).toContainText("src/App.tsx");
+      await expect(review.getByRole("button", { name: "Accept all" })).toBeEnabled();
 
       const routing = await page.evaluate(() => window.__studioTestHooks?.getRoutingState?.());
       expect(routing?.intent).toBe("feature_addition");

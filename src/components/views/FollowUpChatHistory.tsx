@@ -13,9 +13,9 @@ import {
   RunConversationBlock,
   type RunReviewProps,
 } from "@/components/views/RunConversationBlock";
-import { RunReviewActions } from "@/components/views/RunReviewActions";
+import { AGENT_COPY } from "@/core/agent/agentExecutionCopy";
 import { EmptyState } from "@/components/EmptyState";
-import { AgentIcon } from "@/components/icons";
+import { BrandLogo } from "@/components/BrandLogo";
 import {
   AgentConversationThread,
   AgentThreadContinuation,
@@ -263,7 +263,7 @@ export function FollowUpChatHistory({
         <EmptyState
           title="Start a conversation"
           description={emptyHint}
-          icon={<AgentIcon />}
+          icon={<BrandLogo size={40} className="empty-state__brand-logo" />}
           action={
             emptyExamples.length > 0 && onSuggestionClick ? (
               <ul className="follow-up-chat__empty-examples">
@@ -382,12 +382,25 @@ export function FollowUpChatHistory({
                 : null;
 
             if (runBlock) {
+              const turnTime = runArtifact?.startedAt ?? msg.at;
+
               rows.push(
                 <li
-                  key={`${msg.id}-run`}
-                  className="follow-up-chat__row follow-up-chat__row--agent-run"
+                  key={`${msg.id}-assistant`}
+                  className="follow-up-chat__row follow-up-chat__row--studio"
                 >
-                  {runBlock}
+                  <article className="follow-up-chat__bubble follow-up-chat__bubble--studio agent-turn-bubble">
+                    <header className="follow-up-chat__meta follow-up-chat__meta--agent">
+                      <span className="follow-up-chat__speaker">Agent</span>
+                      <time
+                        className="follow-up-chat__time"
+                        dateTime={new Date(turnTime).toISOString()}
+                      >
+                        {formatMessageTime(turnTime)}
+                      </time>
+                    </header>
+                    {runBlock}
+                  </article>
                 </li>,
               );
               const hasLaterUserRun = messages
@@ -402,14 +415,43 @@ export function FollowUpChatHistory({
           return rows;
         })}
         {messages.length === 0 && showLiveRunCard && agentRunCard ? (
-          <li className="follow-up-chat__row follow-up-chat__row--agent-run">
-            {renderRunBlock(null, agentRunCard, undefined, false, activeAgentRunId)}
+          <li className="follow-up-chat__row follow-up-chat__row--studio">
+            <article className="follow-up-chat__bubble follow-up-chat__bubble--studio agent-turn-bubble">
+              <header className="follow-up-chat__meta follow-up-chat__meta--agent">
+                <span className="follow-up-chat__speaker">Agent</span>
+                <time
+                  className="follow-up-chat__time"
+                  dateTime={new Date().toISOString()}
+                >
+                  {formatMessageTime(Date.now())}
+                </time>
+              </header>
+              {renderRunBlock(null, agentRunCard, undefined, false, activeAgentRunId)}
+            </article>
           </li>
         ) : null}
         {review?.awaiting && !reviewEmbeddedInLiveRun ? (
-          <li className="follow-up-chat__row follow-up-chat__row--agent-run">
-            <article className="run-conversation">
-              <RunReviewActions review={review} />
+          <li className="follow-up-chat__row follow-up-chat__row--studio">
+            <article className="follow-up-chat__bubble follow-up-chat__bubble--studio agent-turn-bubble">
+              <p className="agent-conversation__prose" data-testid="agent-review-chip">
+                {AGENT_COPY.review.ready}{" "}
+                <button
+                  type="button"
+                  className="agent-conversation__inline-link"
+                  onClick={() => {
+                    const first = review.changedFiles[0]?.relPath;
+                    if (first && activeAgentRunId && onFocusRunDiff) {
+                      onFocusRunDiff(activeAgentRunId, first);
+                      return;
+                    }
+                    if (activeAgentRunId && onFocusRunDiff) {
+                      onFocusRunDiff(activeAgentRunId);
+                    }
+                  }}
+                >
+                  {AGENT_COPY.review.open}
+                </button>
+              </p>
             </article>
           </li>
         ) : null}

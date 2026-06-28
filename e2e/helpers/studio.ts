@@ -213,6 +213,7 @@ export async function openFixtureProject(
     localStorage.removeItem(`bryantlabs.followUpChat.${targetPath}`);
     localStorage.removeItem("bryantlabs.providerCircuit.v1");
     localStorage.removeItem("bryantlabs.followUpReviewFirst");
+    localStorage.setItem("bryantlabs.useAgentLoopForEdits", "0");
     const hooks = window.__studioTestHooks;
     if (!hooks?.openProjectAt) {
       throw new Error("Studio test hooks are not available");
@@ -225,12 +226,10 @@ export async function openFixtureProject(
 
 export async function waitForAgentReady(page: Page): Promise<void> {
   await dismissBlockingDialogs(page);
-  await page.locator("#build-prompt").waitFor({ state: "visible", timeout: READINESS_TIMEOUT_MS });
-  await page.evaluate(() => {
-    localStorage.removeItem("bryantlabs.providerCircuit.v1");
-  });
+  await waitForStudioTestHooks(page);
   await openFixtureProject(page);
   await waitForComposerReady(page);
+  await page.locator("#build-prompt").waitFor({ state: "visible", timeout: READINESS_TIMEOUT_MS });
 }
 
 export function composerExample(page: Page, label: string) {
@@ -391,7 +390,7 @@ async function readPatchPipelineOutcome(page: Page): Promise<PatchPipelineOutcom
   const hookOutcome = patchPipelineOutcomeFromState(state);
   if (hookOutcome) return hookOutcome;
 
-  if (await page.getByTestId("run-review-actions").isVisible().catch(() => false)) {
+  if (await page.getByTestId("agent-review-chip").isVisible().catch(() => false)) {
     return "waiting_for_review";
   }
   if (await page.getByTestId("run-failure-card").isVisible().catch(() => false)) {

@@ -589,10 +589,6 @@
   flex-shrink: 0;
 }
 
-.follow-up-chat__row--agent-run {
-  list-style: none;
-}
-
 .historical-run-banner {
   display: flex;
   align-items: center;
@@ -749,3 +745,212 @@
   border-left: 3px solid var(--warning-border, #b8860b);
   font-size: var(--font-caption-size, 0.85rem);
 }
+
+/* Unified assistant turn (Cursor-style execution stream) */
+
+.agent-turn-bubble {
+  max-width: min(100%, 52rem);
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+.follow-up-chat__meta--agent .follow-up-chat__time {
+  opacity: 0.55;
+}
+
+.agent-turn__content {
+  margin-top: 0.15rem;
+}
+
+.agent-turn__content--frozen {
+  opacity: 0.92;
+}
+
+/* Conversational assistant projection */
+
+.agent-conversation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.agent-conversation__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.agent-conversation__prose {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.agent-conversation__wait-hint {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.agent-conversation__cursor {
+  display: inline-block;
+  width: 2px;
+  height: 0.95em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--text-secondary);
+  opacity: 0.85;
+  animation: agent-conversation-cursor 1s step-end infinite;
+}
+
+@keyframes agent-conversation-cursor {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+.agent-conversation__stream {
+  white-space: pre-wrap;
+}
+
+.agent-conversation__action-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.68;
+  line-height: 1.25;
+}
+
+.agent-conversation__action-icon {
+  font-size: 9px;
+  opacity: 0.85;
+}
+
+.agent-conversation__action-group {
+  margin-top: 0.1rem;
+}
+
+.agent-conversation__actions {
+  margin-top: 0.15rem;
+  opacity: 0.62;
+}
+
+.agent-conversation__action {
+  animation: agent-conversation-action-in 0.35s ease;
+}
+
+@keyframes agent-conversation-action-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.agent-conversation__action--active .agent-conversation__action-line {
+  animation: agent-conversation-active-pulse 2s ease-in-out infinite;
+}
+
+@keyframes agent-conversation-active-pulse {
+  0%,
+  100% {
+    opacity: 0.72;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.agent-conversation__action-group-toggle {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.agent-conversation__action-group-toggle:hover {
+  color: var(--text-secondary);
+}
+
+.agent-conversation__action-list {
+  list-style: none;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.agent-conversation__action-toggle {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.agent-conversation__action-toggle:hover {
+  color: var(--text-secondary);
+}
+
+.agent-conversation__action-detail {
+  margin: 0.15rem 0 0 1.1rem;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.agent-conversation__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.1rem;
+}
+
+.agent-conversation__links--subtle {
+  opacity: 0.75;
+}
+
+.agent-conversation__link {
+  border: none;
+  background: transparent;
+  color: var(--accent-primary);
+  font-size: 12px;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.agent-conversation__link--muted,
+.agent-conversation__inline-link {
+  border: none;
+  background: transparent;
+  color: var(--accent-primary);
+  font-size: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.agent-conversation__link--muted {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
