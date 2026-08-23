@@ -206,6 +206,7 @@ export function buildPlanPrompt(userPrompt: string, context: PlanContext): strin
     "- Use `repositorySummary`, `symbolIntelligenceSummary`, `bundler`, and `dependencies` to respect the project's stack.",
     "- Prefer `relevantSymbols` and `relevantFiles` (with line numbers when present) for targeting.",
     "- When `projectMemory` is present, follow architecture notes, userPreferences, and notes.",
+    "- When `projectRules` is present, treat them as mandatory project conventions.",
     "- When `retrievedMemories` is present, treat them as long-term project knowledge ranked by relevance.",
     "- `risks` lists concerns or side effects; use [] if none.",
     "- `summary` must be non-empty.",

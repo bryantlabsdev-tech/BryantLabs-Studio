@@ -2,7 +2,7 @@ import { applyDeterministicRepairs } from "@/core/greenfield/deterministicProjec
 import {
   DEFAULT_DETERMINISTIC_REPAIR_MAX_PASSES,
 } from "@/core/greenfield/projectRepairTypes";
-import { createApiProjectRepairIo } from "@/core/greenfield/projectRepairIo";
+import { createApiProjectRepairIo } from "@/core/greenfield/projectRepairApiIo";
 import {
   buildTypeScriptCheckDetailsFromCommand,
 } from "@/core/greenfield/tscDiagnostics";

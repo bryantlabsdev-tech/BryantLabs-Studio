@@ -27,6 +27,21 @@ import {
   type ProjectMemoryContextResult,
 } from "@/core/projectIntelligence/buildProjectMemoryContext";
 
+function attachProjectRules(
+  context: PlanContext,
+  projectRules?: string | null,
+): PlanContext {
+  const trimmed = projectRules?.trim();
+  if (!trimmed) return context;
+  return {
+    ...context,
+    projectRules: trimmed,
+    repositoryPrompt: [context.repositoryPrompt, `Project rules (must follow):\n${trimmed}`]
+      .filter(Boolean)
+      .join("\n\n"),
+  };
+}
+
 const MAX_CONTEXT_DEPENDENCIES = 40;
 
 function hasProjectMemoryContent(memory: ProjectMemory | null): boolean {
@@ -97,6 +112,7 @@ export function buildAgentPlanContext(
   intelligence?: ProjectIntelligenceContext | null,
   projectIntelligence?: ProjectIntelligence | null,
   route?: string | null,
+  projectRules?: string | null,
 ): {
   context: PlanContext;
   diagnostics: SessionMemoryDiagnostics;
@@ -134,6 +150,7 @@ export function buildAgentPlanContext(
     };
   }
   enriched = boostComposerMentionsInContext(enriched, userPrompt, scan);
+  enriched = attachProjectRules(enriched, projectRules);
   return { context: enriched, diagnostics, projectMemoryInjection };
 }
 
@@ -151,6 +168,7 @@ export function buildAgentApplyPlanContext(
     projectIntelligence?: ProjectIntelligence | null;
     route?: string | null;
     referencedContents?: readonly ReferencedFileContent[];
+    projectRules?: string | null;
   },
 ): PlanContext {
   const base = opts.slim
@@ -188,5 +206,6 @@ export function buildAgentApplyPlanContext(
   if (opts.referencedContents?.length) {
     enriched = attachReferencedFileContents(enriched, opts.referencedContents);
   }
+  enriched = attachProjectRules(enriched, opts.projectRules);
   return enriched;
 }

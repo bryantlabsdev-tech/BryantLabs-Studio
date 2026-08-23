@@ -19,6 +19,13 @@ import {
   appendFollowUpChatMessage,
   createFollowUpChatMessage,
 } from "@/core/build/followUpChat";
+import { createRunLogEntry } from "@/core/greenfield/runLog";
+import { AGENT_PIPELINE_UNDERSTANDING } from "@/core/agent/agentUxLabels";
+import {
+  clearProviderTransportEvents,
+  getProviderTransportEvents,
+  summarizeTransportLog,
+} from "@/core/diagnostics/providerTransport";
 
 export interface WorkspaceStudioTestHooksInput {
   readonly api: BryantLabsApi | undefined;
@@ -52,6 +59,8 @@ export interface WorkspaceStudioTestHooksInput {
     port?: number | null;
   }) => void;
   readonly requestPreviewTab: () => void;
+  readonly setGreenfieldRun: Dispatch<SetStateAction<GreenfieldRunSnapshot>>;
+  readonly setBuildRunningForTest: (active: boolean) => void;
 }
 
 export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput): void {
@@ -81,6 +90,8 @@ export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput
     releaseBuildRunForReview,
     patchAppPreview,
     requestPreviewTab,
+    setGreenfieldRun,
+    setBuildRunningForTest,
   } = input;
 
   const getReadinessState = useCallback((): StudioReadinessState => {
@@ -127,9 +138,22 @@ export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput
       aiPlanStatus,
       centerTab,
       activeAgentRunId,
+      applyTargets:
+        planApplySession?.files.map((f) => ({
+          relPath: f.relPath,
+          status: f.status,
+          selectionReason: f.selectionReason,
+          hasProposal: Boolean(f.proposal),
+          decision: f.decision,
+        })) ?? [],
+      proposalRelPaths:
+        planApplySession?.files
+          .filter((f) => Boolean(f.proposal))
+          .map((f) => f.relPath) ?? [],
     }),
     [
       planApplySession?.phase,
+      planApplySession?.files,
       buildRunning,
       buildStatusPhase,
       planApplyError,
@@ -261,14 +285,88 @@ export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput
     [api, providerStatus?.provider, providerStatus?.model],
   );
 
+  const simulateLiveActivityStream = useCallback(
+    (opts?: { complete?: boolean }) => {
+      const resolvedPath = projectPath ?? greenfieldRun.projectPath;
+      if (!resolvedPath) return { ok: false as const, reason: "no_project" };
+
+      const runId = createAgentRunId();
+      const prompt = "Simulate live activity stream";
+      const userMessage = createFollowUpChatMessage("user", prompt, { runId });
+      if (projectPath) {
+        setFollowUpChat(appendFollowUpChatMessage(projectPath, userMessage));
+        beginAgentRun(runId, prompt, userMessage.id);
+      }
+
+      const complete = opts?.complete ?? false;
+      const startedAt = Date.now();
+      const entries = [
+        createRunLogEntry(
+          "pipeline",
+          "success",
+          "Understanding project audit complete",
+          AGENT_PIPELINE_UNDERSTANDING,
+        ),
+        createRunLogEntry("ai_plan", "success", "Plan ready"),
+        createRunLogEntry("provider_call", complete ? "success" : "running", "Waiting on provider…"),
+        createRunLogEntry("apply_plan", "success", "Generating patches…"),
+        createRunLogEntry("write", "success", "Applying patches to src/App.tsx"),
+        createRunLogEntry("typescript", "success", "TypeScript check passed"),
+        createRunLogEntry("build", "success", "Build finished"),
+        createRunLogEntry("preview", "success", "Preview ready"),
+      ];
+
+      setBuildRunningForTest(!complete);
+      setGreenfieldRun((prev) => ({
+        ...prev,
+        projectPath: resolvedPath,
+        runResult: complete ? "success" : "running",
+        runStartedAt: startedAt,
+        entries: [...prev.entries, ...entries],
+      }));
+
+      return { ok: true as const, runId };
+    },
+    [
+      projectPath,
+      greenfieldRun.projectPath,
+      setFollowUpChat,
+      beginAgentRun,
+      setBuildRunningForTest,
+      setGreenfieldRun,
+    ],
+  );
+
+  const getGreenfieldRunSnapshot = useCallback(
+    () => greenfieldRun,
+    [greenfieldRun],
+  );
+
+  const getTransportDiagnostics = useCallback(() => {
+    const events = getProviderTransportEvents();
+    return {
+      events,
+      summary: summarizeTransportLog(events),
+    };
+  }, []);
+
+  const clearTransportDiagnostics = useCallback(() => {
+    clearProviderTransportEvents();
+    void api?.clearProviderTransportDiagnostics?.();
+  }, [api]);
+
   useStudioTestHooks({
     getReadinessState,
+    getGreenfieldRunSnapshot,
     openProjectAt,
     getPatchPipelineState,
     simulatePatchReadyForReview,
     simulatePreviewReady,
+    simulateLiveActivityStream,
     getProviderSmokeState,
     checkConfiguredProviderHealth,
     runProviderSmokeTest,
+    getTransportDiagnostics,
+    clearTransportDiagnostics,
   });
 }

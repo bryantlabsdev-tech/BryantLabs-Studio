@@ -64,6 +64,9 @@ export function classifyPlanApplyProposalReason(
     if (/provider request failed/i.test(err)) {
       return "Model failed";
     }
+    if (/request body is not valid json|unexpected end of data|malformed request body/i.test(err)) {
+      return "Provider rejected a truncated JSON request body";
+    }
     if (/patch proposal failed/i.test(err)) {
       return "Model failed";
     }

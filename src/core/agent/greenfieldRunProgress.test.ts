@@ -155,8 +155,9 @@ describe("deriveGreenfieldRunProgress", () => {
       true,
       runStartedAt + GREENFIELD_STUCK_THRESHOLDS.POSSIBLY_STUCK_MS,
     );
-    assert.equal(at5m?.stuckLevel, "possibly_stuck_5m");
-    assert.match(at5m?.stuckMessage ?? "", /exceeded 5 minutes/);
+    // When idle equals total elapsed, the idle-180 warning wins before the total-run ceiling.
+    assert.equal(at5m?.stuckLevel, "waiting_180");
+    assert.match(at5m?.stuckMessage ?? "", /No progress for 3 minutes/);
   });
 });
 

@@ -23,6 +23,23 @@ describe("classifyPlanApplyProposalReason", () => {
       "No changes produced",
     );
   });
+
+  it("classifies truncated Anthropic JSON bodies", () => {
+    const file: PlanApplyFileEntry = {
+      relPath: "src/App.tsx",
+      absPath: "/p/src/App.tsx",
+      selectionReason: "entry",
+      planReason: "ui",
+      status: "error",
+      decision: "rejected",
+      error:
+        "The request body is not valid JSON: unexpected end of data: line 1 column 8242 (char 8241)",
+    };
+    assert.equal(
+      classifyPlanApplyProposalReason(file),
+      "Provider rejected a truncated JSON request body",
+    );
+  });
 });
 
 describe("buildPlanApplyZeroProposalsReport", () => {

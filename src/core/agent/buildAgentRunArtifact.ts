@@ -94,6 +94,9 @@ export function buildAgentRunArtifact(input: {
       input.stateInput.greenfieldRun.targetFolder,
     greenfieldRun: input.stateInput.greenfieldRun,
     card: state.agentRunCard,
+    buildError: input.stateInput.buildError,
+    planApplyError: input.stateInput.planApplyError,
+    pipelineError: input.stateInput.pipelineError,
     timestamp: terminal.endedAtMs ?? now,
   });
 

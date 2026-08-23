@@ -439,8 +439,12 @@ export function useWorkspaceOrchestrationActions(refs: OrchestrationHostRefs) {
   );
 
   const applyApprovedPlanFiles = useCallback(
-    async (opts?: { pipelineMode?: boolean }) =>
-      applyApprovedPlanFilesOrchestration(applyPlanHostRef.current, opts),
+    async (opts?: {
+      pipelineMode?: boolean;
+      session?: import("@/core/planApply").PlanApplySession;
+      approveReadyFiles?: boolean;
+      approveRelPaths?: readonly string[];
+    }) => applyApprovedPlanFilesOrchestration(applyPlanHostRef.current, opts),
     [applyPlanHostRef],
   );
 

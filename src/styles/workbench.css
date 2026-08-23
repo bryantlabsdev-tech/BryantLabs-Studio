@@ -28,6 +28,7 @@
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
+  -webkit-app-region: no-drag;
 }
 
 .center-tabs::-webkit-scrollbar {
@@ -46,6 +47,7 @@
   cursor: pointer;
   flex-shrink: 0;
   white-space: nowrap;
+  -webkit-app-region: no-drag;
 }
 
 .center-tabs__tab:hover {
@@ -78,7 +80,8 @@
 .center-panel__body:has(.editor--monaco),
 .center-panel__body:has(.gf-logs-center),
 .center-panel__body:has(.gf-inspector-center),
-.center-panel__body:has(.studio-run-log) {
+.center-panel__body:has(.studio-run-log),
+.center-panel__body:has(.pipeline-inspector-view) {
   overflow: hidden;
 }
 
@@ -93,7 +96,8 @@
 .center-panel__body:has(.preview-view) .preview-view,
 .center-panel__body:has(.gf-logs-center) .view-suspense,
 .center-panel__body:has(.gf-inspector-center) .view-suspense,
-.center-panel__body:has(.studio-run-log) .view-suspense {
+.center-panel__body:has(.studio-run-log) .view-suspense,
+.center-panel__body:has(.pipeline-inspector-view) .view-suspense {
   flex: 1 1 0;
   min-height: 0;
   height: 100%;
@@ -104,7 +108,8 @@
 
 .view-suspense:has(.gf-logs-center),
 .view-suspense:has(.gf-inspector-center),
-.view-suspense:has(.studio-run-log) {
+.view-suspense:has(.studio-run-log),
+.view-suspense:has(.pipeline-inspector-view) {
   flex: 1 1 0;
   min-height: 0;
   overflow: hidden;
@@ -144,6 +149,16 @@
 .center-tabs__more {
   position: relative;
   margin-left: auto;
+  flex-shrink: 0;
+}
+
+.center-tabs__list {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .center-tabs__tab--more {
@@ -155,7 +170,7 @@
   top: 100%;
   right: 0;
   z-index: 20;
-  min-width: 140px;
+  min-width: 11.5rem;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

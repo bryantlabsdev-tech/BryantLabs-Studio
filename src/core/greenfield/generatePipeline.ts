@@ -9,6 +9,7 @@ import {
   buildGreenfieldFallbackSkeleton,
   buildCriticalAppScaffold,
   isFallbackSkeletonAppContent,
+  isIncompleteStubAppContent,
 } from "@/core/greenfield/fallbackSkeleton";
 import { validateGreenfieldProject } from "@/core/greenfield/fileValidation";
 import {
@@ -367,7 +368,11 @@ async function tryReservedAppCompletionCall(
   }
 
   const appFile = nextMerged.find((file) => file.path === "src/App.tsx");
-  if (!appFile?.content.trim() || isFallbackSkeletonAppContent(appFile.content)) {
+  if (
+    !appFile?.content.trim() ||
+    isFallbackSkeletonAppContent(appFile.content) ||
+    isIncompleteStubAppContent(appFile.content)
+  ) {
     return null;
   }
 
@@ -626,7 +631,8 @@ export async function runGreenfieldGenerateWithReliability(
     if (validation.ok && validation.files.length === GREENFIELD_FILE_PATHS.length) {
       const appFile = validation.files.find((file) => file.path === "src/App.tsx");
       const appShellIncomplete = appFile
-        ? isFallbackSkeletonAppContent(appFile.content)
+        ? isFallbackSkeletonAppContent(appFile.content) ||
+          isIncompleteStubAppContent(appFile.content)
         : false;
       logGreenfieldSuccess({
         provider: lastResult.provider,
@@ -892,7 +898,10 @@ export async function runGreenfieldGenerateWithReliability(
         fillResult.skeletonFilledPaths.includes("src/App.tsx") &&
         !fillResult.recoveredPartialPaths.includes("src/App.tsx") &&
         filledFiles.some(
-          (file) => file.path === "src/App.tsx" && isFallbackSkeletonAppContent(file.content),
+          (file) =>
+            file.path === "src/App.tsx" &&
+            (isFallbackSkeletonAppContent(file.content) ||
+              isIncompleteStubAppContent(file.content)),
         )
       ) {
         filledFiles = filledFiles.map((file) =>
@@ -938,7 +947,10 @@ export async function runGreenfieldGenerateWithReliability(
           fillResult.skeletonFilledPaths.some((path) => path !== "src/App.tsx") &&
           (warningsIncludeBudgetForcedSkeleton(warnings) ||
             filledFiles.some(
-              (file) => file.path === "src/App.tsx" && isFallbackSkeletonAppContent(file.content),
+              (file) =>
+            file.path === "src/App.tsx" &&
+            (isFallbackSkeletonAppContent(file.content) ||
+              isIncompleteStubAppContent(file.content)),
             ))
         ) {
           logGreenfieldFailed({

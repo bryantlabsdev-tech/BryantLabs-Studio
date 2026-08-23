@@ -42,6 +42,7 @@ export function useWorkspaceRunContextReset(input: {
     | "createPlanErrorRef"
     | "lastContextSnapshotIdRef"
     | "editExplorationContentsRef"
+    | "activeEditorContextRef"
     | "pipelineCoderResultRef"
     | "applyPlanSuccessRef"
     | "executionNoChangeGuardRef"
@@ -79,7 +80,9 @@ export function useWorkspaceRunContextReset(input: {
     mode?: BuildLoopMode,
   ) => void;
   readonly updateGreenfieldRun: (
-    patch: Partial<GreenfieldRunSnapshot>,
+    patch:
+      | Partial<GreenfieldRunSnapshot>
+      | ((prev: GreenfieldRunSnapshot) => Partial<GreenfieldRunSnapshot>),
   ) => void;
 }) {
   const clearPlan = useCallback(() => {
@@ -125,12 +128,13 @@ export function useWorkspaceRunContextReset(input: {
     input.plan.createPlanErrorRef.current = null;
     input.plan.lastContextSnapshotIdRef.current = null;
     input.plan.editExplorationContentsRef.current = [];
+    input.plan.activeEditorContextRef.current = null;
     input.plan.pipelineCoderResultRef.current = null;
     input.plan.applyPlanSuccessRef.current = null;
     input.plan.executionNoChangeGuardRef.current.clear();
-    input.updateGreenfieldRun({
-      ...clearGreenfieldVerificationStatePatch(),
-    });
+    input.updateGreenfieldRun((prev) => ({
+      ...clearGreenfieldVerificationStatePatch(prev),
+    }));
   }, [clearPlan, input]);
 
   const archiveActiveRunContextAfterSuccess = useCallback(() => {

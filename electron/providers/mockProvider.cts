@@ -174,6 +174,17 @@ export function mockRunPlan(
 }
 
 function patchAppTsx(content: string, promptLower: string): string {
+  if (
+    /\b(priority|due date|due dates|overdue|filter|clear completed|confirm)\b/.test(
+      promptLower,
+    )
+  ) {
+    const marker = "// mock: priority-due-date enhancement";
+    if (content.includes(marker)) {
+      return `${content.trimEnd()}\nexport const MOCK_PRIORITY_BUMP = ${Date.now()};\n`;
+    }
+    return `${content.trimEnd()}\n${marker}\nexport type TaskPriority = "low" | "medium" | "high";\nexport type TaskDue = { dueDate: string | null };\n`;
+  }
   if (isGameplayPrompt(promptLower)) {
     const marker = "// mock: gameplay upgrade";
     if (content.includes(marker)) return content;
@@ -187,9 +198,11 @@ function patchAppTsx(content: string, promptLower: string): string {
       `${marker}\nexport function App()`,
     );
   }
-  if (promptLower.includes("blue")) {
-    if (content.includes('className="blue-theme"')) return content;
-    return content.replace("<main>", '<main className="blue-theme">');
+  if (promptLower.includes("blue") || promptLower.includes("dark mode")) {
+    if (content.includes('className="blue-theme"') || content.includes("dark-mode-toggle")) {
+      return `${content.trimEnd()}\nexport const MOCK_THEME_BUMP = true;\n`;
+    }
+    return `${content.trimEnd()}\n// mock: theme toggle\nexport const MOCK_DARK_MODE = true;\n`;
   }
   return `${content.trimEnd()}\n// mock apply\n`;
 }

@@ -1,9 +1,9 @@
-import {
-  runGreenfieldUiAuditAndRepair,
-  type GreenfieldUiRepairHost,
-} from "@/app/orchestration/greenfieldUiRepairOrchestration";
 import { runQuickRepairAndReverify } from "@/app/orchestration/quickRepairOrchestration";
 import type { ApplyPlanOrchestrationHost } from "@/app/orchestration/applyPlanTypes";
+import {
+  runPostApplyUiAuditAdvisory,
+  type PostApplyUiAuditHost,
+} from "@/app/orchestration/postApplyUiAudit";
 import { buildTypeScriptCheckDetailsFromCommand } from "@/core/greenfield/tscDiagnostics";
 import type { GreenfieldSetupResult } from "@/core/greenfield/types";
 import type { CommandResult, VerificationResult } from "@/types";
@@ -83,6 +83,10 @@ export async function runFollowUpQuickRepairBeforeAutoFix(
   return result.verification;
 }
 
+/**
+ * Post-apply UI audit is advisory-only: never repairs files, never fails a
+ * verified apply, and never mutates success narration / runResult.
+ */
 export async function runFollowUpUiAuditAfterPreview(
   host: FollowUpRepairHost,
   opts: {
@@ -90,34 +94,24 @@ export async function runFollowUpUiAuditAfterPreview(
     readonly previewUrl: string;
     readonly userPrompt: string;
     readonly verification: VerificationResult;
+    readonly signal?: AbortSignal;
   },
 ): Promise<{ readonly ok: boolean; readonly advisory: boolean }> {
   if (!host.api) return { ok: true, advisory: false };
 
-  const uiHost: GreenfieldUiRepairHost = {
+  const auditHost: PostApplyUiAuditHost = {
     api: host.api,
     appendGreenfieldRunLog: host.appendGreenfieldRunLog,
     updateGreenfieldRun: host.updateGreenfieldRun,
-    setAppPreview: host.setAppPreview,
-    requestPreviewTab: host.requestPreviewTab,
   };
 
-  const outcome = await runGreenfieldUiAuditAndRepair(uiHost, {
+  const outcome = await runPostApplyUiAuditAdvisory(auditHost, {
     folderPath: opts.folderPath,
     previewUrl: opts.previewUrl,
-    setup: verificationToSetupResult(opts.verification),
     userPrompt: opts.userPrompt,
-    uiAuditHistory: [],
+    verification: opts.verification,
+    ...(opts.signal ? { signal: opts.signal } : {}),
   });
 
-  if (outcome.ok) {
-    const advisory = !outcome.audit.ok || Boolean(outcome.audit.skipReason);
-    return { ok: true, advisory };
-  }
-
-  if (opts.verification.typecheck.ok && opts.verification.build.ok) {
-    return { ok: true, advisory: true };
-  }
-
-  return { ok: false, advisory: false };
+  return { ok: outcome.ok, advisory: outcome.advisory };
 }

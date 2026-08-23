@@ -1,4 +1,5 @@
 import { isPipelineMode, resolveStageRouting } from "@/core/providers/orchestration";
+import { isProviderEnabled } from "@/core/providers/providerEnablement";
 import type { ProviderId, ProviderSettings } from "@/core/providers/types";
 import type { StudioActionType } from "@/core/studioRun/types";
 import {
@@ -6,6 +7,10 @@ import {
   type GreenfieldRunLogEntry,
 } from "@/core/greenfield/runLog";
 import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
+import {
+  completeDanglingRunningLogEntries,
+  finalizeDanglingRunningLogEntries,
+} from "@/core/greenfield/runState";
 import { resolveFailureRunResult } from "@/core/agent/runOutcome";
 
 /** Studio actions that use the configured AI provider before running. */
@@ -21,11 +26,16 @@ export const PROVIDER_HEALTH_ACTIONS: ReadonlySet<StudioActionType> = new Set([
 ]);
 
 export function providersForHealthCheck(settings: ProviderSettings): ProviderId[] {
-  if (!isPipelineMode(settings)) return [settings.provider];
+  if (!isPipelineMode(settings)) {
+    const provider = resolveStageRouting(settings, "planner")?.provider ?? settings.provider;
+    return isProviderEnabled(settings, provider) ? [provider] : [];
+  }
   const ids = new Set<ProviderId>();
   for (const stage of ["planner", "coder", "repair"] as const) {
     const routing = resolveStageRouting(settings, stage);
-    if (routing) ids.add(routing.provider);
+    if (routing && isProviderEnabled(settings, routing.provider)) {
+      ids.add(routing.provider);
+    }
   }
   return [...ids];
 }
@@ -35,7 +45,7 @@ const INTERIM_SUCCESS_ACTIONS: ReadonlySet<StudioActionType> = new Set([
   "ai_plan",
 ]);
 
-function isTerminalStudioSuccess(
+export function isTerminalStudioSuccess(
   actionType: StudioActionType,
   ok: boolean,
   message: string,
@@ -73,11 +83,23 @@ export function applyFinishStudioRunPatch(
           errors: patch.workflow?.errors ?? [],
         }
       : mergedWorkflow;
+  const baseEntries = patch.entries ?? prev.entries;
+  const entries = !ok
+    ? finalizeDanglingRunningLogEntries(baseEntries, message, prev.runStartedAt)
+    : !terminalSuccess
+      ? completeDanglingRunningLogEntries(
+          baseEntries,
+          "success",
+          message,
+          prev.runStartedAt,
+        )
+      : patch.entries;
 
   return {
     ...prev,
     ...patch,
     actionType,
+    ...(entries !== undefined ? { entries } : {}),
     runResult: ok
       ? terminalSuccess
         ? "success"

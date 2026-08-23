@@ -108,8 +108,133 @@ function trimBlockContent(text: string): string {
 
 export function stripMarkdownCodeFence(text: string): string {
   const trimmed = text.trim();
-  const m = trimmed.match(/^```(?:\w+)?\s*\n([\s\S]*?)\n```\s*$/);
+  const m = trimmed.match(/^```[^\n]*\n([\s\S]*?)\n```\s*$/);
   return m ? m[1]! : trimmed;
+}
+
+interface FencedBlock {
+  readonly info: string;
+  readonly body: string;
+  readonly start: number;
+}
+
+function extractFencedBlocks(text: string): FencedBlock[] {
+  const re = /```([^\n`]*)\n([\s\S]*?)```/g;
+  const blocks: FencedBlock[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const body = match[2]?.trim() ?? "";
+    if (!body) continue;
+    blocks.push({
+      info: (match[1] ?? "").trim(),
+      body,
+      start: match.index,
+    });
+  }
+  return blocks;
+}
+
+export function extractLargestFencedCodeBlock(text: string): string | null {
+  let best: string | null = null;
+  let bestLen = 0;
+  for (const block of extractFencedBlocks(text)) {
+    if (block.body.length > bestLen) {
+      bestLen = block.body.length;
+      best = block.body;
+    }
+  }
+  return best;
+}
+
+function looksLikeSourceFile(content: string, path: string): boolean {
+  const trimmed = content.trim();
+  if (trimmed.length < 24) return false;
+  if (/\.tsx?$/i.test(path)) {
+    return /^(import |export |\/\/|\/\*|function |const |type |interface )/m.test(
+      trimmed,
+    );
+  }
+  if (/\.css$/i.test(path)) {
+    return /[{}:;]/.test(trimmed);
+  }
+  return trimmed.length > 40;
+}
+
+function tryRecoverSingleFileFromFence(
+  text: string,
+  path: string,
+): string | null {
+  const fenced = extractLargestFencedCodeBlock(text);
+  if (fenced && looksLikeSourceFile(fenced, path)) return fenced;
+  const whole = stripMarkdownCodeFence(text);
+  if (whole !== text.trim() && looksLikeSourceFile(whole, path)) return whole;
+  return null;
+}
+
+function pathFromFenceInfo(
+  info: string,
+  expected: ReadonlySet<string>,
+): string | null {
+  const tokens = info
+    .split(/[\s,]+/)
+    .map((token) => normalizeApplyPlanPath(token.replace(/^['"`]+|['"`]+$/g, "")))
+    .filter(Boolean);
+  for (const token of tokens) {
+    if (expected.has(token)) return token;
+    for (const path of expected) {
+      if (path === token || path.endsWith(`/${token}`)) return path;
+    }
+  }
+  return null;
+}
+
+function pathFromTextBeforeFence(
+  text: string,
+  fenceStart: number,
+  expected: ReadonlySet<string>,
+): string | null {
+  const prefix = text.slice(Math.max(0, fenceStart - 240), fenceStart);
+  const heading = prefix.match(
+    /(?:^|\n)\s*(?:#{1,6}\s+|\*\*|`)?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)(?:\*\*|`)?\s*$/,
+  );
+  if (!heading) return null;
+  const token = normalizeApplyPlanPath(heading[1]!);
+  if (expected.has(token)) return token;
+  for (const path of expected) {
+    if (path === token || path.endsWith(`/${token}`)) return path;
+  }
+  return null;
+}
+
+export function recoverFencedApplyPlanFiles(
+  text: string,
+  expectedPaths: readonly string[],
+): Map<string, string> {
+  const expected = new Set(expectedPaths.map(normalizeApplyPlanPath));
+  const recovered = new Map<string, string>();
+  const unmatched: string[] = [];
+
+  for (const block of extractFencedBlocks(text)) {
+    const path =
+      pathFromFenceInfo(block.info, expected) ??
+      pathFromTextBeforeFence(text, block.start, expected);
+    if (path && looksLikeSourceFile(block.body, path) && !recovered.has(path)) {
+      recovered.set(path, block.body);
+      continue;
+    }
+    unmatched.push(block.body);
+  }
+
+  const missing = [...expected].filter((path) => !recovered.has(path));
+  if (missing.length === 1) {
+    const onlyPath = missing[0]!;
+    const candidate =
+      unmatched.find((body) => looksLikeSourceFile(body, onlyPath)) ??
+      tryRecoverSingleFileFromFence(text, onlyPath);
+    if (candidate) recovered.set(onlyPath, candidate);
+  }
+
+  return recovered;
 }
 
 export function hasApplyPlanFileMarkers(text: string): boolean {
@@ -136,15 +261,41 @@ export function parseApplyPlanMarkedFiles(
     );
     content = stripMarkdownCodeFence(content);
     if (content.length === 0) continue;
+    if (/^<full(?: updated)? file content>$/i.test(content.trim())) continue;
 
     if (expectedSet.has(path)) {
+      if (/\.(tsx?|jsx?|css)$/i.test(path) && !looksLikeSourceFile(content, path)) {
+        continue;
+      }
       byPath.set(path, content);
     }
   }
 
-  const detectedPaths = [...detectedSet].sort();
+  let detectedPaths = [...detectedSet].sort();
   const hasAnyFileMarker = hasApplyPlanFileMarkers(text);
-  const missingPaths = normalizedExpected.filter((p) => !byPath.has(p));
+  let missingPaths = normalizedExpected.filter((p) => !byPath.has(p));
+
+  if (missingPaths.length > 0) {
+    const recovered = recoverFencedApplyPlanFiles(text, missingPaths);
+    for (const [path, content] of recovered) {
+      if (!byPath.has(path)) {
+        byPath.set(path, content);
+        detectedSet.add(path);
+      }
+    }
+    detectedPaths = [...detectedSet].sort();
+    missingPaths = normalizedExpected.filter((p) => !byPath.has(p));
+  }
+
+  if (missingPaths.length === 0 && byPath.size > 0) {
+    return {
+      ok: true,
+      files: byPath,
+      missingPaths: [],
+      detectedPaths,
+      hasAnyFileMarker,
+    };
+  }
 
   if (!hasAnyFileMarker) {
     return {

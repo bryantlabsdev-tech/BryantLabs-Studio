@@ -14,11 +14,14 @@ import {
 } from "@/core/agent/runTimeline";
 import {
   incompleteGreenfieldEditBlockMessage,
+  greenfieldSetupReachedSuccess,
   shouldBlockEditForIncompleteGreenfield,
 } from "@/core/agent/greenfieldRecoveryRouting";
 import { resolveEffectiveProjectScan } from "@/core/agent/resolveEffectiveProjectScan";
 import { logPatchGenerated } from "@/core/agent/projectIntentRouting";
+import { mergeActiveEditorPath } from "@/core/context/activeEditorContext";
 import { buildAgentApplyPlanContext } from "@/core/context/buildAgentContext";
+import { readProjectRulesText } from "@/core/projectRules/readProjectRules";
 import {
   readReferencedFileContents,
   resolveContextContentPathsAsync,
@@ -31,15 +34,23 @@ import {
 } from "@/core/contextEngine";
 import type { ContextFailureMeta } from "@/core/contextEngine/types";
 import { getIntelligenceHost } from "@/app/intelligence/intelligenceHost";
+import {
+  buildApplyPlanEditPhases,
+  chunkTargetsForPhases,
+  formatEditPhasePlanLog,
+  shouldUseMultiPhaseEdit,
+} from "@/app/orchestration/multiPhaseApplyPlan";
+import { saveEditPhaseCheckpointLocal } from "@/core/editPhases/persistence";
+import { markPhaseStatus } from "@/core/editPhases/planPhases";
 import { recordPromptVisibility } from "@/core/intelligence/promptVisibility";
-import { buildApplyPlanZeroProposalsReport } from "@/core/diagnostics/failureReport";
+import { buildApplyPlanZeroProposalsReport, buildApplyPlanFailureReport } from "@/core/diagnostics/failureReport";
 import { isEditablePath } from "@/core/editor";
 import {
   estimateAiCalls,
   normalizeProviderSettings,
   resolveStageRouting,
 } from "@/core/providers/orchestration";
-import { isRequestTooLargeError } from "@/core/providers/reliability";
+import { shouldRetryApplyPlanWithCompression, isTruncatedRequestBodyError } from "@/core/providers/reliability";
 import type { ProviderId, ProviderSettings } from "@/core/providers/types";
 import { activeProviderModel } from "@/core/studioRun/types";
 import {
@@ -57,18 +68,24 @@ import {
   CREATE_TARGET_REJECTED_LABEL,
   SCAFFOLD_TARGET_SKIPPED_LABEL,
   isBlockedNonUiTarget,
+  isDirectRewritePatchTarget,
   isUiCorePatchTarget,
   classifyApplyIntent,
+  gameplayPromptNeedsStylesheet,
   isUiOnlyApplyPrompt,
   normalizeApplyPlanPath,
   resolveUserPlanPrompt,
   validateProposalQuality,
   validateCreateProposalQuality,
+  detectSatisfiedGameplayFeature,
   withAllReadyFilesApproved,
   type ApplyPlanBatchPatchResult,
   type PlanApplyFileEntry,
   type PlanApplySession,
 } from "@/core/planApply";
+import {
+  evaluateIncompleteCoordinatedApply,
+} from "@/core/planApply/coordinatedEditCompletion";
 import { buildUiAuditFixDeterministicPatches } from "@/core/planApply/uiAuditFixDeterministicFallback";
 import {
   formatAiCallBudgetDiagnostics,
@@ -81,6 +98,8 @@ import type { Plan } from "@/core/planner";
 import type { ApplyPlanOrchestrationHost } from "@/app/orchestration/applyPlanTypes";
 import { recordProviderUsage } from "@/core/sessionMemory";
 import { applyApprovedPlanFilesOrchestration } from "@/app/orchestration/applyPlanApply";
+import { readFollowUpReviewFirst } from "@/core/build/followUpPrefs";
+import { stagePlanApplyShadowRun } from "@/app/orchestration/shadowStage";
 
 /** Max target-file size we will send for an Apply Plan batch proposal (chars). */
 export const MAX_AI_PATCH_CHARS = 60_000;
@@ -88,7 +107,7 @@ export const MAX_AI_PATCH_CHARS = 60_000;
 export interface ExecuteApplyPlanOptions {
   readonly directRewrite: boolean;
   readonly pipelineMode?: boolean;
-  /** When true, approve and apply immediately after successful propose (single-agent follow-up). */
+  /** When true, approve and apply immediately after successful propose. Defaults to auto-apply. */
   readonly autoContinue?: boolean;
 }
 
@@ -98,6 +117,8 @@ export interface ExecuteApplyPlanResult {
   readonly waitingForReview?: boolean;
   readonly applyOk?: boolean;
   readonly error?: string;
+  /** True when the requested feature is already present — run succeeded without patches. */
+  readonly featureAlreadySatisfied?: boolean;
 }
 
 const EMPTY_RESULT: ExecuteApplyPlanResult = {
@@ -127,6 +148,7 @@ export async function executeApplyPlanOrchestration(
           scan: host.scan,
           projectPath: host.project.path,
           ...(host.greenfieldRun ? { greenfieldRun: host.greenfieldRun } : {}),
+          persistedModifiedFiles: host.sessionMemory.modifiedFiles,
         })
       : null;
 
@@ -162,11 +184,17 @@ export async function executeApplyPlanOrchestration(
 
   const directRewrite = opts.directRewrite;
   const pipelineMode = opts.pipelineMode ?? false;
-  const autoContinue = opts.autoContinue ?? false;
+  const autoContinue = opts.autoContinue ?? !readFollowUpReviewFirst();
+
+  if (pipelineMode) {
+    resolved.pipelineCoderResultRef.current = null;
+  }
 
   if (!directRewrite) {
     resolved.applyPlanSuccessRef.current = null;
     resolved.executionNoChangeGuardRef.current.clear();
+    resolved.setPlanApplyError(null);
+    resolved.updateGreenfieldRun({ failureReport: null });
   }
 
   const studioApi = resolved.api;
@@ -226,12 +254,23 @@ export async function executeApplyPlanOrchestration(
     summary = resolved.planApplySession.planSummary;
     source = resolved.planApplySession.planSource;
     skipped = [];
+  }
+
+  const applyIntent = classifyApplyIntent(prompt);
+  const uiOnlyPrompt = applyIntent.intent === "small_ui";
+  const gameplayPrompt = applyIntent.gameplay;
+
+  if (directRewrite && resolved.planApplySession) {
     targets = resolved.planApplySession.files
       .filter(
         (f) =>
           f.absPath &&
-          isUiCorePatchTarget(f.relPath) &&
-          f.status !== "skipped",
+          f.status !== "skipped" &&
+          isDirectRewritePatchTarget(
+            f.relPath,
+            gameplayPrompt,
+            f.action ?? "modify",
+          ),
       )
       .map((f) => {
         const selectionReason = f.selectionReason || "Direct rewrite target";
@@ -247,9 +286,6 @@ export async function executeApplyPlanOrchestration(
       });
   }
 
-  const applyIntent = classifyApplyIntent(prompt);
-  const uiOnlyPrompt = applyIntent.intent === "small_ui";
-  const gameplayPrompt = applyIntent.gameplay;
   const routingFilesAllowed = uiOnlyPrompt
     ? targets.filter((t) => isUiCorePatchTarget(t.relPath)).map((t) => t.relPath)
     : gameplayPrompt
@@ -290,6 +326,94 @@ export async function executeApplyPlanOrchestration(
     return { ...EMPTY_RESULT, error: err };
   }
 
+  if (!directRewrite && gameplayPrompt) {
+    const appEntry = projectScan.files.find(
+      (f) => normalizeApplyPlanPath(f.path) === "src/App.tsx",
+    );
+    if (appEntry) {
+      const read = await studioApi.readFile(appEntry.absPath);
+      if (read.readable && read.content) {
+        const satisfied = detectSatisfiedGameplayFeature(prompt, {
+          "src/App.tsx": read.content,
+        });
+        if (satisfied) {
+          const detail = satisfied.message;
+          if (!pipelineMode) {
+            resolved.beginStudioAction(
+              "apply_plan",
+              "apply_plan",
+              "Apply Plan — feature already present",
+              {
+                details: detail,
+                patch: {
+                  workflow: {
+                    prompt,
+                    planSource: source,
+                    planSummary: summary,
+                    filesProposed: 0,
+                    filesAccepted: 0,
+                    filesWritten: [],
+                    linesAdded: 0,
+                    linesRemoved: 0,
+                    errors: [],
+                    routingIntent: {
+                      ...routingIntentPatch,
+                      files_written: [],
+                    },
+                  },
+                },
+              },
+            );
+            resolved.finishStudioAction(
+              "apply_plan",
+              "apply_plan",
+              true,
+              "Feature already implemented",
+              {
+                details: detail,
+                patch: {
+                  finalMessage: detail,
+                  workflow: {
+                    prompt,
+                    planSource: source,
+                    planSummary: summary,
+                    filesProposed: 0,
+                    filesAccepted: 0,
+                    filesWritten: [],
+                    linesAdded: 0,
+                    linesRemoved: 0,
+                    errors: [],
+                    routingIntent: {
+                      ...routingIntentPatch,
+                      files_written: [],
+                    },
+                  },
+                },
+              },
+            );
+          }
+          recordRunTimelineStage("patch_generated", "feature_already_present");
+          if (pipelineMode) {
+            resolved.pipelineCoderResultRef.current = {
+              ok: true,
+              fileCount: 0,
+              routing: {
+                provider: "ollama",
+                model: "feature_already_present",
+              },
+              contextSnapshotId: resolved.lastContextSnapshotIdRef.current,
+            };
+          }
+          return {
+            validReady: 0,
+            autoContinued: false,
+            featureAlreadySatisfied: true,
+          };
+        }
+      }
+    }
+  }
+
   const runId = resolved.beginApplyPlanRun();
   const staleResult = (detail?: string) => {
     if (!resolved.isStaleApplyPlanRun(runId)) return false;
@@ -302,7 +426,14 @@ export async function executeApplyPlanOrchestration(
 
   if (directRewrite && resolved.planApplySession) {
     sessionFiles = resolved.planApplySession.files.map((f) => {
-      if (!isUiCorePatchTarget(f.relPath) || !f.absPath) return f;
+      const eligible =
+        f.absPath &&
+        isDirectRewritePatchTarget(
+          f.relPath,
+          gameplayPrompt,
+          f.action ?? "modify",
+        );
+      if (!eligible) return f;
       const {
         error: _e,
         rejectionReason: _r,
@@ -389,6 +520,12 @@ export async function executeApplyPlanOrchestration(
           prompt,
           planSource: source,
           planSummary: summary,
+          filesProposed: 0,
+          filesAccepted: 0,
+          filesWritten: [],
+          linesAdded: 0,
+          linesRemoved: 0,
+          errors: [],
           routingIntent: routingIntentPatch,
         },
       },
@@ -410,6 +547,7 @@ export async function executeApplyPlanOrchestration(
       operation: pipelineMode ? "pipeline_coder" : "apply_plan",
       ...(memoryRetrieval ? { memoryRetrieval } : {}),
     }) ?? null;
+  const projectRules = await readProjectRulesText(studioApi, resolved.project.path);
   const contextBase = uiOnlyPrompt
     ? buildApplyPlanPatchContext(projectScan)
     : buildAgentApplyPlanContext(projectScan, {
@@ -418,16 +556,21 @@ export async function executeApplyPlanOrchestration(
         sessionMemory: resolved.sessionMemory,
         projectPath: resolved.project.path,
         slim: false,
+        projectRules,
         ...(memoryRetrieval ? { memoryRetrieval } : {}),
         ...(intelligence ? { intelligence } : {}),
       });
   const contentPaths = uiOnlyPrompt
     ? []
-    : await resolveContextContentPathsAsync(
+    : mergeActiveEditorPath(
+        await resolveContextContentPathsAsync(
+          prompt,
+          projectScan,
+          studioApi,
+          contextBase.relevantFiles,
+        ),
+        resolved.activeEditorContextRef?.current?.relPath,
         prompt,
-        projectScan,
-        studioApi,
-        contextBase.relevantFiles,
       );
   const referencedContents =
     contentPaths.length > 0
@@ -442,6 +585,7 @@ export async function executeApplyPlanOrchestration(
           projectPath: resolved.project.path,
           slim: false,
           referencedContents,
+          projectRules,
           ...(memoryRetrieval ? { memoryRetrieval } : {}),
           ...(intelligence ? { intelligence } : {}),
         })
@@ -701,8 +845,11 @@ export async function executeApplyPlanOrchestration(
 
   async function runProposalPass(
     entries: readonly PlanApplyFileEntry[],
+    passOpts?: { readonly forceCompressed?: boolean },
   ): Promise<ApplyPlanBatchPatchResult | null> {
-    const pending = entries.filter((f) => f.status === "pending");
+    const pending = entries.filter(
+      (f) => f.status === "pending" || f.status === "proposing",
+    );
     if (pending.length === 0) return null;
 
     const { batch, entryByPath } = await prepareBatchTargets(pending);
@@ -710,8 +857,21 @@ export async function executeApplyPlanOrchestration(
 
     const apiBatch = uiOnlyPrompt
       ? batch.filter((f) => isUiCorePatchTarget(f.path))
-      : batch;
+      : gameplayPrompt && !gameplayPromptNeedsStylesheet(prompt)
+        ? batch.filter((f) => normalizeApplyPlanPath(f.path) !== "src/index.css")
+        : batch;
     if (apiBatch.length === 0) return null;
+
+    if (gameplayPrompt && !gameplayPromptNeedsStylesheet(prompt)) {
+      for (const [relPath, entry] of entryByPath) {
+        if (normalizeApplyPlanPath(relPath) !== "src/index.css") continue;
+        updatePlanApplyFile(entry.relPath, {
+          status: "skipped",
+          decision: "rejected",
+          error: "Stylesheet omitted — gameplay logic edit does not require CSS changes.",
+        });
+      }
+    }
 
     markEntriesProposing(apiBatch.map((f) => f.path));
 
@@ -781,16 +941,76 @@ export async function executeApplyPlanOrchestration(
         if (basis !== undefined) promptBasisByPath.set(f.path, basis);
       }
 
-      const invoke = async (provider: ProviderId) =>
-        studioApi.proposeApplyPlanPatches(provider, prompt, ctx.context, promptFiles, {
-          planSummary: ctx.planSummary,
-          targetPaths: promptFiles.map((f) => f.path),
-          slimContext: ctx.slimContext,
-          directRewrite,
-          intelligenceBlock: ctx.intelligenceBlock,
-          contextNotes: ctx.contextNotes,
-          uiEditMode: ctx.uiEditMode,
+      const invoke = async (provider: ProviderId) => {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[apply_plan:ipc:start] provider=${provider} files=${promptFiles.length}`,
+        );
+        // Paths only — main hydrates from disk. Serialize via JSON string IPC
+        // (providers:applyPlanBatchJson) to avoid Chromium structured-clone hangs.
+        const ipcFiles = promptFiles.map((f) => {
+          const entry = promptEntryByPath.get(f.path);
+          const isCreate = (entry?.action ?? "modify") === "create";
+          return {
+            path: f.path,
+            content: "",
+            ...(entry?.absPath && !isCreate ? { absPath: entry.absPath } : {}),
+          };
         });
+        const ipcContext = {
+          framework: ctx.context.framework,
+          language: ctx.context.language,
+          bundler: ctx.context.bundler,
+          packageManager: ctx.context.packageManager,
+          entryPoints: (ctx.context.entryPoints ?? []).slice(0, 4),
+          repositorySummary: String(ctx.context.repositorySummary ?? "").slice(0, 800),
+          dependencies: [] as string[],
+          totalFiles: ctx.context.totalFiles,
+          totalFolders: ctx.context.totalFolders,
+          files: [] as [],
+          symbols: [] as [],
+        };
+        // Serialize in the renderer so only a string crosses contextBridge.
+        // Passing file/context objects into preload was hanging Chromium clone.
+        let payloadJson: string;
+        try {
+          payloadJson = JSON.stringify({
+            provider,
+            prompt,
+            context: ipcContext,
+            files: ipcFiles,
+            meta: {
+              planSummary: String(ctx.planSummary ?? prompt).slice(0, 1_500),
+              targetPaths: promptFiles.map((f) => f.path),
+              slimContext: true,
+              ...(directRewrite ? { directRewrite: true } : {}),
+              intelligenceBlock: String(ctx.intelligenceBlock ?? "").slice(0, 2_000),
+              contextNotes: String(ctx.contextNotes ?? "").slice(0, 2_000),
+              ...(ctx.uiEditMode ? { uiEditMode: true } : {}),
+            },
+          });
+        } catch (err) {
+          return {
+            ok: false as const,
+            provider,
+            model: "",
+            raw: null,
+            latencyMs: 0,
+            error: `Failed to serialize apply-plan payload: ${err instanceof Error ? err.message : String(err)}`,
+            missingPaths: promptFiles.map((f) => f.path),
+          };
+        }
+        // eslint-disable-next-line no-console
+        console.error(
+          `[apply_plan:ipc:json] bytes=${payloadJson.length} files=${ipcFiles.length}`,
+        );
+        const result = await studioApi.proposeApplyPlanPatchesJson(payloadJson);
+        // eslint-disable-next-line no-console
+        console.error(
+          `[apply_plan:ipc:done] ok=${Boolean(result && typeof result === "object" && "ok" in result ? (result as { ok?: boolean }).ok : result)}`,
+        );
+        return result;
+      };
 
       const batchResult = applyPlanSettings
         ? await resolved.invokeCoderCall(
@@ -808,13 +1028,28 @@ export async function executeApplyPlanOrchestration(
       if (
         batchResult &&
         !batchResult.ok &&
-        isRequestTooLargeError(batchResult.error) &&
+        shouldRetryApplyPlanWithCompression(batchResult.error) &&
         !compressed
       ) {
-        return proposeWithContext(true);
+        const compressedResult = await proposeWithContext(true);
+        return compressedResult ?? batchResult;
       }
 
-      if (!batchResult) return null;
+      if (!batchResult) {
+        const nullErr = contextFailureMeta
+          ? `Request too large (~${contextFailureMeta.estimated_tokens} tokens, limit ${contextFailureMeta.provider_limit}).`
+          : "Provider patch generation returned no result.";
+        for (const [relPath, entry] of promptEntryByPath) {
+          const basis = promptBasisByPath.get(relPath);
+          updatePlanApplyFile(entry.relPath, {
+            status: "error",
+            decision: "rejected",
+            error: nullErr,
+            ...(basis !== undefined ? { basisContent: basis } : {}),
+          });
+        }
+        return null;
+      }
 
       applyBatchPatchResult(batchResult, promptEntryByPath, promptBasisByPath);
 
@@ -833,10 +1068,14 @@ export async function executeApplyPlanOrchestration(
     }
 
     try {
-      let batchResult = await proposeWithContext(false);
+      let batchResult = await proposeWithContext(Boolean(passOpts?.forceCompressed));
       let usedDeterministicFallback = false;
 
-      if ((!batchResult || !batchResult.ok) && uiOnlyPrompt) {
+      if (
+        (!batchResult || !batchResult.ok) &&
+        uiOnlyPrompt &&
+        !isTruncatedRequestBodyError(batchResult?.error)
+      ) {
         const uiAuditFallback = buildUiAuditFixDeterministicPatches({
           prompt,
           appTsx: apiBasisByPath.get("src/App.tsx") ?? null,
@@ -982,17 +1221,153 @@ export async function executeApplyPlanOrchestration(
     );
   }
 
-  let lastBatchResult = await runProposalPass(sessionFiles);
+  let lastBatchResult: ApplyPlanBatchPatchResult | null = null;
+  let lastProviderRaw: string | null = null;
+
+  function rememberProviderRaw(batchResult: ApplyPlanBatchPatchResult | null): void {
+    if (!batchResult) return;
+    const raw =
+      batchResult.lastModelRawText?.trim() ||
+      batchResult.rawText?.trim() ||
+      null;
+    if (raw) lastProviderRaw = raw;
+  }
+
+  lastBatchResult = null;
+  lastProviderRaw = null;
+
+  const useMultiPhase = shouldUseMultiPhaseEdit({
+    prompt,
+    targetCount: targets.length,
+  });
+  let editPhasePlan = useMultiPhase
+    ? buildApplyPlanEditPhases({
+        prompt,
+        targetPaths: targets.map((t) => t.relPath),
+        runId,
+      })
+    : null;
+
+  if (editPhasePlan) {
+    editPhasePlan = { ...editPhasePlan, status: "running" };
+    saveEditPhaseCheckpointLocal(resolved.project.path, editPhasePlan);
+    resolved.appendGreenfieldRunLog(
+      "apply_plan",
+      "running",
+      "Multi-phase edit plan",
+      formatEditPhasePlanLog(editPhasePlan),
+    );
+    resolved.updateGreenfieldRun({
+      latestAction: {
+        status: "running",
+        summary: `Multi-phase edit · ${editPhasePlan.phases.length} phases`,
+        detail: formatEditPhasePlanLog(editPhasePlan),
+        stage: "apply_plan",
+        at: new Date().toISOString(),
+      },
+    });
+
+    const chunks = chunkTargetsForPhases(targets, editPhasePlan);
+    for (const chunk of chunks) {
+      if (chunk.targets.length === 0) continue;
+      if (resolved.isStaleApplyPlanRun(runId)) break;
+
+      const chunkPaths = new Set(chunk.targets.map((t) => t.relPath));
+      // Defer other phases: only current phase files stay pending for this propose.
+      sessionFiles = sessionFiles.map((f) => {
+        if (f.status === "ready" || f.status === "error") return f;
+        if (chunkPaths.has(f.relPath)) {
+          return { ...f, status: "pending" as const, decision: "pending" as const };
+        }
+        if (f.status === "pending" || f.status === "proposing") {
+          return {
+            ...f,
+            status: "skipped" as const,
+            error: "Deferred to a later edit phase",
+          };
+        }
+        return f;
+      });
+      resolved.setPlanApplySession((prev) =>
+        prev ? { ...prev, files: sessionFiles } : prev,
+      );
+
+      editPhasePlan = markPhaseStatus(editPhasePlan, chunk.phaseId, {
+        status: "generating",
+        startedAt: Date.now(),
+        attempt: (editPhasePlan.phaseStates[chunk.phaseId]?.attempt ?? 0) + 1,
+      });
+      saveEditPhaseCheckpointLocal(resolved.project.path, editPhasePlan);
+      resolved.appendGreenfieldRunLog(
+        "apply_plan",
+        "running",
+        chunk.title,
+        `Generating patches for: ${chunk.targets.map((t) => t.relPath).join(", ")}`,
+      );
+
+      lastBatchResult = await runProposalPass(sessionFiles);
+      rememberProviderRaw(lastBatchResult);
+
+      // One compressed retry for this phase only — never a global recovery storm.
+      const phaseFailed = sessionFiles.some(
+        (f) =>
+          chunkPaths.has(f.relPath) &&
+          (f.status === "error" || f.status === "pending"),
+      );
+      if (phaseFailed && !directRewrite) {
+        resolved.appendGreenfieldRunLog(
+          "apply_plan",
+          "running",
+          `${chunk.title} — one bounded retry`,
+        );
+        lastBatchResult = await runProposalPass(sessionFiles, {
+          forceCompressed: true,
+        });
+        rememberProviderRaw(lastBatchResult);
+      }
+
+      const phaseReady = sessionFiles.filter(
+        (f) => chunkPaths.has(f.relPath) && f.status === "ready",
+      ).length;
+      editPhasePlan = markPhaseStatus(editPhasePlan, chunk.phaseId, {
+        status: phaseReady > 0 ? "completed" : "failed",
+        completedAt: Date.now(),
+        providerCalls: (editPhasePlan.phaseStates[chunk.phaseId]?.providerCalls ?? 0) + 1,
+        error:
+          phaseReady > 0
+            ? null
+            : "Phase generation produced no valid patches",
+      });
+      saveEditPhaseCheckpointLocal(resolved.project.path, editPhasePlan);
+
+      // Restore deferred files for subsequent phases.
+      sessionFiles = sessionFiles.map((f) => {
+        if (
+          f.status === "skipped" &&
+          f.error === "Deferred to a later edit phase"
+        ) {
+          const { error: _ignored, ...rest } = f;
+          return { ...rest, status: "pending" as const };
+        }
+        return f;
+      });
+    }
+  } else {
+    lastBatchResult = await runProposalPass(sessionFiles);
+    rememberProviderRaw(lastBatchResult);
+  }
 
   let validReady = countValidProposals();
 
-  const hasRetryableFailures = sessionFiles.some(
-    (f) =>
-      targets.some((t) => t.relPath === f.relPath) &&
-      (f.status === "error" || f.status === "pending"),
-  );
+  const hasRetryableFailures =
+    !editPhasePlan &&
+    sessionFiles.some(
+      (f) =>
+        targets.some((t) => t.relPath === f.relPath) &&
+        (f.status === "error" || f.status === "pending"),
+    );
 
-  if (!directRewrite && validReady === 0 && hasRetryableFailures) {
+  if (!directRewrite && hasRetryableFailures) {
     const retryTargets = buildNarrowedRetryTargets(
       plan,
       resolved.aiPlan,
@@ -1004,27 +1379,101 @@ export async function executeApplyPlanOrchestration(
         sessionMemory: resolved.sessionMemory,
       },
     );
-    const targetPathSet = new Set(targets.map((t) => t.relPath));
-    const retryPathSet = new Set(retryTargets.map((t) => t.relPath));
-    const alreadyNarrow =
-      retryTargets.length > 0 &&
-      retryTargets.length <= targets.length &&
-      [...retryPathSet].every((p) => targetPathSet.has(p));
     const errorPaths = new Set(
-      sessionFiles.filter((f) => f.status === "error").map((f) => f.relPath),
+      sessionFiles.filter((f) => f.status === "error" || f.status === "pending").map((f) => f.relPath),
     );
-    const retryOnlyFailed = retryTargets.filter((t) => errorPaths.has(t.relPath));
+    const retryOnlyFailed = (
+      retryTargets.length > 0 ? retryTargets : targets
+    ).filter((t) => errorPaths.has(t.relPath));
 
-    if (!alreadyNarrow && retryOnlyFailed.length > 0) {
+    if (retryOnlyFailed.length > 0) {
       resolved.appendGreenfieldRunLog(
         "apply_plan",
         "running",
-        `Apply Plan — reliability retry (${retryOnlyFailed.map((t) => t.relPath).join(", ")})`,
+        `Apply Plan — retrying failed files (${retryOnlyFailed.map((t) => t.relPath).join(", ")})`,
       );
       mergeRetryTargets(retryOnlyFailed);
-      lastBatchResult = await runProposalPass(sessionFiles);
+      lastBatchResult = await runProposalPass(sessionFiles, {
+        forceCompressed: true,
+      });
+      rememberProviderRaw(lastBatchResult);
       validReady = countValidProposals();
     }
+  }
+
+  // Second recovery pass for remaining gaps after a partial batch (common on
+  // large Kanban-style expansions where the first response omits page files).
+  const stillFailed = sessionFiles.filter(
+    (f) =>
+      targets.some((t) => t.relPath === f.relPath) &&
+      (f.status === "error" || f.status === "pending"),
+  );
+  if (
+    !editPhasePlan &&
+    !directRewrite &&
+    !pipelineMode &&
+    validReady > 0 &&
+    stillFailed.length > 0 &&
+    stillFailed.length <= 6
+  ) {
+    resolved.appendGreenfieldRunLog(
+      "apply_plan",
+      "running",
+      `Apply Plan — recovery pass for ${stillFailed.map((f) => f.relPath).join(", ")}`,
+    );
+    mergeRetryTargets(
+      stillFailed.map((f) => {
+        const t = targets.find((x) => x.relPath === f.relPath)!;
+        return t;
+      }),
+    );
+    lastBatchResult = await runProposalPass(sessionFiles);
+    rememberProviderRaw(lastBatchResult);
+    validReady = countValidProposals();
+  }
+
+  const budgetOrContextBlocked =
+    contextFailureMeta != null ||
+    sessionFiles.some((f) =>
+      /budget|max ai calls|request too large/i.test(
+        `${f.error ?? ""} ${f.rejectionReason ?? ""}`,
+      ),
+    );
+
+  const shouldAutoDirectRewrite =
+    !directRewrite &&
+    validReady === 0 &&
+    !pipelineMode &&
+    lastBatchResult != null &&
+    !budgetOrContextBlocked;
+
+  if (shouldAutoDirectRewrite) {
+    const fallbackSession: PlanApplySession = {
+      ...applySession,
+      applyRunId: runId,
+      files: sessionFiles,
+      phase: "proposing",
+      totals: computePlanApplyTotals(sessionFiles),
+      selectedRelPath: applySession.selectedRelPath,
+      directRewriteAvailable: false,
+      lastModelRawText:
+        lastBatchResult?.lastModelRawText ?? lastBatchResult?.rawText ?? null,
+    };
+    resolved.setPlanApplySession(fallbackSession);
+    resolved.appendGreenfieldRunLog(
+      "apply_plan",
+      "running",
+      "Apply Plan — direct rewrite fallback",
+      lastBatchResult?.error ?? "Patch format retry",
+    );
+    return executeApplyPlanOrchestration(
+      { ...resolved, planApplySession: fallbackSession },
+      {
+        directRewrite: true,
+        pipelineMode,
+        autoContinue,
+      },
+    );
   }
 
   const proposeTotals = computePlanApplyTotals(sessionFiles);
@@ -1035,12 +1484,19 @@ export async function executeApplyPlanOrchestration(
     (f) => f.status === "ready" && f.diffStats?.changed,
   );
   const lastRaw =
-    lastBatchResult?.lastModelRawText ?? lastBatchResult?.rawText ?? null;
+    lastProviderRaw ??
+    lastBatchResult?.lastModelRawText ??
+    lastBatchResult?.rawText ??
+    null;
   const showDirectRewrite =
     validReady === 0 && !directRewrite && Boolean(lastBatchResult?.repairAttempted);
 
   const reviewPhase: PlanApplySession["phase"] =
-    validReady > 0 && !autoContinue ? "waiting_for_review" : "review";
+    validReady === 0
+      ? "failed"
+      : validReady > 0 && !autoContinue
+        ? "waiting_for_review"
+        : "review";
 
   const reviewSession: PlanApplySession = {
     ...applySession,
@@ -1067,6 +1523,14 @@ export async function executeApplyPlanOrchestration(
     logPatchReadyForApply(readyFiles);
     logPatchReviewMode(!autoContinue);
     recordRunTimelineStage("patch_generated", readyFiles.join(","));
+    const shadow = await stagePlanApplyShadowRun(studioApi, runId, sessionFiles);
+    if (!shadow.ok) {
+      resolved.appendGreenfieldRunLog(
+        "apply_plan",
+        "failed",
+        `Shadow staging skipped: ${shadow.reason ?? "unknown"}`,
+      );
+    }
   }
 
   if (staleResult("propose patches")) {
@@ -1094,10 +1558,7 @@ export async function executeApplyPlanOrchestration(
     });
     const routeSelectionWrong =
       resolved.greenfieldRun != null &&
-      shouldBlockEditForIncompleteGreenfield({
-        projectPath: resolved.project.path,
-        greenfieldRun: resolved.greenfieldRun,
-      });
+      !greenfieldSetupReachedSuccess(resolved.greenfieldRun);
     const report = buildApplyPlanZeroProposalsReport({
       diagnostics,
       collectionSkipped: uiOnlyPromptForReport ? [] : skipped,
@@ -1121,6 +1582,39 @@ export async function executeApplyPlanOrchestration(
     coderProposalError = report.rootCauseLine;
     resolved.publishFailureReport(report);
     if (!pipelineMode) {
+      const failurePatch: Partial<import("@/core/greenfield/runState").GreenfieldRunSnapshot> = {
+        failureReport: report,
+        finalMessage: report.rootCauseLine,
+        workflow: {
+          prompt,
+          planSource: source,
+          planSummary: summary,
+          filesProposed: patchTargetCount,
+          filesAccepted: 0,
+          linesAdded: proposeTotals.linesAdded,
+          linesRemoved: proposeTotals.linesRemoved,
+          errors: [report.rootCauseLine],
+          routingIntent: {
+            ...routingIntentPatch,
+            files_written: readyFiles,
+          },
+          ...(contextFailureMeta ? { contextFailure: contextFailureMeta } : {}),
+        },
+      };
+      if (lastRaw?.trim()) {
+        const priorDebug = resolved.greenfieldRun?.debug;
+        failurePatch.debug = {
+          ...(priorDebug ?? {}),
+          stage: "apply_plan:patch_propose",
+          requestStartedAt: new Date().toISOString(),
+          elapsedMs:
+            resolved.greenfieldRun?.runStartedAt != null
+              ? Math.max(0, Date.now() - resolved.greenfieldRun.runStartedAt)
+              : 0,
+          errorMessage: report.rootCauseLine,
+          rawProviderPayload: lastRaw.slice(0, 8000),
+        };
+      }
       resolved.finishStudioAction(
         "apply_plan",
         "apply_plan",
@@ -1128,26 +1622,7 @@ export async function executeApplyPlanOrchestration(
         "Apply Plan — no proposals generated",
         {
           details: diagDetail || report.rootCauseLine,
-          patch: {
-            failureReport: report,
-            finalMessage: report.rootCauseLine,
-            workflow: {
-              prompt,
-              planSource: source,
-              planSummary: summary,
-              filesProposed: patchTargetCount,
-              linesAdded: proposeTotals.linesAdded,
-              linesRemoved: proposeTotals.linesRemoved,
-              errors: [report.rootCauseLine],
-              routingIntent: {
-                ...routingIntentPatch,
-                files_written: readyFiles,
-              },
-              ...(contextFailureMeta
-                ? { contextFailure: contextFailureMeta }
-                : {}),
-            },
-          },
+          patch: failurePatch,
         },
       );
     }
@@ -1188,6 +1663,46 @@ export async function executeApplyPlanOrchestration(
   }
 
   if (autoContinue && validReady > 0 && !pipelineMode) {
+    const incompleteBeforeWrite = evaluateIncompleteCoordinatedApply({
+      prompt,
+      targetPaths: targets.map((t) => t.relPath),
+      files: sessionFiles,
+    });
+    if (incompleteBeforeWrite.incomplete) {
+      const message =
+        incompleteBeforeWrite.message ??
+        `Incomplete patch batch: ${validReady}/${patchTargetCount} files ready`;
+      resolved.appendGreenfieldRunLog(
+        "apply_plan",
+        "failed",
+        `Refusing incomplete apply (${validReady}/${patchTargetCount} ready)`,
+        message,
+      );
+      resolved.setPlanApplyError(message);
+      resolved.publishFailureReport(
+        buildApplyPlanFailureReport({ applyError: message }),
+      );
+      resolved.finishStudioAction("apply_plan", "apply_plan", false, message, {
+        details: message,
+        patch: {
+          workflow: {
+            prompt,
+            planSource: source,
+            planSummary: summary,
+            errors: [message],
+            routingIntent: routingIntentPatch,
+          },
+        },
+      });
+      resolved.releaseBuildRunForReview?.();
+      return {
+        validReady,
+        autoContinued: false,
+        applyOk: false,
+        error: message,
+      };
+    }
+
     const approved = withAllReadyFilesApproved(reviewSession);
     const applyingSession = { ...approved, phase: "applying" as const };
     applySession = applyingSession;

@@ -39,7 +39,10 @@ export function nextAutoEscalationStep(
   model: string,
   settings: ProviderSettings,
 ): StrongerModelStep | null {
-  return suggestStrongerModelStep(provider, model, settings);
+  if (settings.askBeforeFallback !== false) return null;
+  const step = suggestStrongerModelStep(provider, model, settings);
+  if (!step || step.provider !== provider) return null;
+  return step;
 }
 
 export function escalationReasonFromError(error: string): string {

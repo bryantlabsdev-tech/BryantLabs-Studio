@@ -48,13 +48,39 @@ export function isUiOnlyApplyPrompt(prompt: string): boolean {
 }
 
 /** Paths eligible for gameplay / feature_addition apply (logic + styling). */
+/**
+ * Vite/React mount stubs (createRoot + import App). Feature edits belong in App.tsx,
+ * not these bootstrap files — including them causes Missing @@FILE rejections and
+ * false "updating main.tsx" narration.
+ */
+export function isEntryBootstrapPath(relPath: string): boolean {
+  const norm = normalizeRelPath(relPath).toLowerCase();
+  return (
+    norm === "src/main.tsx" ||
+    norm === "src/main.ts" ||
+    norm === "src/main.jsx" ||
+    norm === "src/main.js" ||
+    norm === "src/index.tsx" ||
+    norm === "src/index.ts" ||
+    norm === "src/index.jsx" ||
+    norm === "src/index.js"
+  );
+}
+
+export const ENTRY_BOOTSTRAP_SKIP_MESSAGE =
+  "Not needed for feature edits (entry bootstrap only)";
+
 export function isGameplayPatchTarget(relPath: string): boolean {
   const norm = normalizeRelPath(relPath);
   if (norm === "src/App.tsx" || norm === "src/index.css" || norm === "src/App.css") {
     return true;
   }
+  if (isEntryBootstrapPath(norm)) return false;
   if (!/\.tsx$/i.test(norm)) return false;
-  return /sudoku|gameboard|game-board|board|cell|grid|pad|modal|stat/i.test(norm);
+  if (/(^|\/)status/i.test(norm) || /statement/i.test(norm)) return false;
+  return /sudoku|gameboard|game-board|board|cell|grid|pad|modal|(^|\/)stats?(?:[-._]?[a-z0-9]+)?\.tsx$/i.test(
+    norm,
+  );
 }
 
 /** Gameplay apply allowlist: App entry, stylesheets, and related UI components. */
@@ -85,6 +111,16 @@ export function buildGameplayAllowlist(
 export function isUiCorePatchTarget(relPath: string): boolean {
   const norm = normalizeRelPath(relPath);
   return norm === "src/App.tsx" || norm === "src/index.css";
+}
+
+/** Targets eligible for a direct-rewrite retry after patch-format failures. */
+export function isDirectRewritePatchTarget(
+  relPath: string,
+  gameplay: boolean,
+  action: PlanApplyTargetAction = "modify",
+): boolean {
+  if (action === "create") return true;
+  return gameplay ? isGameplayPatchTarget(relPath) : isUiCorePatchTarget(relPath);
 }
 
 function fileBasename(relPath: string): string {
@@ -193,6 +229,10 @@ export function filterPlanApplyTargets(
   if (functional) {
     const kept: PlanApplyTargetCandidate[] = [];
     for (const c of candidates) {
+      if (isEntryBootstrapPath(c.relPath)) {
+        skipped.push(`${c.relPath}: ${ENTRY_BOOTSTRAP_SKIP_MESSAGE}`);
+        continue;
+      }
       if (isBlockedNonUiTarget(c.relPath) && !configAllowed) {
         skipped.push(`${c.relPath}: ${CONFIG_UI_BLOCK_MESSAGE}`);
         continue;

@@ -2,7 +2,7 @@ import { useWorkspace } from "@/app/WorkspaceProvider";
 
 /**
  * Compact top-bar indicator for the active AI provider and health.
- * Click opens the Providers panel.
+ * Click opens Settings.
  */
 export function ProviderStatusPill() {
   const { isDesktop, providerStatus, openProvidersView } = useWorkspace();

@@ -53,4 +53,22 @@ describe("uiAuditFixDeterministicFallback", () => {
     });
     assert.equal(result, null);
   });
+
+  it("does not apply stale ui audit fallback for unrelated follow-up prompts", () => {
+    const result = buildUiAuditFixDeterministicPatches({
+      prompt: "Add dark mode toggle",
+      appTsx: "export default function App() { return <main />; }",
+      indexCss: SAMPLE_CSS,
+      uiAuditResult: {
+        ok: true,
+        type: "calculator_layout",
+        score: 100,
+        issues: [],
+        skipped: false,
+        details: "ok",
+        classification: { type: "calculator_layout", confidence: 1, signals: [] },
+      },
+    });
+    assert.equal(result, null);
+  });
 });

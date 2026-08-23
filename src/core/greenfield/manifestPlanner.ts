@@ -61,6 +61,52 @@ function isValidPageTitle(title: string): boolean {
   return /^[A-Za-z][A-Za-z0-9\s/&-]*$/.test(t);
 }
 
+/**
+ * Feature-requirement bullets ("Dashboard with…", "Light and dark themes")
+ * must not become route pages. Only short noun page names qualify.
+ */
+export function isPageNameTitle(title: string): boolean {
+  if (!isValidPageTitle(title)) return false;
+  const t = title.trim();
+  if (/\bwith\b/i.test(t)) return false;
+  if (
+    /^(responsive|light|dark|form|empty|seed|local|reusable|no |add |use |include )/i.test(
+      t,
+    )
+  ) {
+    return false;
+  }
+  if (
+    /\b(validation|persistence|notification|confirmation|controls|states|schema|themes?|navigation|demo\s*data|import|export)\b/i.test(
+      t,
+    )
+  ) {
+    return false;
+  }
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length > 3) return false;
+  // "Calendar-style due-date view" → hyphenated feature phrasing
+  if (/-style\b|\bdue-date\b|\bview\b$/i.test(t) && words.length > 1) return false;
+  return true;
+}
+
+/** Normalize "Projects page" / "Task list" → proper page titles. */
+function normalizePageTitle(raw: string): string | null {
+  const t = raw.trim();
+  const pageSuffix = t.match(/^([A-Za-z][A-Za-z0-9\s/&-]{0,28}?)\s+page$/i);
+  if (pageSuffix?.[1] && isPageNameTitle(pageSuffix[1])) {
+    return pageSuffix[1].trim().replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  const listSuffix = t.match(/^([A-Za-z][A-Za-z0-9\s/&-]{0,28}?)\s+list$/i);
+  if (listSuffix?.[1] && isPageNameTitle(listSuffix[1])) {
+    const base = listSuffix[1].trim();
+    if (/^task$/i.test(base)) return "Tasks";
+    return base.replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  if (!isPageNameTitle(t)) return null;
+  return t;
+}
+
 function parsePageLine(line: string): string | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
@@ -89,6 +135,8 @@ function pagesFromLines(
   lines: readonly string[],
   startIdx: number,
   stopAtSection: boolean,
+  /** When true (Pages: section), allow slightly looser titles; still reject feature bullets. */
+  requirePageName = true,
 ): { title: string; route: string }[] {
   const numbered: { title: string; route: string }[] = [];
 
@@ -97,9 +145,10 @@ function pagesFromLines(
     if (stopAtSection && PAGE_SECTION_STOP.test(trimmed)) break;
     if (stopAtSection && trimmed === "" && numbered.length >= 2) break;
 
-    const title = parsePageLine(lines[i]!);
+    const raw = parsePageLine(lines[i]!);
+    if (!raw) continue;
+    const title = requirePageName ? normalizePageTitle(raw) : isValidPageTitle(raw) ? raw : null;
     if (!title) continue;
-    if (!isValidPageTitle(title)) continue;
     numbered.push({ title, route: routeForTitle(title) });
   }
 
@@ -123,8 +172,42 @@ function detectInlineNumberedPages(
   prompt: string,
 ): readonly { title: string; route: string }[] {
   const lines = prompt.split("\n");
-  const parsed = pagesFromLines(lines, 0, false);
+  // Require page-name titles so Include: feature bullets never become routes.
+  const parsed = pagesFromLines(lines, 0, false, true);
   return dedupePages(parsed);
+}
+
+/**
+ * Infer real app screens from prose when the prompt describes features
+ * ("Projects page", "Task list", "Calendar-style due-date view") without a Pages: section.
+ */
+export function detectImpliedAppPages(
+  prompt: string,
+): readonly { title: string; route: string }[] {
+  const pages: { title: string; route: string }[] = [];
+  const add = (title: string) => {
+    if (pages.some((p) => p.title.toLowerCase() === title.toLowerCase())) return;
+    pages.push({ title, route: routeForTitle(title) });
+  };
+
+  if (/\bdashboard\b/i.test(prompt)) add("Dashboard");
+  if (/\bprojects?\s+page\b|\bmanage(?:ment)?\s+of\s+projects\b|\bproject-management\b/i.test(prompt)) {
+    add("Projects");
+  }
+  if (/\btask\s+list\b|\btasks?\s+page\b|\btasks?\s+with\b/i.test(prompt)) add("Tasks");
+  if (/\bteam\s+page\b|\bteam\s+members?\b|\bmember\s+profiles\b/i.test(prompt)) {
+    add("Team");
+  }
+  if (/\bcalendar[- ]style\b|\bdue-date\s+view\b|\bcalendar\b/i.test(prompt)) {
+    add("Calendar");
+  }
+  if (/\bactivity\s+timeline\b|\bactivity\s+feed\b/i.test(prompt)) add("Activity");
+  if (/\bkanban\b|\bboard\b/i.test(prompt) && !pages.some((p) => p.title === "Tasks")) {
+    add("Board");
+  }
+  if (/\bsettings\b/i.test(prompt) && pages.length >= 2) add("Settings");
+
+  return pages;
 }
 
 function isFieldFlowPrompt(prompt: string): boolean {
@@ -136,7 +219,7 @@ function resolveDefaultPages(prompt: string): readonly { title: string; route: s
   return GENERIC_DEFAULT_PAGES;
 }
 
-/** Extract page list — explicit Pages section first, then numbered list, then domain defaults. */
+/** Extract page list — explicit Pages section first, then numbered list, then implied, then defaults. */
 export function detectPagesFromPrompt(
   prompt: string,
 ): readonly { title: string; route: string }[] {
@@ -146,12 +229,16 @@ export function detectPagesFromPrompt(
   const fromNumbered = detectInlineNumberedPages(prompt);
   if (fromNumbered.length >= 2) return fromNumbered.slice(0, 12);
 
+  const implied = detectImpliedAppPages(prompt);
+  if (implied.length >= 2) return implied.slice(0, 12);
+
   return resolveDefaultPages(prompt);
 }
 
 function extractAppName(prompt: string): string {
   const patterns = [
-    /app called\s+([A-Za-z][A-Za-z0-9_-]*)/i,
+    /(?:app(?:lication)?|project)\s+called\s+([A-Za-z][A-Za-z0-9_-]*)/i,
+    /called\s+([A-Za-z][A-Za-z0-9_-]*)/i,
     /build\s+([A-Za-z][A-Za-z0-9_-]*)\s*(?:—|--|-|\.|:|$)/i,
     /create\s+([A-Za-z][A-Za-z0-9_-]*)\s*(?:—|--|-|\.|:|$)/i,
     /^([A-Za-z][A-Za-z0-9_-]*)\s+(?:fleet|saas|app|dashboard)/im,

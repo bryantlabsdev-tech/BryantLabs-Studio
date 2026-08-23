@@ -475,3 +475,26 @@
   color: var(--text-muted);
 }
 
+.exec-dash__diagnostics-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.exec-dash__diag-link {
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.exec-dash__diag-link:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+

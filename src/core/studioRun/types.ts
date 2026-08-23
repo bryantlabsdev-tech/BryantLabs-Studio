@@ -13,6 +13,7 @@ export const BRYANTLABS_AGENT_DISPLAY_NAME = "BryantLabs Agent";
 export type StudioActionType =
   | "idle"
   | "greenfield"
+  | "consultation"
   | "ai_plan"
   | "apply_plan"
   | "multi_file_execution"
@@ -28,6 +29,7 @@ export type StudioActionType =
 export const STUDIO_ACTION_LABELS: Record<StudioActionType, string> = {
   idle: "Idle",
   greenfield: "New App",
+  consultation: "Consultation",
   ai_plan: "AI Plan",
   apply_plan: "Apply Plan",
   multi_file_execution: "Multi-File Execution",

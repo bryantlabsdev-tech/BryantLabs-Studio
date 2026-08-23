@@ -27,15 +27,17 @@ describe("followUpPrefs", () => {
     globalThis.localStorage = original;
   });
 
-  it("defaults to review-first on", () => {
-    assert.equal(readFollowUpReviewFirst(), true);
-  });
-
-  it("persists review-first preference", () => {
+  it("forces review-first off while auto-apply is enabled", () => {
+    assert.equal(readFollowUpReviewFirst(), false);
     writeFollowUpReviewFirst(true);
     assert.equal(store[key], "1");
-    assert.equal(readFollowUpReviewFirst(), true);
-    writeFollowUpReviewFirst(false);
     assert.equal(readFollowUpReviewFirst(), false);
+  });
+
+  it("persists review-first preference for later restore", () => {
+    writeFollowUpReviewFirst(true);
+    assert.equal(store[key], "1");
+    writeFollowUpReviewFirst(false);
+    assert.equal(store[key], "0");
   });
 });

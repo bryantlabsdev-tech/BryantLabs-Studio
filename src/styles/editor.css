@@ -587,3 +587,80 @@
   color: #f87171;
 }
 
+/* ---------- Split editor ---------- */
+.editor-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-split__pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor-split__primary {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.editor-split__handle {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  background: var(--border);
+  transition: background 120ms ease;
+}
+
+.editor-split__handle:hover {
+  background: var(--accent-soft);
+}
+
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.editor-pane__bar {
+  flex-shrink: 0;
+}
+
+.editor-pane__monaco {
+  flex: 1;
+  min-height: 0;
+}
+
+.editor-split__picker {
+  margin-left: auto;
+  max-width: 45%;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+
+.editor-split__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  flex: 1;
+}
+
+.btn--ghost.btn--active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+

@@ -31,9 +31,9 @@ export const AGENT_COPY = {
 
 /** Tiered wait copy — deterministic by elapsed time, never repeats within a tier. */
 export function pickWaitObservation(elapsedMs: number): string {
-  if (elapsedMs < 10_000) return "I'm reviewing the project.";
-  if (elapsedMs < 20_000) return "I'm tracing how this feature is connected.";
-  if (elapsedMs < 40_000) return "I'm making sure this change doesn't affect other parts of the app.";
+  if (elapsedMs < 10_000) return "I'm looking at what to generate.";
+  if (elapsedMs < 20_000) return "I'm working out the structure of this app.";
+  if (elapsedMs < 40_000) return "I'm making sure the pieces fit together.";
   if (elapsedMs < 60_000) {
     return "This is a larger change than usual, so I'm taking a little more time.";
   }

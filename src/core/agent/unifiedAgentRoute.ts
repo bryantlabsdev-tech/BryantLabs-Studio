@@ -3,12 +3,13 @@ import {
   isEmptyProjectFolder,
   NO_FOLDER_GREENFIELD_MESSAGE,
   GREENFIELD_EMPTY_FOLDER_ACTIVITY,
+  EMPTY_FOLDER_EXTEND_PROJECT_MESSAGE,
   resolveAgentSourceFileCount,
 } from "@/core/agent/agentGreenfieldDispatch";
 import {
-  looksLikeAuditPrompt,
   looksLikeEditExistingProjectPrompt,
   looksLikeExplicitGreenfieldRestart,
+  looksLikePreserveExistingAppPrompt,
   looksLikeRepairPrompt,
 } from "@/core/agent/agentPromptPatterns";
 import {
@@ -16,7 +17,15 @@ import {
   promptReferencesCurrentApp,
   resolveEstablishedProject,
 } from "@/core/agent/projectIntentRouting";
+import {
+  classifyAgentPromptIntent,
+  intentEntersApplyPlan,
+  intentIsConsultation,
+  type AgentPromptIntent,
+} from "@/core/agent/agentIntentRouter";
 import type { ProjectScan } from "@/types";
+
+export type { AgentPromptIntent };
 
 export interface AgentRouteDecisionTrace {
   readonly candidates: readonly string[];
@@ -34,6 +43,7 @@ export type StudioIntentKind =
   | "follow_up"
   | "repair"
   | "audit"
+  | "consultation"
   | "blocked";
 
 export type AgentRouteMode =
@@ -48,6 +58,9 @@ export type AgentExecutionKind =
   | "greenfield"
   | "greenfield_recovery"
   | "build_loop"
+  | "consultation"
+  | "mixed_confirm"
+  | "run_command"
   | "blocked";
 
 const REFACTOR_PROMPT_PATTERNS: readonly RegExp[] = [
@@ -102,6 +115,8 @@ export interface RouteAgentPromptResult {
   readonly reason: string;
   readonly execution: AgentExecutionKind;
   readonly intent: StudioIntentKind;
+  readonly promptIntent: AgentPromptIntent;
+  readonly mixedEdit: boolean;
   readonly blockedReason: string | null;
   /** Shown in agent chat — never suggests empty folder when editing an existing project. */
   readonly activityNote: string | null;
@@ -119,6 +134,8 @@ function blocked(
     reason: opts?.reason ?? "blocked",
     execution: "blocked",
     intent: "blocked",
+    promptIntent: "ask",
+    mixedEdit: false,
     blockedReason: reason,
     activityNote: opts?.activityNote ?? null,
     needsEmptyFolder: opts?.needsEmptyFolder ?? false,
@@ -154,6 +171,8 @@ function greenfieldRoute(
     reason,
     execution: "greenfield",
     intent: "greenfield",
+    promptIntent: "generate",
+    mixedEdit: false,
     blockedReason: null,
     activityNote: opts?.activityNote ?? null,
     needsEmptyFolder: opts?.needsEmptyFolder ?? false,
@@ -178,6 +197,8 @@ function greenfieldRecoveryRoute(
     reason,
     execution: "greenfield_recovery",
     intent: "greenfield",
+    promptIntent: "generate",
+    mixedEdit: false,
     blockedReason: null,
     activityNote:
       opts?.activityNote ??
@@ -198,13 +219,15 @@ function buildLoopRoute(
   reason: string,
   intent: StudioIntentKind,
   decision: AgentRouteDecisionTrace,
-  opts?: { activityNote?: string | null },
+  opts?: { activityNote?: string | null; promptIntent?: AgentPromptIntent },
 ): RouteAgentPromptResult {
   return {
     mode,
     reason,
     execution: "build_loop",
     intent,
+    promptIntent: opts?.promptIntent ?? (intent === "repair" ? "edit" : "edit"),
+    mixedEdit: false,
     blockedReason: null,
     activityNote: opts?.activityNote ?? null,
     needsEmptyFolder: false,
@@ -217,6 +240,117 @@ function buildLoopRoute(
         decision.greenfieldRejectReason ?? "existing_project_edit",
     },
   };
+}
+
+function consultationRoute(
+  reason: string,
+  promptIntent: AgentPromptIntent,
+  decision: AgentRouteDecisionTrace,
+  opts?: { activityNote?: string | null; mixedEdit?: boolean },
+): RouteAgentPromptResult {
+  const execution = opts?.mixedEdit ? "mixed_confirm" : "consultation";
+  const studioIntent: StudioIntentKind =
+    promptIntent === "analyze" ? "audit" : "consultation";
+  return {
+    mode: "edit_existing_project",
+    reason,
+    execution,
+    intent: studioIntent,
+    promptIntent,
+    mixedEdit: opts?.mixedEdit === true,
+    blockedReason: null,
+    activityNote: opts?.activityNote ?? null,
+    needsEmptyFolder: false,
+    decision: {
+      ...decision,
+      selectedRoute: execution,
+      selectionReason: reason,
+      greenfieldRejected: true,
+      greenfieldRejectReason:
+        decision.greenfieldRejectReason ?? "consultation_no_patch",
+    },
+  };
+}
+
+function runCommandRoute(
+  reason: string,
+  promptIntent: AgentPromptIntent,
+  decision: AgentRouteDecisionTrace,
+): RouteAgentPromptResult {
+  return {
+    mode: "edit_existing_project",
+    reason,
+    execution: "run_command",
+    intent: "consultation",
+    promptIntent,
+    mixedEdit: false,
+    blockedReason: null,
+    activityNote: null,
+    needsEmptyFolder: false,
+    decision: {
+      ...decision,
+      selectedRoute: "run_command",
+      selectionReason: reason,
+      greenfieldRejected: true,
+      greenfieldRejectReason:
+        decision.greenfieldRejectReason ?? "run_command_no_patch",
+    },
+  };
+}
+
+function routeByPromptIntent(
+  trimmed: string,
+  decision: AgentRouteDecisionTrace,
+  opts?: { forceEdit?: boolean },
+): RouteAgentPromptResult | null {
+  const classified = classifyAgentPromptIntent(trimmed);
+
+  if (classified.mixedEdit) {
+    return consultationRoute(
+      classified.reason,
+      classified.intent,
+      decision,
+      { mixedEdit: true },
+    );
+  }
+
+  if (opts?.forceEdit || intentEntersApplyPlan(classified.intent)) {
+    if (classified.intent === "refactor") {
+      return buildLoopRoute(
+        "refactor_project",
+        classified.reason,
+        "follow_up",
+        decision,
+        { promptIntent: "refactor" },
+      );
+    }
+    if (classified.intent === "generate") {
+      return buildLoopRoute(
+        "edit_existing_project",
+        classified.reason,
+        "follow_up",
+        decision,
+        { promptIntent: "generate" },
+      );
+    }
+    return buildLoopRoute(
+      "edit_existing_project",
+      classified.reason,
+      "follow_up",
+      decision,
+      { promptIntent: "edit" },
+    );
+  }
+
+  if (classified.intent === "run" || classified.intent === "terminal") {
+    return runCommandRoute(classified.reason, classified.intent, decision);
+  }
+
+  if (intentIsConsultation(classified.intent)) {
+    return consultationRoute(classified.reason, classified.intent, decision);
+  }
+
+  return consultationRoute("default_question", "ask", decision);
 }
 
 function buildRouteDecisionBase(input: {
@@ -489,36 +623,8 @@ export function routeAgentPrompt(
           decisionWithReject,
         );
       }
-      if (looksLikeRefactorPrompt(trimmed)) {
-        return buildLoopRoute(
-          "refactor_project",
-          "refactor_keywords_established",
-          "follow_up",
-          decisionWithReject,
-        );
-      }
-      if (looksLikeAuditPrompt(trimmed)) {
-        return buildLoopRoute(
-          "edit_existing_project",
-          "audit_keywords_established",
-          "audit",
-          decisionWithReject,
-        );
-      }
-      if (editPhrasing || referencesCurrentApp) {
-        return buildLoopRoute(
-          "edit_existing_project",
-          "edit_keywords_established",
-          "follow_up",
-          decisionWithReject,
-        );
-      }
-      return buildLoopRoute(
-        "edit_existing_project",
-        "established_project",
-        "follow_up",
-        decisionWithReject,
-      );
+      const intentRoute = routeByPromptIntent(trimmed, decisionWithReject);
+      if (intentRoute) return intentRoute;
     }
 
     if (looksLikeRepairPrompt(trimmed) && !looksLikeGreenfieldNewAppPrompt(trimmed)) {
@@ -526,6 +632,11 @@ export function routeAgentPrompt(
         "This folder is empty. Open a project with source files before requesting repairs.",
         decisionWithReject,
       );
+    }
+    if (looksLikePreserveExistingAppPrompt(trimmed)) {
+      return blocked(EMPTY_FOLDER_EXTEND_PROJECT_MESSAGE, decisionWithReject, {
+        mode: "edit_existing_project",
+      });
     }
     if (
       looksLikeGreenfieldNewAppPrompt(trimmed) ||
@@ -567,44 +678,8 @@ export function routeAgentPrompt(
         decisionWithReject,
       );
     }
-    if (looksLikeRefactorPrompt(trimmed)) {
-      return buildLoopRoute(
-        "refactor_project",
-        "refactor_keywords",
-        "follow_up",
-        decisionWithReject,
-      );
-    }
-    if (looksLikeAuditPrompt(trimmed)) {
-      return buildLoopRoute(
-        "edit_existing_project",
-        "audit_keywords",
-        "audit",
-        decisionWithReject,
-      );
-    }
-    if (editPhrasing) {
-      return buildLoopRoute(
-        "edit_existing_project",
-        "edit_keywords",
-        "follow_up",
-        decisionWithReject,
-      );
-    }
-    if (looksLikeGreenfieldNewAppPrompt(trimmed)) {
-      return buildLoopRoute(
-        "edit_existing_project",
-        "existing_project",
-        "follow_up",
-        decisionWithReject,
-      );
-    }
-    return buildLoopRoute(
-      "edit_existing_project",
-      "existing_project",
-      "follow_up",
-      decisionWithReject,
-    );
+    const intentRoute = routeByPromptIntent(trimmed, decisionWithReject);
+    if (intentRoute) return intentRoute;
   }
 
   if (hasSources) {
@@ -627,44 +702,8 @@ export function routeAgentPrompt(
         decisionWithReject,
       );
     }
-    if (looksLikeRefactorPrompt(trimmed)) {
-      return buildLoopRoute(
-        "refactor_project",
-        "refactor_keywords",
-        "follow_up",
-        decisionWithReject,
-      );
-    }
-    if (looksLikeAuditPrompt(trimmed)) {
-      return buildLoopRoute(
-        "edit_existing_project",
-        "audit_keywords",
-        "audit",
-        decisionWithReject,
-      );
-    }
-    if (editPhrasing) {
-      return buildLoopRoute(
-        "edit_existing_project",
-        "edit_keywords",
-        "follow_up",
-        decisionWithReject,
-      );
-    }
-    if (looksLikeGreenfieldNewAppPrompt(trimmed)) {
-      return buildLoopRoute(
-        "edit_existing_project",
-        "existing_project",
-        "follow_up",
-        decisionWithReject,
-      );
-    }
-    return buildLoopRoute(
-      "edit_existing_project",
-      "existing_project",
-      "follow_up",
-      decisionWithReject,
-    );
+    const intentRoute = routeByPromptIntent(trimmed, decisionWithReject);
+    if (intentRoute) return intentRoute;
   }
 
   return blocked(

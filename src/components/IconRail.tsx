@@ -2,6 +2,7 @@ import { useWorkspace } from "@/app/WorkspaceProvider";
 import type { RailTool } from "@/core/layout/types";
 import {
   FolderIcon,
+  GitBranchIcon,
   MapIcon,
   PlugIcon,
   SearchIcon,
@@ -15,6 +16,7 @@ const PRIMARY_TOOLS: ReadonlyArray<{
 }> = [
   { id: "files", label: "Files", Icon: FolderIcon },
   { id: "search", label: "Search", Icon: SearchIcon },
+  { id: "git", label: "Source Control", Icon: GitBranchIcon },
   { id: "repomap", label: "Repo map", Icon: MapIcon },
   { id: "providers", label: "Settings", Icon: PlugIcon },
 ];
@@ -23,7 +25,9 @@ const PRIMARY_TOOLS: ReadonlyArray<{
  * Minimal icon rail — primary navigation only. Expert tools via ⌘⇧P.
  */
 export function IconRail() {
-  const { railTool, setRailTool, setCenterTab, setCommandPaletteOpen } = useWorkspace();
+  const { railTool, setRailTool, setCenterTab, setCommandPaletteOpen, gitStatus, centerTab } =
+    useWorkspace();
+  const dirtyCount = gitStatus?.dirtyCount ?? 0;
 
   return (
     <nav className="icon-rail" aria-label="Tools">
@@ -39,14 +43,20 @@ export function IconRail() {
         >
           <Icon className="icon-rail__icon" />
           <span className="icon-rail__label">{label}</span>
+          {id === "git" && dirtyCount > 0 ? (
+            <span className="icon-rail__badge" aria-label={`${dirtyCount} uncommitted changes`}>
+              {dirtyCount > 99 ? "99+" : dirtyCount}
+            </span>
+          ) : null}
         </button>
       ))}
 
       <button
         type="button"
-        className="icon-rail__btn"
+        className={`icon-rail__btn${centerTab === "preview" ? " icon-rail__btn--on" : ""}`}
         title="Preview"
         aria-label="Preview"
+        aria-current={centerTab === "preview" ? "page" : undefined}
         onClick={() => setCenterTab("preview")}
       >
         <MonitorIcon className="icon-rail__icon" />

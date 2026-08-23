@@ -212,6 +212,7 @@ export async function invokeStageProvider<T extends StageProviderResult>(opts: {
   let provider = routing.provider;
   const timeoutMs = resolveStageTimeoutMs(opts.stage, {
     ...(opts.patchSize ? { patchSize: opts.patchSize } : {}),
+    ...(opts.promptPayload ? { promptText: opts.promptPayload } : {}),
   });
   const baseRecordPurpose: AiCallGatePurpose = opts.recordPurpose ?? "primary";
 

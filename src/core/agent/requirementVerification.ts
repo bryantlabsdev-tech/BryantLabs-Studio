@@ -24,6 +24,10 @@ import type { ProjectScan } from "@/types";
 
 export type RequirementImplementationStatus = "pass" | "fail" | "unknown";
 
+function escapeRegexLiteral(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export { requirementTypeLabel };
 export type { RequirementType };
 
@@ -270,13 +274,14 @@ function keywordHits(
   const hitFiles = new Set<string>();
 
   for (const keyword of keywords) {
-    const pathRef = findPathMatch(sources, new RegExp(keyword, "i"));
+    const pattern = new RegExp(escapeRegexLiteral(keyword), "i");
+    const pathRef = findPathMatch(sources, pattern);
     if (pathRef) {
       refs.push(pathRef);
       hitFiles.add(pathRef.file);
       continue;
     }
-    const contentRef = findContentMatch(sources, new RegExp(keyword, "i"));
+    const contentRef = findContentMatch(sources, pattern);
     if (contentRef) {
       refs.push(contentRef);
       hitFiles.add(contentRef.file);

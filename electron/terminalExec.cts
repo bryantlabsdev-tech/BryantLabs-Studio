@@ -1,6 +1,14 @@
 import { spawn } from "node:child_process";
 import * as path from "node:path";
 import type { IpcMain } from "electron";
+import {
+  buildSpawnDiagnostics,
+  formatPosixSpawnError,
+  logSpawnDiagnostics,
+  resolveShellCommand,
+  resolveSpawnCwdSync,
+  spawnProcessEnv,
+} from "./processSpawn.cjs";
 
 const OUTPUT_CAP = 80_000;
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -16,20 +24,26 @@ export interface TerminalExecResult {
   readonly error?: string;
 }
 
+/** Keep in sync with src/core/agentLoop/agentCommandAllowlist.ts. */
+const ARG = String.raw`(?:\s+[\w.\-/=]+)`;
+
 const ALLOWED_COMMANDS: readonly RegExp[] = [
-  /^npm run (build|test|typecheck|lint|preview|dev)(\s|$)/i,
-  /^npm test(\s|$)/i,
-  /^npx tsc\b/i,
-  /^npx vitest\b/i,
-  /^npx eslint\b/i,
-  /^git status\b/i,
-  /^git diff\b/i,
-  /^git log\b/i,
-  /^node --version\b/i,
-  /^npm --version\b/i,
+  new RegExp(String.raw`^npm run (build|test|typecheck|lint|preview|dev)${ARG}*$`, "i"),
+  new RegExp(String.raw`^npm test${ARG}*$`, "i"),
+  new RegExp(String.raw`^npx tsc${ARG}*$`, "i"),
+  new RegExp(String.raw`^npx vitest${ARG}*$`, "i"),
+  new RegExp(String.raw`^npx eslint${ARG}*$`, "i"),
+  new RegExp(String.raw`^git status${ARG}*$`, "i"),
+  new RegExp(String.raw`^git diff${ARG}*$`, "i"),
+  new RegExp(String.raw`^git log${ARG}*$`, "i"),
+  /^node --version$/i,
+  /^npm --version$/i,
 ];
 
+const SHELL_META = /[;&|`$()<>\n\r]|&&|\|\||\$\(/;
+
 const BLOCKED_PATTERNS: readonly RegExp[] = [
+  SHELL_META,
   /\brm\s+-rf\b/i,
   /\bsudo\b/i,
   /\bcurl\b/i,
@@ -38,8 +52,6 @@ const BLOCKED_PATTERNS: readonly RegExp[] = [
   /\bchown\b/i,
   /\bkill\b/i,
   /\bpkill\b/i,
-  /\b>\s*\//,
-  /\|\s*sh\b/i,
 ];
 
 function validateCommand(command: string): string | null {
@@ -67,10 +79,11 @@ function runAllowlistedCommand(
     let truncated = false;
     let timedOut = false;
 
-    const child = spawn(command, {
+    const resolvedCommand = resolveShellCommand(command);
+    const child = spawn(resolvedCommand, {
       cwd,
       shell: true,
-      env: process.env,
+      env: spawnProcessEnv(),
     });
 
     const timer = setTimeout(() => {
@@ -105,7 +118,7 @@ function runAllowlistedCommand(
         durationMs: Date.now() - start,
         timedOut,
         truncated,
-        error: err.message,
+        error: formatPosixSpawnError(err),
       });
     });
 
@@ -128,6 +141,7 @@ function runAllowlistedCommand(
 export function registerTerminalExecIpc(
   ipcMain: IpcMain,
   isWithinProject: (target: string) => boolean,
+  getProjectRoot: () => string | null = () => null,
 ): void {
   ipcMain.handle(
     "terminal:exec",
@@ -142,14 +156,29 @@ export function registerTerminalExecIpc(
       if (typeof command !== "string") {
         return { error: "Invalid command." };
       }
-      const resolved = path.resolve(cwd);
+      const requested = path.resolve(cwd);
+      if (!isWithinProject(requested)) {
+        return { error: "Working directory is outside the open project." };
+      }
+      const { cwd: resolved, exists } = resolveSpawnCwdSync(
+        requested,
+        getProjectRoot(),
+      );
       if (!isWithinProject(resolved)) {
         return { error: "Working directory is outside the open project." };
+      }
+      if (!exists) {
+        return { error: "Working directory does not exist." };
       }
       const validationError = validateCommand(command);
       if (validationError) {
         return { error: validationError };
       }
+      const diagnostics = buildSpawnDiagnostics({
+        command: resolveShellCommand(command),
+        cwd: resolved,
+      });
+      logSpawnDiagnostics(diagnostics, "terminal:exec");
       return runAllowlistedCommand(command, resolved, DEFAULT_TIMEOUT_MS);
     },
   );

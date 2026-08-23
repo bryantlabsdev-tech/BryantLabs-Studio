@@ -11,10 +11,20 @@ import {
   type HealthResult,
   type ProviderResponse,
 } from "./types.cjs";
+import { createTransportRequestId, isTruncatedHttpJsonBodyError } from "./httpJson.cjs";
+import {
+  ANTHROPIC_MESSAGES_SERIALIZER,
+  buildAnthropicMessagesRequest,
+  diffAnthropicRequestStructures,
+  type AnthropicRequestStructure,
+} from "./anthropicMessagesRequest.cjs";
 
 const API_BASE = "https://api.anthropic.com/v1";
 const ANTHROPIC_VERSION = "2023-06-01";
 const HEALTH_TIMEOUT_MS = 25_000;
+
+/** Last successful Messages request structure in this process (sanitized). */
+let lastSuccessfulStructure: AnthropicRequestStructure | null = null;
 
 type ConnectionStatus =
   | "connected"
@@ -122,6 +132,7 @@ async function createMessage(
   maxTokens: number,
   timeoutMs: number,
   temperature?: number,
+  attempt = 1,
 ): Promise<{
   ok: boolean;
   text: string;
@@ -129,29 +140,161 @@ async function createMessage(
   httpStatus: number;
   error: string | null;
 }> {
-  const body: {
-    model: string;
-    max_tokens: number;
-    messages: Array<{ role: "user"; content: string }>;
-    temperature?: number;
-  } = {
+  const built = buildAnthropicMessagesRequest({
     model,
-    max_tokens: maxTokens,
-    messages: [{ role: "user", content: prompt }],
-  };
-  if (temperature !== undefined) body.temperature = temperature;
+    prompt,
+    maxTokens,
+    ...(temperature !== undefined ? { temperature } : {}),
+  });
+
+  const requestId = createTransportRequestId("anthropic");
+  console.log(
+    `[anthropic:request:structure] ${JSON.stringify({
+      requestId,
+      attempt,
+      serializer: built.serializer,
+      payloadByteLength: built.byteLength,
+      hashBeforeValidation: built.hashBeforeValidation,
+      hashBeforeSend: built.hashBeforeSend,
+      localJsonParse: built.localJsonParse,
+      ...(built.localJsonParseError
+        ? {
+            localJsonParseError: built.localJsonParseError,
+            localJsonParseOffset: built.localJsonParseOffset,
+          }
+        : {}),
+      schemaResult: built.schemaResult,
+      topLevelKeys: built.structure.topLevelKeys,
+      fieldTypeMap: built.structure.fieldTypeMap,
+      messageCount: built.structure.messageCount,
+      contentBlockTypes: built.structure.contentBlockTypes,
+      toolCount: built.structure.toolCount,
+      hasSystem: built.structure.hasSystem,
+      hasToolChoice: built.structure.hasToolChoice,
+    })}`,
+  );
+
+  if (built.localJsonParse !== "pass" || built.schemaResult !== "ok") {
+    return {
+      ok: false,
+      text: "",
+      raw: null,
+      httpStatus: 0,
+      error: `Local Anthropic request validation failed (${built.schemaResult}).`,
+    };
+  }
+
+  // Guard: hash must be stable from validation → send (no post-serialize mutation).
+  if (built.hashBeforeValidation !== built.hashBeforeSend) {
+    return {
+      ok: false,
+      text: "",
+      raw: null,
+      httpStatus: 0,
+      error: "Anthropic request hash changed after validation (body mutated).",
+    };
+  }
+
+  console.log(
+    `[anthropic:transport:start] ${JSON.stringify({
+      requestId,
+      attempt,
+      payloadByteLength: built.byteLength,
+      serializer: ANTHROPIC_MESSAGES_SERIALIZER,
+      timeoutMs,
+    })}`,
+  );
 
   const res = await fetchJson(
     `${API_BASE}/messages`,
     {
       method: "POST",
-      headers: anthropicHeaders(apiKey),
-      body: JSON.stringify(body),
+      headers: {
+        ...anthropicHeaders(apiKey),
+        "Content-Type": "application/json",
+      },
+      // Single-serialize UTF-8 string; encodeRequestBody → Buffer (same bytes as bodyBuffer).
+      body: built.serialized,
     },
     timeoutMs,
+    {
+      attempt,
+      requestId,
+      structure: {
+        localJsonParse: built.localJsonParse,
+        topLevelKeys: built.structure.topLevelKeys,
+        fieldTypeMap: built.structure.fieldTypeMap,
+        messageCount: built.structure.messageCount,
+        contentBlockTypes: built.structure.contentBlockTypes,
+        toolCount: built.structure.toolCount,
+        schemaResult: built.schemaResult,
+        serializer: built.serializer,
+        hashBeforeValidation: built.hashBeforeValidation,
+        hashBeforeSend: built.hashBeforeSend,
+        hashAtSocketWrite: null,
+      },
+    },
   );
   const apiError = extractApiError(res.json);
+  const hashAtWrite = res.transport?.payloadSha256 ?? null;
+  if (res.transport) {
+    console.log(
+      `[anthropic:transport:done] ${JSON.stringify({
+        requestId,
+        attempt,
+        payloadByteLength: res.transport.payloadByteLength,
+        bytesWritten: res.transport.bytesWritten,
+        payloadSha256: res.transport.payloadSha256,
+        hashBeforeValidation: built.hashBeforeValidation,
+        hashBeforeSend: built.hashBeforeSend,
+        hashAtSocketWrite: hashAtWrite,
+        hashesMatch:
+          built.hashBeforeSend === hashAtWrite &&
+          built.hashBeforeValidation === built.hashBeforeSend,
+        contentLengthHeader: res.transport.contentLengthHeader,
+        responseByteLength: res.transport.responseByteLength,
+        responseSha256: res.transport.responseSha256,
+        httpStatus: res.status,
+        providerRequestId: res.transport.providerRequestId,
+        truncationSource: res.transport.truncationSource,
+        parserStage: res.transport.parserStage,
+        bodyFullyFlushed: res.transport.bodyFullyFlushed,
+        aborted: res.transport.aborted,
+        completed: res.transport.completed,
+        socketEvents: res.transport.socketEvents,
+        serializer: ANTHROPIC_MESSAGES_SERIALIZER,
+        schemaResult: built.schemaResult,
+        localJsonParse: built.localJsonParse,
+        ...(apiError ? { apiErrorKind: "anthropic_api_error_message" } : {}),
+      })}`,
+    );
+  }
+
   const ok = res.ok && !apiError;
+  if (ok) {
+    lastSuccessfulStructure = built.structure;
+  } else if (
+    apiError &&
+    isTruncatedHttpJsonBodyError(apiError) &&
+    lastSuccessfulStructure
+  ) {
+    const diff = diffAnthropicRequestStructures(
+      built.structure,
+      lastSuccessfulStructure,
+    );
+    console.log(
+      `[anthropic:request:structure-diff] ${JSON.stringify({
+        requestId,
+        attempt,
+        httpStatus: res.status,
+        failed: built.structure,
+        lastSuccess: lastSuccessfulStructure,
+        diff,
+        note: "Anthropic rejected request JSON — structural comparison only",
+      })}`,
+    );
+  }
+
   return {
     ok,
     text: ok ? extractMessageText(res.json) : "",
@@ -320,14 +463,28 @@ export async function generate(
   }
 
   try {
-    const res = await createMessage(
+    let attempt = 1;
+    let res = await createMessage(
       model,
       raw.anthropicApiKey,
       prompt,
       maxOutputTokens,
       timeoutMs,
       temperature,
+      attempt,
     );
+    if (!res.ok && isTruncatedHttpJsonBodyError(res.error)) {
+      attempt = 2;
+      res = await createMessage(
+        model,
+        raw.anthropicApiKey,
+        prompt,
+        maxOutputTokens,
+        timeoutMs,
+        temperature,
+        attempt,
+      );
+    }
     return {
       ok: res.ok,
       provider: "anthropic",
@@ -339,6 +496,41 @@ export async function generate(
       error: res.error ?? undefined,
     };
   } catch (err) {
+    const transportMsg = err instanceof Error ? err.message : String(err);
+    if (isTruncatedHttpJsonBodyError(transportMsg) || isFetchTimeoutError(err)) {
+      try {
+        const res = await createMessage(
+          model,
+          raw.anthropicApiKey,
+          prompt,
+          maxOutputTokens,
+          timeoutMs,
+          temperature,
+          2,
+        );
+        return {
+          ok: res.ok,
+          provider: "anthropic",
+          model,
+          text: res.text,
+          raw: res.raw,
+          latencyMs: Date.now() - start,
+          timeoutMs,
+          error: res.error ?? undefined,
+        };
+      } catch (retryErr) {
+        return {
+          ok: false,
+          provider: "anthropic",
+          model,
+          text: "",
+          raw: null,
+          latencyMs: Date.now() - start,
+          timeoutMs,
+          error: mapGenerateError(retryErr, operation, timeoutMs),
+        };
+      }
+    }
     return {
       ok: false,
       provider: "anthropic",

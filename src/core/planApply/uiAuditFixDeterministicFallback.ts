@@ -73,7 +73,7 @@ export function buildUiAuditFixDeterministicPatches(input: {
   readonly uiAuditResult?: UiAuditResult | null;
 }): UiAuditFixDeterministicResult | null {
   const parsed = parseUiAuditAdvisoryFixPrompt(input.prompt);
-  if (!parsed && !input.uiAuditResult) return null;
+  if (!parsed) return null;
 
   const layoutType = resolveLayoutType(input.prompt, input.uiAuditResult);
   const issues = resolveIssues(input.prompt, input.uiAuditResult);

@@ -210,6 +210,7 @@ export function deriveFollowUpRunPhase(input: {
   if (planApplyPhase === "review" || planApplyPhase === "waiting_for_review") {
     return "reviewing";
   }
+  if (planApplyPhase === "failed") return "failed";
 
   switch (buildPhase) {
     case "planning":

@@ -1,6 +1,6 @@
 import type { StudioFailureReport } from "@/core/diagnostics/failureReport";
 import type { GreenfieldRunLogEntry } from "@/core/greenfield/runLog";
-import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
+import type { GreenfieldRunUpdate } from "@/app/orchestration/followUpRunFailure";
 
 /** Workspace bridge for publishing structured failure reports to the run log. */
 export interface FailureReportOrchestrationHost {
@@ -10,7 +10,7 @@ export interface FailureReportOrchestrationHost {
     message: string,
     detailsOrOpts?: string | import("@/core/greenfield/runLog").RunLogEntryOptions,
   ) => void;
-  readonly updateGreenfieldRun: (patch: Partial<GreenfieldRunSnapshot>) => void;
+  readonly updateGreenfieldRun: (patch: GreenfieldRunUpdate) => void;
 }
 
 export type { StudioFailureReport };

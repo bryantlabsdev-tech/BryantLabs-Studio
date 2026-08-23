@@ -5,6 +5,7 @@ import {
   shouldIgnoreStaleFailureReport,
   type ResolvedRunVerification,
 } from "@/core/diagnostics/verificationResolution";
+import { formatExecutionModeLabel } from "@/core/agent/executionModeConfirmation";
 import type { AgentRunArtifact } from "@/core/agent/agentRunHistory";
 import type { AgentRunCardViewModel } from "@/core/agent/agentRunCard";
 import { hashPrompt } from "@/core/agent/runContextReset";
@@ -18,6 +19,9 @@ import type { RunTerminalOutcome } from "@/core/agent/runTerminal";
 import type { StudioFailureReport } from "@/core/diagnostics/failureReport";
 import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
 import { collectGreenfieldMissingFiles } from "@/core/greenfield/missingFiles";
+import type { ProviderSettings } from "@/core/providers/types";
+import { formatProviderEnablementDiagnosticSection } from "@/core/providers/providerEnablement";
+import { normalizeProviderSettings } from "@/core/providers/orchestration";
 
 export type DiagnosticReportStatus = "success" | "failed" | "warning";
 
@@ -39,6 +43,10 @@ export interface DiagnosticReportSnapshot {
   readonly model: string | null;
   readonly route: string | null;
   readonly generationMode: string | null;
+  readonly executionMode: string | null;
+  readonly executionModeReason: string | null;
+  readonly executionModeConfirmationRequired: boolean | null;
+  readonly executionModeUserChoice: string | null;
   readonly projectPath: string | null;
   readonly status: DiagnosticReportStatus;
   readonly stage: string | null;
@@ -58,6 +66,7 @@ export interface DiagnosticReportSnapshot {
   readonly commandStderr: string | null;
   readonly recommendedNextSteps: readonly string[];
   readonly outcome: RunTerminalOutcome | null;
+  readonly providerEnablementLines: readonly string[];
 }
 
 export interface DiagnosticReportBundle {
@@ -192,6 +201,10 @@ export interface BuildDiagnosticReportInput {
   readonly greenfieldRun: GreenfieldRunSnapshot;
   readonly card: AgentRunCardViewModel;
   readonly timestamp?: number;
+  readonly buildError?: string | null;
+  readonly planApplyError?: string | null;
+  readonly pipelineError?: string | null;
+  readonly providerSettings?: ProviderSettings | null;
 }
 
 export interface ResolveDiagnosticReportBundleInput {
@@ -206,6 +219,39 @@ export interface ResolveDiagnosticReportBundleInput {
   readonly route?: string | null;
   readonly generationMode?: string | null;
   readonly timestamp?: number;
+  readonly buildError?: string | null;
+  readonly planApplyError?: string | null;
+  readonly pipelineError?: string | null;
+  readonly providerSettings?: ProviderSettings | null;
+}
+
+function mergeGreenfieldRunForDiagnosticReport(
+  live: GreenfieldRunSnapshot,
+  artifact: AgentRunArtifact | null | undefined,
+): GreenfieldRunSnapshot {
+  if (!artifact) return live;
+
+  const artifactEntries = artifact.logEntries ?? [];
+  const liveEntries = live.entries ?? [];
+  const entries =
+    artifactEntries.length > 0 && liveEntries.length === 0
+      ? artifactEntries
+      : liveEntries.length > 0
+        ? liveEntries
+        : artifactEntries;
+
+  return {
+    ...live,
+    entries: [...entries],
+    runTimeline: live.runTimeline ?? artifact.timeline ?? null,
+    finalMessage: live.finalMessage ?? artifact.diagnosticReport?.errorMessage ?? null,
+    failureReport: live.failureReport,
+    workflow:
+      live.workflow ??
+      (artifact.diagnosticReport?.errorMessage
+        ? { errors: [artifact.diagnosticReport.errorMessage] }
+        : null),
+  };
 }
 
 export function resolveDiagnosticReportBundle(
@@ -222,6 +268,10 @@ export function resolveDiagnosticReportBundle(
     }
   }
   if (!input.runId) return null;
+  const greenfieldRun = mergeGreenfieldRunForDiagnosticReport(
+    input.greenfieldRun,
+    input.artifact,
+  );
   return buildDiagnosticReport({
     runId: input.runId,
     previousRunId: input.previousRunId ?? null,
@@ -230,9 +280,15 @@ export function resolveDiagnosticReportBundle(
     route: input.route ?? null,
     generationMode: input.generationMode ?? null,
     projectPath: input.projectPath ?? null,
-    greenfieldRun: input.greenfieldRun,
+    greenfieldRun,
     card: input.card,
+    buildError: input.buildError ?? null,
+    planApplyError: input.planApplyError ?? null,
+    pipelineError: input.pipelineError ?? null,
     ...(input.timestamp !== undefined ? { timestamp: input.timestamp } : {}),
+    ...(input.providerSettings !== undefined
+      ? { providerSettings: input.providerSettings }
+      : {}),
   });
 }
 
@@ -266,12 +322,18 @@ export function buildDiagnosticReport(input: BuildDiagnosticReportInput): Diagno
 
   const outcome = input.outcome ?? null;
   const status = deriveDiagnosticReportStatus({ outcome, card, greenfieldRun });
+  const externalError =
+    input.buildError?.trim() ||
+    input.planApplyError?.trim() ||
+    input.pipelineError?.trim() ||
+    null;
   const rawError =
     status === "success"
       ? null
       : failureDetails?.rawErrorMessage ??
         failureReport?.rootCauseLine ??
         greenfieldRun.finalMessage ??
+        externalError ??
         card.summary ??
         null;
 
@@ -307,6 +369,17 @@ export function buildDiagnosticReport(input: BuildDiagnosticReportInput): Diagno
     generationMode:
       input.generationMode ??
       (greenfieldRun.actionType === "greenfield" ? "greenfield" : greenfieldRun.actionType),
+    executionMode: greenfieldRun.executionMode
+      ? formatExecutionModeLabel(greenfieldRun.executionMode.mode)
+      : null,
+    executionModeReason: greenfieldRun.executionMode?.reason ?? null,
+    executionModeConfirmationRequired:
+      greenfieldRun.executionMode?.confirmationRequired ?? null,
+    executionModeUserChoice: greenfieldRun.executionMode?.userChoice
+      ? greenfieldRun.executionMode.userChoice === "edit_current"
+        ? "Edit Current Project"
+        : "Create New App"
+      : null,
     projectPath: input.projectPath ?? greenfieldRun.projectPath ?? greenfieldRun.targetFolder,
     status,
     stage: resolveDiagnosticStage({ run: greenfieldRun, outcome, resolved }),
@@ -340,6 +413,11 @@ export function buildDiagnosticReport(input: BuildDiagnosticReportInput): Diagno
         ? ["Run completed successfully. Re-open Preview to verify the app."]
         : ["Open Console for full run logs.", "Retry with a smaller prompt or switch provider."]),
     outcome,
+    providerEnablementLines: input.providerSettings
+      ? formatProviderEnablementDiagnosticSection(
+          normalizeProviderSettings(input.providerSettings),
+        )
+      : [],
   };
 
   return {
@@ -366,8 +444,23 @@ export function formatDiagnosticReportText(snapshot: DiagnosticReportSnapshot): 
     "",
     `Provider: ${snapshot.provider ?? "unknown"}`,
     `Model: ${snapshot.model ?? "unknown"}`,
+    ...(snapshot.providerEnablementLines.length
+      ? ["", ...snapshot.providerEnablementLines]
+      : []),
     `Route: ${snapshot.route ?? "unknown"}`,
     `Generation Mode: ${snapshot.generationMode ?? "unknown"}`,
+    `Execution Mode: ${snapshot.executionMode ?? "unknown"}`,
+    `Execution Mode Reason: ${snapshot.executionModeReason ?? "—"}`,
+    `Confirmation Required: ${
+      snapshot.executionModeConfirmationRequired == null
+        ? "—"
+        : snapshot.executionModeConfirmationRequired
+          ? "true"
+          : "false"
+    }`,
+    ...(snapshot.executionModeUserChoice
+      ? [`User selected: ${snapshot.executionModeUserChoice}`]
+      : []),
     `Project Path: ${snapshot.projectPath ?? "none"}`,
     "",
     `Status: ${snapshot.status}`,

@@ -1,6 +1,7 @@
 import type { IpcMain } from "electron";
 import { spawn } from "node:child_process";
 import * as path from "node:path";
+import { spawnProcessEnv } from "./processSpawn.cjs";
 
 export interface ProjectGrepHit {
   readonly path: string;
@@ -54,7 +55,7 @@ function grepWithRg(
         pattern,
         root,
       ],
-      { cwd: root, timeout: 15_000 },
+      { cwd: root, timeout: 15_000, env: spawnProcessEnv() },
     );
     let stderr = "";
     child.stderr.on("data", (chunk: Buffer) => {

@@ -24,6 +24,10 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          const normalized = id.replace(/\\/g, "/");
+          if (normalized.includes("/src/app/workspaceContext")) {
+            return "workspace-core";
+          }
           if (id.includes("node_modules/monaco-editor") || id.includes("@monaco-editor")) {
             return "monaco";
           }

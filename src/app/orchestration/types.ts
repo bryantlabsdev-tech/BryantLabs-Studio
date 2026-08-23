@@ -41,6 +41,9 @@ export interface BuildPipelineHost {
   readonly projectMemory: ProjectMemory;
   readonly createPlanErrorRef: MutableRefObject<string | null>;
   readonly editExplorationContentsRef: MutableRefObject<readonly ReferencedFileContent[]>;
+  readonly activeEditorContextRef: MutableRefObject<
+    import("@/core/context/activeEditorContext").ActiveEditorContext | null
+  >;
   readonly aiPlanRef: MutableRefObject<AIPlanResult | null>;
   readonly lastContextSnapshotIdRef: MutableRefObject<string | null>;
   readonly pipelineCoderResultRef: MutableRefObject<PipelineCoderResult | null>;
@@ -56,6 +59,9 @@ export interface BuildPipelineHost {
   readonly approveAllPlanApplyFiles: () => void;
   readonly applyApprovedPlanFiles: (opts?: {
     pipelineMode?: boolean;
+    session?: import("@/core/planApply").PlanApplySession;
+    approveReadyFiles?: boolean;
+    approveRelPaths?: readonly string[];
   }) => Promise<{
     ok: boolean;
     verification: VerificationResult | null;
@@ -152,10 +158,15 @@ export interface BuildPipelineHost {
   readonly releaseBuildRunForReview?: () => void;
   readonly setPlanApplySession: Dispatch<SetStateAction<PlanApplySession | null>>;
   readonly setPlanApplyError: Dispatch<SetStateAction<string | null>>;
-  readonly updateGreenfieldRun: (patch: Partial<GreenfieldRunSnapshot>) => void;
+  readonly updateGreenfieldRun: (
+    patch:
+      | Partial<GreenfieldRunSnapshot>
+      | ((prev: GreenfieldRunSnapshot) => Partial<GreenfieldRunSnapshot>),
+  ) => void;
   readonly refreshProviderStatus?: () => Promise<void>;
   readonly syncAppContextBeforeEdit?: () => void;
   readonly runAgentFollowUp?: (prompt: string) => Promise<void>;
+  readonly resetAiCallTracker?: () => void;
 }
 
 export interface BuildStatusInput {

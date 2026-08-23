@@ -22,7 +22,9 @@ import {
   type FollowUpSuccessSnapshot,
 } from "@/core/build/followUpRun";
 import type { FollowUpEscalationState } from "@/core/build/providerAutoEscalation";
-import { finalizeGreenfieldAgentRun } from "@/core/agent/greenfieldAgentCleanup";
+import {
+  buildAgentGreenfieldSuccessRunPatch,
+} from "@/core/agent/greenfieldAgentCleanup";
 import { formatGreenfieldCompletionMessage } from "@/core/agent/agentCompletionMessage";
 import { suggestNextSteps } from "@/core/domain";
 import { recordPrompt } from "@/core/sessionMemory/store";
@@ -180,7 +182,13 @@ export function useAgentChatRecording(input: {
       input.setAgentGreenfieldPanelActive(false);
       input.setGreenfieldRun((prev) => ({
         ...prev,
-        ...finalizeGreenfieldAgentRun(prev),
+        ...buildAgentGreenfieldSuccessRunPatch(prev, successInput),
+        ...(input.projectPath
+          ? {
+              projectPath: prev.projectPath ?? input.projectPath,
+              targetFolder: prev.targetFolder ?? input.projectPath,
+            }
+          : {}),
       }));
 
       const message = formatGreenfieldCompletionMessage({

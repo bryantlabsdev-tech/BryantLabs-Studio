@@ -73,4 +73,32 @@ describe("promptClassification", () => {
     assert.equal(isUiLayoutPrompt(lower), true);
     assert.equal(classifyFollowUpPromptType(prompt), "ui_layout");
   });
+
+  it("classifies priority and due-date task edits as functional", () => {
+    const prompt =
+      "Add priority and due dates to each task, with priority filtering and overdue highlighting.";
+    const lower = prompt.toLowerCase();
+    assert.equal(isFunctionalFeaturePrompt(lower), true);
+    assert.equal(isUiOnlyFollowUpPrompt(prompt), false);
+    assert.equal(classifyFollowUpPromptType(prompt), "functional");
+  });
+
+  it("does not treat a hint-under-field prompt as CSS-only UI (ui is not a substring of hint)", () => {
+    const prompt =
+      "Add a small hint under the add-task field that says Press Enter to add a task.";
+    const lower = prompt.toLowerCase();
+    assert.equal(isUiLayoutPrompt(lower), false);
+    assert.equal(isFunctionalFeaturePrompt(lower), true);
+    assert.equal(isUiOnlyStylingPrompt(prompt), false);
+    assert.equal(isUiOnlyFollowUpPrompt(prompt), false);
+    assert.equal(classifyFollowUpPromptType(prompt), "functional");
+  });
+
+  it("classifies a footer copy addition as functional, not ui_layout", () => {
+    const prompt = "Add a small footer that says Made with BryantLabs Studio.";
+    const lower = prompt.toLowerCase();
+    assert.equal(isFunctionalFeaturePrompt(lower), true);
+    assert.equal(isUiLayoutPrompt(lower), false);
+    assert.equal(isUiOnlyFollowUpPrompt(prompt), false);
+  });
 });

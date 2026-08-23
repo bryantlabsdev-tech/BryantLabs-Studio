@@ -8,6 +8,14 @@ import {
 } from "@/core/agent/runInspectorSession";
 
 describe("runInspectorSession", () => {
+  it("does not rewrite inspector session when center inspector is already inactive", () => {
+    const next = reduceRunInspectorSession(EMPTY_RUN_INSPECTOR_SESSION, {
+      type: "center_inspector_active",
+      runId: null,
+    });
+    assert.equal(next, EMPTY_RUN_INSPECTOR_SESSION);
+  });
+
   it("opens modal and locks run id", () => {
     const next = reduceRunInspectorSession(EMPTY_RUN_INSPECTOR_SESSION, {
       type: "open_modal",

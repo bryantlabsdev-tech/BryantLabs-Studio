@@ -7,6 +7,7 @@ import {
   filterRecordsByPeriod,
 } from "@/core/analytics/aggregate";
 import { appendAnalyticsRecord, loadAnalyticsHistory } from "@/core/analytics/store";
+import { analyticsRecordKey } from "@/core/analytics/recordRun";
 import type { StudioAnalyticsRecord } from "@/core/analytics/types";
 
 function sampleRecord(
@@ -129,5 +130,24 @@ describe("studio analytics aggregate", () => {
     ];
     const week = filterRecordsByPeriod(records, "7d", now);
     assert.equal(week.length, 1);
+  });
+});
+
+describe("analyticsRecordKey", () => {
+  it("is stable across wall-clock timestamps for the same completed run", () => {
+    const startedAt = 1_700_000_000_000;
+    const first = sampleRecord({
+      at: startedAt + 4_000,
+      durationMs: 4_000,
+      actionType: "greenfield",
+      status: "success",
+    });
+    const later = sampleRecord({
+      at: startedAt + 4_250,
+      durationMs: 4_250,
+      actionType: "greenfield",
+      status: "success",
+    });
+    assert.equal(analyticsRecordKey(first), analyticsRecordKey(later));
   });
 });

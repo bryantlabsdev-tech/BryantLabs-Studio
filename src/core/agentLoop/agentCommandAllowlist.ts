@@ -1,19 +1,24 @@
-/** Allowlisted one-shot shell commands for the agent loop. */
+/** Allowlisted one-shot shell commands for the agent loop. Keep in sync with electron/terminalExec.cts. */
+
+const ARG = String.raw`(?:\s+[\w.\-/=]+)`;
 
 const ALLOWED_COMMANDS: readonly RegExp[] = [
-  /^npm run (build|test|typecheck|lint|preview|dev)(\s|$)/i,
-  /^npm test(\s|$)/i,
-  /^npx tsc\b/i,
-  /^npx vitest\b/i,
-  /^npx eslint\b/i,
-  /^git status\b/i,
-  /^git diff\b/i,
-  /^git log\b/i,
-  /^node --version\b/i,
-  /^npm --version\b/i,
+  new RegExp(String.raw`^npm run (build|test|typecheck|lint|preview|dev)${ARG}*$`, "i"),
+  new RegExp(String.raw`^npm test${ARG}*$`, "i"),
+  new RegExp(String.raw`^npx tsc${ARG}*$`, "i"),
+  new RegExp(String.raw`^npx vitest${ARG}*$`, "i"),
+  new RegExp(String.raw`^npx eslint${ARG}*$`, "i"),
+  new RegExp(String.raw`^git status${ARG}*$`, "i"),
+  new RegExp(String.raw`^git diff${ARG}*$`, "i"),
+  new RegExp(String.raw`^git log${ARG}*$`, "i"),
+  /^node --version$/i,
+  /^npm --version$/i,
 ];
 
+const SHELL_META = /[;&|`$()<>\n\r]|&&|\|\||\$\(/;
+
 const BLOCKED_PATTERNS: readonly RegExp[] = [
+  SHELL_META,
   /\brm\s+-rf\b/i,
   /\bsudo\b/i,
   /\bcurl\b/i,
@@ -22,9 +27,6 @@ const BLOCKED_PATTERNS: readonly RegExp[] = [
   /\bchown\b/i,
   /\bkill\b/i,
   /\bpkill\b/i,
-  /\b>\s*\//,
-  /\|\s*sh\b/i,
-  /&&\s*rm\b/i,
 ];
 
 export function validateAgentCommand(

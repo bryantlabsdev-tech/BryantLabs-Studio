@@ -1,4 +1,5 @@
 import type { CenterTab } from "@/core/layout/types";
+import { isGreenfieldRunActive } from "@/core/agent/agentRunMutex";
 import { isRunTerminal } from "@/core/agent/runTerminal";
 import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
 
@@ -25,7 +26,7 @@ export function resolveRunInProgress(input: {
     input.activeAgentRunId != null ||
     input.buildRunning ||
     input.pipelineRunning ||
-    input.greenfieldRun.runStartedAt != null
+    isGreenfieldRunActive(input.greenfieldRun, false)
   );
 }
 

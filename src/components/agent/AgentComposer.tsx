@@ -91,8 +91,6 @@ export function AgentComposer({
   active,
   awaitingReview,
   greenfieldActive,
-  reviewFirst,
-  onReviewFirstChange,
   hasProject,
   showExamples,
   examplePrompts,
@@ -397,24 +395,6 @@ export function AgentComposer({
               onClick={onOpenSettings}
             >
               Model & settings
-            </button>
-          ) : null}
-
-          {hasProject ? (
-            <button
-              type="button"
-              className={[
-                "agent-workspace-composer__toggle",
-                reviewFirst ? "agent-workspace-composer__toggle--active" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              disabled={active}
-              title="Pause to review diffs before applying (recommended)"
-              aria-pressed={reviewFirst}
-              onClick={() => onReviewFirstChange(!reviewFirst)}
-            >
-              Review first
             </button>
           ) : null}
 

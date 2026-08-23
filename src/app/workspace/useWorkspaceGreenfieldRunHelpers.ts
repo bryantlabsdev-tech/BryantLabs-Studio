@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { bindRunTimelinePersistence } from "@/core/agent/runTimeline";
 import {
   appendGreenfieldRunEntry,
@@ -20,11 +20,16 @@ import {
   cancelGreenfieldRunPatch,
   reconcileStaleGreenfieldRun,
 } from "@/core/agent/greenfieldRunLifecycle";
+import {
+  failRunOnDeadlinePatch,
+  resolveExpiredOperationDeadline,
+} from "@/core/agent/operationDeadlines";
 import { emitGreenfieldConsoleEvent } from "@/core/console/greenfieldConsoleEvents";
 import type { CenterTab } from "@/core/layout/types";
 import type { OrchestrationHostRefs } from "@/app/workspace/useOrchestrationHostRefs";
 
 export function useWorkspaceGreenfieldRunHelpers(input: {
+  readonly api?: import("@/types").BryantLabsApi | null | undefined;
   readonly projectPath: string | undefined;
   readonly agentGreenfieldPanelActive: boolean;
   readonly greenfieldRun: GreenfieldRunSnapshot;
@@ -45,12 +50,47 @@ export function useWorkspaceGreenfieldRunHelpers(input: {
   ) => void;
   readonly recordAgentActivityMessage: (text: string) => void;
 }) {
+  const runRef = useRef(input.greenfieldRun);
+  runRef.current = input.greenfieldRun;
+
   useEffect(() => {
     bindRunTimelinePersistence((timeline) => {
       input.updateGreenfieldRun({ runTimeline: timeline });
     });
     return () => bindRunTimelinePersistence(null);
   }, [input.updateGreenfieldRun]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const current = runRef.current;
+      const expired = resolveExpiredOperationDeadline(current, Date.now());
+      if (!expired) return;
+      input.setGreenfieldRun((prev) => {
+        if (
+          prev.runResult === "failed" ||
+          prev.runResult === "cancelled" ||
+          prev.runResult === "interrupted"
+        ) {
+          return prev;
+        }
+        const next = failRunOnDeadlinePatch(prev, expired);
+        if (!next) return prev;
+        emitGreenfieldConsoleEvent("greenfield:stale-cleared", {
+          projectPath: input.projectPath ?? prev.targetFolder ?? null,
+          provider: prev.provider,
+          model: prev.model,
+          message: expired.reason,
+        });
+        input.recordAgentActivityMessage(expired.reason);
+        return { ...prev, ...next };
+      });
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [
+    input.projectPath,
+    input.recordAgentActivityMessage,
+    input.setGreenfieldRun,
+  ]);
 
   const appendGreenfieldRunLog = useCallback(
     (
@@ -146,7 +186,6 @@ export function useWorkspaceGreenfieldRunHelpers(input: {
     input.greenfieldRun.actionType,
     input.greenfieldRun.runResult,
     input.greenfieldRun.runStartedAt,
-    input.greenfieldRun.latestAction,
     input.persistAnalyticsRecord,
   ]);
 
@@ -158,6 +197,7 @@ export function useWorkspaceGreenfieldRunHelpers(input: {
   );
 
   const cancelGreenfieldRun = useCallback(() => {
+    void input.api?.cancelActiveProviderRequests?.();
     input.greenfieldRunControlRef.current?.cancel();
     input.setGreenfieldRun((prev) => {
       emitGreenfieldConsoleEvent("greenfield:cancelled", {

@@ -1,8 +1,8 @@
 import type { GreenfieldPageSpec } from "@/core/greenfield/manifestPlanner";
 import type { GreenfieldProjectFilePath } from "@/core/greenfield/types";
 
-/** Pages per provider call — keeps each response within output limits. */
-export const MULTI_PHASE_PAGES_BATCH_SIZE = 3;
+/** Pages per provider call — one page keeps Opus within the 3-minute phase budget. */
+export const MULTI_PHASE_PAGES_BATCH_SIZE = 1;
 
 export function splitPagesIntoBatches<T>(
   pages: readonly T[],

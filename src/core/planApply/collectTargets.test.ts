@@ -223,6 +223,38 @@ describe("plan apply target policy", () => {
     const paths = collected.targets.map((t) => t.relPath);
     assert.ok(paths.includes("src/App.tsx"));
     assert.ok(paths.includes("src/index.css"));
+    assert.ok(!paths.includes("src/main.tsx"));
+  });
+
+  it("excludes src/main.tsx from Sudoku gameplay hint follow-ups", () => {
+    const gameplayPrompt = "add hints";
+    const scanWithMain = mockScan(["src/App.tsx", "src/index.css", "src/main.tsx"]);
+    const plan = generatePlan(gameplayPrompt, scanWithMain);
+    const aiPlan: AIPlanResult = {
+      ok: true,
+      provider: "anthropic",
+      model: "claude",
+      latencyMs: 1,
+      raw: {},
+      plan: {
+        summary: "Add hint button and hinted cell styling",
+        files: [
+          { path: "src/App.tsx", reason: "Hint handler and UI" },
+          { path: "src/index.css", reason: "Hinted cell styles" },
+        ],
+        reasoning: "",
+        risks: [],
+        confidence: "High",
+      },
+    };
+    const { targets } = collectPlanApplyTargets(
+      plan,
+      aiPlan,
+      scanWithMain,
+      gameplayPrompt,
+    );
+    const paths = targets.map((t) => t.relPath);
+    assert.deepEqual(paths.sort(), ["src/App.tsx", "src/index.css"]);
   });
 
   it("keeps History.tsx, App.tsx, and index.css for calculation history feature prompt", () => {

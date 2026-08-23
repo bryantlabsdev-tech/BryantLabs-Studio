@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   mergeProjectProblems,
   monacoMarkersToProblems,
+  sameProjectProblems,
   toRelativeProjectPath,
 } from "@/core/diagnostics/projectProblems";
 
@@ -86,5 +87,22 @@ describe("projectProblems", () => {
       toRelativeProjectPath(root, "/Users/dev/my-app/src/main.ts"),
       "src/main.ts",
     );
+  });
+
+  it("treats identical problem lists as unchanged", () => {
+    const problem = {
+      file: "src/App.tsx",
+      absFile: `${root}/src/App.tsx`,
+      line: 1,
+      column: 1,
+      code: "TS2307",
+      message: "Cannot find module 'react'.",
+      severity: "error" as const,
+      source: "monaco" as const,
+    };
+    assert.equal(sameProjectProblems([problem], [{ ...problem }]), true);
+    assert.equal(sameProjectProblems([problem], [{ ...problem, line: 2 }]), false);
+    const other = { ...problem, file: "src/main.ts", absFile: `${root}/src/main.ts` };
+    assert.equal(sameProjectProblems([problem, other], [other, problem]), true);
   });
 });

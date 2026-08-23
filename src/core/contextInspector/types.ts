@@ -107,6 +107,7 @@ export interface ContextOrchestrationSection {
   readonly fallbackPolicy: string;
   readonly providerHealthAtStart?: Readonly<Partial<Record<ProviderId, string>>>;
   readonly providerFailureSummary?: string | null;
+  readonly providerEnablementSummary?: string;
 }
 
 export interface ContextSnapshot {

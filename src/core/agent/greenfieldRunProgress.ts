@@ -10,7 +10,8 @@ export const GREENFIELD_STUCK_THRESHOLDS = {
   WAITING_60_MS: 60_000,
   WAITING_120_MS: 120_000,
   WAITING_180_MS: 180_000,
-  POSSIBLY_STUCK_MS: 5 * 60_000,
+  /** With ≤3 min generation phases, stuck detection stays tight. */
+  POSSIBLY_STUCK_MS: 10 * 60_000,
   STALE_MS: 10 * 60_000,
 } as const;
 
@@ -245,12 +246,6 @@ function deriveStuckLevel(
   const idleMs = now - anchor;
   const totalMs = runStartedAt ? now - runStartedAt : idleMs;
 
-  if (totalMs >= GREENFIELD_STUCK_THRESHOLDS.POSSIBLY_STUCK_MS) {
-    return {
-      level: "possibly_stuck_5m",
-      message: "This run has exceeded 5 minutes and may be stuck.",
-    };
-  }
   if (idleMs >= GREENFIELD_STUCK_THRESHOLDS.WAITING_180_MS) {
     return {
       level: "waiting_180",
@@ -267,6 +262,12 @@ function deriveStuckLevel(
     return {
       level: "waiting_60",
       message: "Still waiting for provider…",
+    };
+  }
+  if (totalMs >= GREENFIELD_STUCK_THRESHOLDS.POSSIBLY_STUCK_MS) {
+    return {
+      level: "possibly_stuck_5m",
+      message: "This run has been active for a long time. You can cancel or retry if needed.",
     };
   }
   return { level: "none", message: null };
@@ -338,7 +339,7 @@ export function deriveGreenfieldRunProgress(
     lastProgressAt,
     stuckLevel,
     stuckMessage,
-    composerLabel: `Creating app… ${currentStageLabel} with ${providerPart}… ${elapsed} elapsed`,
+    composerLabel: `${run.actionType === "greenfield" ? "Creating app" : "Editing project"}… ${currentStageLabel} with ${providerPart}… ${elapsed} elapsed`,
     activity: buildFollowUpActivityStream(run.entries, null),
   };
 }

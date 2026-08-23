@@ -6,6 +6,7 @@ import {
   mergeProblemsStatus,
   mergeProjectProblems,
   monacoMarkersToProblems,
+  sameProjectProblems,
   type ProjectProblem,
   type ProjectProblemsStatus,
 } from "@/core/diagnostics/projectProblems";
@@ -34,9 +35,10 @@ export function useProjectProblems(input: {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const markers = monaco.editor.getModelMarkers({});
-        setMonacoProblems(
-          monacoMarkersToProblems(input.projectPath!, markers),
-        );
+        setMonacoProblems((prev) => {
+          const next = monacoMarkersToProblems(input.projectPath!, markers);
+          return sameProjectProblems(prev, next) ? prev : next;
+        });
       });
     };
 

@@ -93,4 +93,22 @@ describe("agentRunMutex", () => {
       true,
     );
   });
+
+  it("does not treat waiting_for_review as a busy workflow", () => {
+    const input = {
+      greenfieldRun: emptyGreenfieldRun(),
+      greenfieldPanelActive: false,
+      buildRunning: false,
+      pipelineRunning: false,
+      aiPlanStatus: "idle" as const,
+      planApplyPhase: "waiting_for_review",
+      autoFixPhase: null,
+    };
+    assert.equal(isAgentWorkflowBusy(input), false);
+    assert.equal(isAgentRunActive(input), false);
+    assert.equal(
+      getAgentRunBlockReason(input),
+      "Review pending — approve, reject, or regenerate patches before starting another run.",
+    );
+  });
 });

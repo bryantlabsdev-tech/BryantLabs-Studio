@@ -1,3 +1,4 @@
+import { greenfieldSetupReachedSuccess } from "@/core/agent/greenfieldRecoveryRouting";
 import type { AgentRunVerification } from "@/core/agent/agentRunCard";
 import type { GreenfieldRunLogEntry } from "@/core/greenfield/runLog";
 import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
@@ -253,7 +254,14 @@ export function resolveDiagnosticStage(input: {
 
   for (let i = input.run.entries.length - 1; i >= 0; i -= 1) {
     const entry = input.run.entries[i]!;
-    if (entry.status === "failed" || entry.status === "running") {
+    if (entry.status === "failed") {
+      return entry.stage.replace(/_/g, " ");
+    }
+  }
+
+  for (let i = input.run.entries.length - 1; i >= 0; i -= 1) {
+    const entry = input.run.entries[i]!;
+    if (entry.status === "running") {
       return entry.stage.replace(/_/g, " ");
     }
   }
@@ -262,17 +270,39 @@ export function resolveDiagnosticStage(input: {
 }
 
 /** Patch applied when starting a new run to avoid stale verification diagnostics. */
-export function clearGreenfieldVerificationStatePatch(): Partial<GreenfieldRunSnapshot> {
-  return {
+export function clearGreenfieldVerificationStatePatch(
+  run?: GreenfieldRunSnapshot,
+): Partial<GreenfieldRunSnapshot> {
+  const base: Partial<GreenfieldRunSnapshot> = {
     failureReport: null,
     finalMessage: null,
     runTimeline: null,
     workflow: null,
-    setupResult: null,
     verification: null,
+    debug: null,
+    runResult: "running",
+    endedAt: null,
+    durationMs: null,
+    latestAction: null,
+  };
+
+  // Follow-up edits clear stale plan/verify state but must keep proof that the
+  // initial greenfield setup finished — otherwise edits are misclassified as
+  // incomplete greenfield recovery (zero proposals + false block message).
+  if (
+    run &&
+    (greenfieldSetupReachedSuccess(run) ||
+      (run.runResult === "success" &&
+        (run.filesWritten.length > 0 || (run.generatedFiles?.length ?? 0) > 0)))
+  ) {
+    return base;
+  }
+
+  return {
+    ...base,
+    setupResult: null,
     uiAuditResult: null,
     uiAuditHistory: [],
-    debug: null,
     generationMetrics: null,
     generatedFiles: null,
     entries: [],

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { useAgentRunViewModel } from "@/app/workspace/useAgentRunViewModel";
 import { findAgentRunArtifact } from "@/core/agent/agentRunHistory";
 import { extractRunFileDiffs, resolveAllowGeneratedFileDiffs } from "@/core/agent/runFileDiffs";

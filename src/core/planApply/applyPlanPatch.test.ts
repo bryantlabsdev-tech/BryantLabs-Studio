@@ -95,6 +95,36 @@ describe('Apply Plan patch format ("Make calculator UI premium")', () => {
     assert.equal(parsed.files.get("src/index.css"), VALID_CSS);
   });
 
+  it("recovers a single-file TSX block from markdown fences when @@FILE markers are missing", () => {
+    const fenced = ["```tsx", VALID_APP, "```"].join("\n");
+    const parsed = parseApplyPlanMarkedFiles(fenced, ["src/App.tsx"]);
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.files.get("src/App.tsx"), VALID_APP);
+    assert.equal(parsed.hasAnyFileMarker, false);
+  });
+
+  it("recovers a fenced file when the info string includes the path", () => {
+    const fenced = ["```tsx src/App.tsx", VALID_APP, "```"].join("\n");
+    const parsed = parseApplyPlanMarkedFiles(fenced, ["src/App.tsx"]);
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.files.get("src/App.tsx"), VALID_APP);
+  });
+
+  it("recovers a fenced file after an echoed @@FILE example placeholder", () => {
+    const text = [
+      "@@FILE:src/App.tsx",
+      "<full updated file content>",
+      "@@END",
+      "",
+      "```tsx src/App.tsx",
+      VALID_APP,
+      "```",
+    ].join("\n");
+    const parsed = parseApplyPlanMarkedFiles(text, ["src/App.tsx"]);
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.files.get("src/App.tsx"), VALID_APP);
+  });
+
   it("salvages one file when the other block is missing (MISSING_FILES)", () => {
     const partial = shortMarkerBlock("src/App.tsx", VALID_APP);
     const parsed = parseApplyPlanMarkedFiles(partial, TARGETS);

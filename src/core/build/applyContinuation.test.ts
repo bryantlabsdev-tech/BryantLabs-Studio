@@ -32,4 +32,17 @@ describe("applyContinuation", () => {
     });
     assert.equal(message, null);
   });
+
+  it("surfaces incomplete auto-continue even when some files are ready", () => {
+    const message = formatApplyContinuationFailure({
+      applyResult: {
+        validReady: 1,
+        autoContinued: false,
+        error: "Incomplete patch batch: 1 of 3 files ready.",
+      },
+      planFileCount: 3,
+      autoContinue: true,
+    });
+    assert.match(message ?? "", /Incomplete patch batch/i);
+  });
 });

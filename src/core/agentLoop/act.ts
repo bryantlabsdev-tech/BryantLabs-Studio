@@ -12,6 +12,7 @@ import {
 import { activateTask, setTaskStatus } from "@/core/agentLoop/planner";
 import type { RepositorySearchHit } from "@/core/repository/types";
 import type { SymbolReferenceInfo } from "@/core/repository/types";
+import { AGENT_FILE_PREVIEW_CHARS } from "@/core/agent/agentContextLimits";
 
 export interface AgentActCallbacks {
   searchFiles(query: string): Promise<RepositorySearchHit[]>;
@@ -230,7 +231,7 @@ export async function executeAgentAction(
       const preview = [out.stdout, out.stderr]
         .filter(Boolean)
         .join("\n")
-        .slice(0, 2000);
+        .slice(0, AGENT_FILE_PREVIEW_CHARS);
       next = patchAgentFlags(next, {
         commandsRun: [...next.flags.commandsRun, command],
       });
@@ -270,7 +271,7 @@ export async function executeAgentAction(
       next = patchAgentFlags(next, {
         mcpToolsInvoked: [...next.flags.mcpToolsInvoked, tool],
       });
-      const preview = out.content.slice(0, 2000);
+      const preview = out.content.slice(0, AGENT_FILE_PREVIEW_CHARS);
       return {
         session: appendObservation(
           next,

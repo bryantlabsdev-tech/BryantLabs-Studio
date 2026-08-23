@@ -1,6 +1,7 @@
-import { useLayoutEffect, useState, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import {
   auditPreviewAncestors,
+  previewAncestorAuditsEqual,
   type PreviewAncestorAudit,
 } from "@/core/preview/previewAncestorAudit";
 
@@ -10,22 +11,24 @@ export function usePreviewAncestorAudit(
   layoutKey = 0,
 ): PreviewAncestorAudit | null {
   const [audit, setAudit] = useState<PreviewAncestorAudit | null>(null);
+  const rafRef = useRef(0);
 
   useLayoutEffect(() => {
     if (!active) {
-      setAudit(null);
+      setAudit((prev) => (prev === null ? prev : null));
       return;
     }
 
     const run = () => {
-      const next = auditPreviewAncestors(frameRef.current);
-      setAudit(next);
-      if (import.meta.env.DEV) {
-        console.table(next.rows);
-        if (next.collapseAt) {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = 0;
+        const next = auditPreviewAncestors(frameRef.current);
+        setAudit((prev) => (previewAncestorAuditsEqual(prev, next) ? prev : next));
+        if (import.meta.env.DEV && next.collapseAt) {
           console.info("[preview layout audit]", next.collapseReason);
         }
-      }
+      });
     };
 
     run();
@@ -49,6 +52,7 @@ export function usePreviewAncestorAudit(
       ro.disconnect();
       window.removeEventListener("resize", run);
       window.clearTimeout(t);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, [active, layoutKey, frameRef]);
 

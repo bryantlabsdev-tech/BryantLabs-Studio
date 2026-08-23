@@ -54,4 +54,14 @@ describe("executionDashboardTabPolicy", () => {
     assert.equal(started.tabToSet, "execution");
     assert.equal(started.nextState.savedTab, "editor");
   });
+
+  it("does not treat a leftover runStartedAt as in progress", () => {
+    const leftover = resolveRunInProgress({
+      greenfieldRun: { ...emptyGreenfieldRun(), runStartedAt: Date.now() },
+      activeAgentRunId: null,
+      buildRunning: false,
+      pipelineRunning: false,
+    });
+    assert.equal(leftover, false);
+  });
 });

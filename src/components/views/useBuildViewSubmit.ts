@@ -1,8 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buildGreenfieldFallbackSourceFileCount } from "@/core/agent/agentGreenfieldDispatch";
-import { isEmptyProjectFolder } from "@/core/agent/agentGreenfieldDispatch";
+import {
+  applyExecutionModeChoice,
+  EXECUTION_MODE_LOG_LABEL,
+  finalizeExecutionModeDiagnostics,
+  formatExecutionModeLogDetails,
+  recordExecutionModeSessionChoice,
+  resolveExecutionMode,
+  routeAfterExecutionMode,
+  type ExecutionModeChoice,
+  type ExecutionModeDiagnostics,
+  type ExecutionModeResolution,
+} from "@/core/agent/executionModeConfirmation";
+import {
+  buildGreenfieldFallbackSourceFileCount,
+  isEmptyProjectFolder,
+} from "@/core/agent/agentGreenfieldDispatch";
 import { isGreenfieldRunActive } from "@/core/agent/agentRunMutex";
 import type { AgentRunArtifact } from "@/core/agent/agentRunHistory";
+import type { AgentPromptIntent } from "@/core/agent/agentIntentRouter";
 import type { StudioIntentKind } from "@/core/agent/classifyStudioIntent";
 import {
   planPendingFolderResume,
@@ -12,6 +27,7 @@ import {
   type PendingFolderResume,
 } from "@/core/agent/folderSelectionGate";
 import { buildPlanPreviewLine } from "@/core/agent/planPreview";
+import { looksLikeApplyConfirmation } from "@/core/agent/agentIntentRouter";
 import { validateAgentPrompt, LONG_PROMPT_AUTO_PROCEED_CHARS } from "@/core/agent/promptSubmission";
 import { logAgentRoute, type ComposerModeOverride, type RouteAgentPromptResult } from "@/core/agent/unifiedAgentRoute";
 import {
@@ -28,7 +44,10 @@ import { studioEventBus } from "@/core/console/studioEventBus";
 import type { FeasibilityResult } from "@/core/intelligence";
 import type { BuildLoopStatus } from "@/core/build";
 import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
-import type { PlanApplySession } from "@/core/planApply";
+import {
+  planApplySessionAwaitsUserReview,
+  type PlanApplySession,
+} from "@/core/planApply";
 import { isProviderReady } from "@/core/providers/AnthropicProvider";
 import { normalizeProviderSettings } from "@/core/providers/orchestration";
 import type { ProviderSettings } from "@/core/providers/types";
@@ -57,6 +76,14 @@ export interface UseBuildViewSubmitInput {
   readonly setAgentGreenfieldPanelActive: (active: boolean) => void;
   readonly runBuildLoop: (prompt: string) => Promise<void>;
   readonly startAgent: (prompt: string) => Promise<void>;
+  readonly runAgentConsultationFlow: (opts: {
+    readonly prompt: string;
+    readonly promptIntent: AgentPromptIntent;
+    readonly mixedEdit?: boolean;
+    readonly command?: boolean;
+  }) => Promise<void>;
+  readonly consumePendingMixedEdit: () => { readonly prompt: string } | null;
+  readonly consultationRunning: boolean;
   readonly openProject: () => Promise<void>;
   readonly openProjectAt: (path: string) => Promise<void>;
   readonly setRailTool: (tool: import("@/core/layout/types").RailTool) => void;
@@ -72,6 +99,8 @@ export interface UseBuildViewSubmitInput {
   readonly recordAgentUserMessage: (text: string) => void;
   readonly recordAgentActivityMessage: (text: string) => void;
   readonly providerStatus: { provider?: string; model?: string } | null;
+  readonly hasGitRepo?: boolean;
+  readonly hasProjectIndex?: boolean;
 }
 
 export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
@@ -88,6 +117,11 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     intent: StudioIntentKind;
     route: RouteAgentPromptResult;
   } | null>(null);
+  const [executionModeGate, setExecutionModeGate] = useState<{
+    prompt: string;
+    route: RouteAgentPromptResult;
+    resolution: ExecutionModeResolution;
+  } | null>(null);
   const [folderSelectionGate, setFolderSelectionGate] =
     useState<FolderSelectionGateState | null>(null);
   const [folderPickerError, setFolderPickerError] = useState<string | null>(null);
@@ -101,6 +135,10 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
   const [providerSettings, setProviderSettings] = useState<ProviderSettings | null>(null);
 
   const pendingFolderResumeRef = useRef<PendingFolderResume | null>(null);
+  const lastProceedRouteRef = useRef<{
+    prompt: string;
+    route: Pick<RouteAgentPromptResult, "execution" | "intent" | "promptIntent" | "mixedEdit">;
+  } | null>(null);
   const submitLockRef = useRef(false);
   const activeSubmitPromptRef = useRef<string | null>(null);
   const api = window.bryantlabs;
@@ -123,13 +161,17 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     return () => input.setAgentGreenfieldPanelActive(false);
   }, [greenfieldMode, input.setAgentGreenfieldPanelActive]);
 
-  const active = input.buildRunning || input.pipelineRunning;
+  const active =
+    input.buildRunning ||
+    input.pipelineRunning ||
+    input.consultationRunning;
   const greenfieldActive =
     greenfieldMode || isGreenfieldRunActive(input.greenfieldRun, greenfieldMode);
   const awaitingReview =
-    input.buildStatus.phase === "review" ||
-    input.planApplySession?.phase === "review" ||
-    input.planApplySession?.phase === "waiting_for_review";
+    planApplySessionAwaitsUserReview(input.planApplySession) ||
+    (input.buildStatus.phase === "review" &&
+      (input.planApplySession == null ||
+        planApplySessionAwaitsUserReview(input.planApplySession)));
   const providerReady = providerSettings ? isProviderReady(providerSettings) : false;
   const composerDisabled =
     Boolean(input.agentRunBlockReason) ||
@@ -137,7 +179,8 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     greenfieldActive ||
     awaitingReview ||
     input.greenfieldIndexSyncPending ||
-    (input.hasProject && input.scanStatus === "scanning");
+    (input.hasProject &&
+      (input.scanStatus === "scanning" || input.scanStatus === "idle"));
   const sendDisabled =
     composerDisabled || submissionPending || !providerReady || prompt.trim().length < 4;
 
@@ -158,6 +201,13 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     submitLockRef.current = false;
     activeSubmitPromptRef.current = null;
   }, []);
+
+  const releasePendingSubmit = useCallback(() => {
+    setSubmissionPending(false);
+    setSubmissionAt(null);
+    setSubmitStallMessage(null);
+    releaseSubmitLock();
+  }, [releaseSubmitLock]);
 
   useEffect(() => {
     if (!active && !submissionPending && !greenfieldActive) {
@@ -231,11 +281,13 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
   );
 
   const startFollowUpRun = useCallback(
-    (trimmed: string, route: Pick<RouteAgentPromptResult, "execution" | "intent">) => {
-      const effectivePrompt = prompt.trim().length >= 4 ? prompt.trim() : trimmed;
+    (trimmed: string, route: Pick<RouteAgentPromptResult, "execution" | "intent" | "promptIntent" | "mixedEdit">) => {
+      const effectivePrompt = trimmed;
       const action = resolveFollowUpSubmitAction({
         hasProject: input.hasProject,
         routeExecution: route.execution,
+        routePromptIntent: route.promptIntent,
+        routeMixedEdit: route.mixedEdit,
         emptyProjectFolder,
         scan: input.scan,
         scanStatus: input.scanStatus,
@@ -250,6 +302,18 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
         return;
       }
       if (action.kind === "greenfield" || action.kind === "greenfield_recovery") {
+        if (action.kind !== "greenfield_recovery") input.clearRunContextForNewSubmit();
+        input.recordAgentActivityMessage(
+          route.intent === "greenfield"
+            ? "Greenfield Detection · Generation Mode Activated"
+            : "Greenfield recovery started",
+        );
+        input.updateGreenfieldRun({
+          actionType: "greenfield",
+          runStartedAt: Date.now(),
+          runResult: "running",
+          targetFolder: input.projectPath,
+        });
         setGreenfieldRecoveryMode(action.kind === "greenfield_recovery");
         setGreenfieldPrompt(trimmed);
         setGreenfieldMode(true);
@@ -257,6 +321,24 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
       }
       if (action.kind === "blocked_scan") {
         setBlockedMessage(action.reason);
+        setSubmissionError(action.reason);
+        releasePendingSubmit();
+        return;
+      }
+      if (action.kind === "consultation") {
+        void input.runAgentConsultationFlow({
+          prompt: effectivePrompt,
+          promptIntent: action.promptIntent,
+          mixedEdit: action.mixedEdit,
+        });
+        return;
+      }
+      if (action.kind === "run_command") {
+        void input.runAgentConsultationFlow({
+          prompt: effectivePrompt,
+          promptIntent: action.promptIntent,
+          command: true,
+        });
         return;
       }
       if (action.greenfieldBlockedByRoute) {
@@ -268,24 +350,64 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
         );
       }
       setLastAgentIntent(route.intent);
-      if (action.kind === "agent_loop" || action.kind === "build_loop") {
+      if (action.kind === "agent_loop") {
         void input.startAgent(effectivePrompt);
         return;
       }
+      if (action.kind === "build_loop") {
+        void input.runBuildLoop(effectivePrompt);
+        return;
+      }
     },
-    [prompt, input, emptyProjectFolder, greenfieldFallbackCount],
+    [input, emptyProjectFolder, greenfieldFallbackCount, releasePendingSubmit],
   );
 
   const buildFreshFollowUpRoute = useCallback(
-    (trimmed: string): Pick<RouteAgentPromptResult, "execution" | "intent"> => {
+    (trimmed: string): Pick<RouteAgentPromptResult, "execution" | "intent" | "promptIntent" | "mixedEdit"> => {
       const route = resolveBuildViewSubmitRoute(flowInput(trimmed));
-      return { execution: route.execution, intent: route.intent };
+      return {
+        execution: route.execution,
+        intent: route.intent,
+        promptIntent: route.promptIntent,
+        mixedEdit: route.mixedEdit,
+      };
     },
     [flowInput],
   );
 
+  const recordExecutionMode = useCallback(
+    (diagnostics: ExecutionModeDiagnostics) => {
+      input.updateGreenfieldRun({
+        executionMode: diagnostics,
+        routeDecision: input.greenfieldRun.routeDecision,
+      });
+      input.appendGreenfieldRunLog(
+        "prompt",
+        "success",
+        EXECUTION_MODE_LOG_LABEL,
+        formatExecutionModeLogDetails(diagnostics),
+      );
+      studioEventBus.emit({
+        type: "intent.classified",
+        timestamp: Date.now(),
+        projectPath: input.projectPath,
+        intent:
+          diagnostics.userChoice === "create_new" ||
+          (diagnostics.userChoice == null &&
+            diagnostics.recommendedChoice === "create_new")
+            ? "greenfield"
+            : "follow_up",
+      });
+    },
+    [input],
+  );
+
   const proceedWithSubmit = useCallback(
-    (trimmed: string, route: RouteAgentPromptResult) => {
+    (
+      trimmed: string,
+      route: RouteAgentPromptResult,
+      executionDiagnostics?: ExecutionModeDiagnostics,
+    ) => {
       if (submitLockRef.current) {
         if (activeSubmitPromptRef.current === trimmed) return;
         setSubmissionError("A run is already in progress. Wait for it to finish.");
@@ -295,6 +417,9 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
       activeSubmitPromptRef.current = trimmed;
 
       logBuildViewSubmitAccepted(flowInput(trimmed), route);
+      if (executionDiagnostics) {
+        recordExecutionMode(executionDiagnostics);
+      }
       setBlockedMessage(null);
       setLastAgentIntent(route.intent);
       setSubmissionPending(true);
@@ -307,6 +432,15 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
         intent: route.intent,
       });
       input.recordAgentUserMessage(trimmed);
+      lastProceedRouteRef.current = {
+        prompt: trimmed,
+        route: {
+          execution: route.execution,
+          intent: route.intent,
+          promptIntent: route.promptIntent,
+          mixedEdit: route.mixedEdit,
+        },
+      };
 
       const gate = evaluateBuildViewSubmit(flowInput(trimmed), route);
       if (gate.kind === "folder") {
@@ -339,7 +473,9 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
       setGreenfieldMode(false);
       setGreenfieldRecoveryMode(false);
       setGreenfieldPrompt("");
-      input.recordAgentActivityMessage(buildPlanPreviewLine(trimmed));
+      input.recordAgentActivityMessage(
+        buildPlanPreviewLine(trimmed, route.promptIntent),
+      );
 
       if (gate.kind === "clarity") {
         setClarityGate({ prompt: gate.prompt, question: gate.question });
@@ -347,6 +483,22 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
       }
       if (gate.kind === "feasibility") {
         setFeasibilityGate(gate.result);
+        return;
+      }
+      if (gate.kind === "consultation") {
+        void input.runAgentConsultationFlow({
+          prompt: gate.prompt,
+          promptIntent: gate.promptIntent,
+          mixedEdit: gate.mixedEdit,
+        });
+        return;
+      }
+      if (gate.kind === "run_command") {
+        void input.runAgentConsultationFlow({
+          prompt: gate.prompt,
+          promptIntent: gate.promptIntent,
+          command: true,
+        });
         return;
       }
       if (gate.kind === "follow_up") {
@@ -358,7 +510,45 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
         startFollowUpRun(gate.prompt, gate.route);
       }
     },
-    [flowInput, input, startFollowUpRun],
+    [flowInput, input, startFollowUpRun, recordExecutionMode],
+  );
+
+  const resolveSubmitExecutionMode = useCallback(
+    (trimmed: string, route: RouteAgentPromptResult) =>
+      resolveExecutionMode({
+        projectOpen: input.hasProject,
+        projectPath: input.projectPath,
+        scan: input.scan,
+        scanStatus: input.scanStatus,
+        filesWritten: input.greenfieldRun.filesWritten,
+        ...(greenfieldFallbackCount !== undefined
+          ? { fallbackSourceFileCount: greenfieldFallbackCount }
+          : {}),
+        hasGitRepo: input.hasGitRepo === true,
+        hasProjectIndex: input.hasProjectIndex === true,
+        route,
+        prompt: trimmed,
+        modeOverride,
+      }),
+    [input, greenfieldFallbackCount, modeOverride],
+  );
+
+  const beginSubmitAfterRoute = useCallback(
+    (trimmed: string, route: RouteAgentPromptResult) => {
+      const resolution = resolveSubmitExecutionMode(trimmed, route);
+      if (resolution.confirmationRequired) {
+        setExecutionModeGate({ prompt: trimmed, route, resolution });
+        return;
+      }
+      const diagnostics = resolution.diagnostics;
+      recordExecutionModeSessionChoice(
+        diagnostics.userChoice ?? diagnostics.recommendedChoice,
+        resolution.profile,
+      );
+      const effectiveRoute = routeAfterExecutionMode(route, diagnostics);
+      proceedWithSubmit(trimmed, effectiveRoute, diagnostics);
+    },
+    [resolveSubmitExecutionMode, proceedWithSubmit],
   );
 
   const dispatchPrompt = useCallback(
@@ -376,6 +566,22 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
       if (submitLockRef.current || active || submissionPending || greenfieldActive) {
         if (activeSubmitPromptRef.current === trimmed) return;
         setSubmissionError("A run is already in progress. Wait for it to finish.");
+        return;
+      }
+
+      const pendingMixed = input.consumePendingMixedEdit();
+      if (pendingMixed && looksLikeApplyConfirmation(trimmed)) {
+        setPrompt(text ?? prompt);
+        input.recordAgentUserMessage(trimmed);
+        input.recordAgentActivityMessage(
+          buildPlanPreviewLine(pendingMixed.prompt, "edit"),
+        );
+        setSubmissionPending(true);
+        setSubmissionAt(Date.now());
+        void input.runBuildLoop(pendingMixed.prompt).finally(() => {
+          setSubmissionPending(false);
+          releaseSubmitLock();
+        });
         return;
       }
       if (!providerReady) {
@@ -411,7 +617,7 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
         setStaleRunGate({ prompt: trimmed, intent: route.intent, route });
         return;
       }
-      proceedWithSubmit(trimmed, route);
+      beginSubmitAfterRoute(trimmed, route);
     },
     [
       prompt,
@@ -422,8 +628,40 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
       input,
       flowInput,
       releaseSubmitLock,
-      proceedWithSubmit,
+      beginSubmitAfterRoute,
     ],
+  );
+
+  const proceedAfterExecutionMode = useCallback(
+  async (choice: ExecutionModeChoice, createTargetFolder: string) => {
+      const gate = executionModeGate;
+      if (!gate) return;
+      const target =
+        choice === "create_new" && createTargetFolder.trim().length > 0
+          ? createTargetFolder.trim()
+          : gate.resolution.createTargetFolder ?? input.projectPath;
+      const diagnostics = finalizeExecutionModeDiagnostics(
+        gate.resolution.diagnostics,
+        choice,
+        true,
+        target,
+      );
+      recordExecutionModeSessionChoice(choice, gate.resolution.profile);
+      const effectiveRoute = routeAfterExecutionMode(
+        applyExecutionModeChoice(gate.route, choice, target),
+        diagnostics,
+      );
+      setExecutionModeGate(null);
+      if (
+        choice === "create_new" &&
+        target &&
+        target !== input.projectPath
+      ) {
+        await input.openProjectAt(target);
+      }
+      proceedWithSubmit(gate.prompt, effectiveRoute, diagnostics);
+    },
+    [executionModeGate, input, proceedWithSubmit],
   );
 
   const handleResetAgentState = useCallback(() => {
@@ -433,6 +671,7 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     setSubmissionPending(false);
     setSubmissionAt(null);
     setStaleRunGate(null);
+    setExecutionModeGate(null);
     setFeasibilityGate(null);
     setClarityGate(null);
     setFolderSelectionGate(null);
@@ -451,30 +690,45 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     setStaleRunGate(null);
     handleResetAgentState();
     setPrompt(gate.prompt);
-    proceedWithSubmit(gate.prompt, gate.route);
-  }, [staleRunGate, handleResetAgentState, proceedWithSubmit]);
+    beginSubmitAfterRoute(gate.prompt, gate.route);
+  }, [staleRunGate, handleResetAgentState, beginSubmitAfterRoute]);
 
   const proceedAfterFeasibility = useCallback(() => {
     const trimmed = prompt.trim();
     setFeasibilityGate(null);
-    if (trimmed.length >= 4) {
-      input.recordAgentActivityMessage(buildPlanPreviewLine(trimmed));
-      startFollowUpRun(trimmed, buildFreshFollowUpRoute(trimmed));
+    if (trimmed.length < 4) {
+      releasePendingSubmit();
+      return;
     }
-  }, [prompt, input, startFollowUpRun, buildFreshFollowUpRoute]);
+    input.recordAgentActivityMessage(buildPlanPreviewLine(trimmed));
+    const stored = lastProceedRouteRef.current;
+    if (stored && stored.prompt === trimmed) {
+      startFollowUpRun(trimmed, stored.route);
+      return;
+    }
+    startFollowUpRun(trimmed, buildFreshFollowUpRoute(trimmed));
+  }, [prompt, input, startFollowUpRun, buildFreshFollowUpRoute, releasePendingSubmit]);
 
   const proceedAfterClarity = useCallback(() => {
     const trimmed = prompt.trim();
     setClarityGate(null);
-    if (trimmed.length < 4) return;
+    if (trimmed.length < 4) {
+      releasePendingSubmit();
+      return;
+    }
     input.recordAgentActivityMessage(buildPlanPreviewLine(trimmed));
     const feasibility = input.analyzeFeasibility(trimmed);
     if (feasibility.requiresConfirmation) {
       setFeasibilityGate(feasibility);
       return;
     }
+    const stored = lastProceedRouteRef.current;
+    if (stored && stored.prompt === trimmed) {
+      startFollowUpRun(trimmed, stored.route);
+      return;
+    }
     startFollowUpRun(trimmed, buildFreshFollowUpRoute(trimmed));
-  }, [prompt, input, startFollowUpRun, buildFreshFollowUpRoute]);
+  }, [prompt, input, startFollowUpRun, buildFreshFollowUpRoute, releasePendingSubmit]);
 
   const resumePendingFolderPrompt = useCallback(() => {
     const pending = pendingFolderResumeRef.current;
@@ -511,8 +765,8 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
       setStaleRunGate({ prompt: pendingPrompt, intent: route.intent, route });
       return;
     }
-    proceedWithSubmit(pendingPrompt, route);
-  }, [flowInput, input, modeOverride, proceedWithSubmit]);
+    beginSubmitAfterRoute(pendingPrompt, route);
+  }, [flowInput, input, modeOverride, beginSubmitAfterRoute]);
 
   useEffect(() => {
     resumePendingFolderPrompt();
@@ -537,6 +791,9 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     setClarityGate,
     staleRunGate,
     setStaleRunGate,
+    executionModeGate,
+    setExecutionModeGate,
+    proceedAfterExecutionMode,
     folderSelectionGate,
     setFolderSelectionGate,
     folderPickerError,
@@ -573,6 +830,7 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     proceedAfterFeasibility,
     proceedAfterClarity,
     releaseSubmitLock,
+    releasePendingSubmit,
     resolveFolderGateCancel,
     planPendingFolderResume,
     shouldResumePendingPrompt,

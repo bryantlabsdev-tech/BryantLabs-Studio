@@ -50,13 +50,14 @@ describe("greenfieldCallBudget", () => {
     assert.equal(tracker.canMakeCall(settings, { purpose: "repair" }).ok, true);
   });
 
-  it("bumps max calls to seven for nine-page FleetOps when user limit is three", () => {
+  it("bumps max calls for nine-page FleetOps when user limit is three", () => {
     const tracker = new AiCallTracker();
     const settings = settingsWithMaxCalls(3);
     configureMultiPhaseGreenfieldCallReservations(tracker, settings, 9);
 
-    assert.equal(tracker.getMaxCallsOverride(), 7);
-    for (let i = 0; i < 7; i++) {
+    // shared + 9 page batches + app + 2 repair headroom
+    assert.equal(tracker.getMaxCallsOverride(), 13);
+    for (let i = 0; i < 13; i++) {
       assert.equal(tracker.canMakeCall(settings, { purpose: "primary", stage: "greenfield" }).ok, true);
       tracker.recordCall();
     }
@@ -74,13 +75,14 @@ describe("greenfieldCallBudget", () => {
     assert.equal(repairReserve, 2);
   });
 
-  it("allows five greenfield primary calls for two-page multi-phase after budget bump", () => {
+  it("allows six greenfield primary calls for two-page multi-phase after budget bump", () => {
     const tracker = new AiCallTracker();
     const settings = settingsWithMaxCalls(3);
     configureMultiPhaseGreenfieldCallReservations(tracker, settings, 2);
 
-    assert.equal(tracker.getMaxCallsOverride(), 5);
-    for (let i = 0; i < 5; i++) {
+    // shared + 2 pages + app + 2 headroom = 6
+    assert.equal(tracker.getMaxCallsOverride(), 6);
+    for (let i = 0; i < 6; i++) {
       assert.equal(tracker.canMakeCall(settings, { purpose: "primary", stage: "greenfield" }).ok, true);
       tracker.recordCall();
     }

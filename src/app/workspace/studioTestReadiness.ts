@@ -2,6 +2,7 @@ import {
   getAgentRunBlockReason,
   isGreenfieldRunActive,
 } from "@/core/agent/agentRunMutex";
+import { countProjectSourceFiles } from "@/core/agent/agentReadiness";
 import type { AIPlanStatus } from "@/app/orchestration/types";
 import type { AppPreviewState } from "@/app/workspace/usePreviewState";
 import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
@@ -32,6 +33,7 @@ export interface StudioReadinessState {
   readonly desktopApiReady: boolean;
   readonly projectPath: string | null;
   readonly scanStatus: string;
+  readonly sourceFileCount: number;
   readonly composerReady: boolean;
   readonly composerBlockReason: string | null;
   readonly centerTab: CenterTab;
@@ -85,7 +87,9 @@ export function computeStudioReadinessState(
     input.buildRunning ||
     input.pipelineRunning ||
     isGreenfieldRunActive(input.greenfieldRun, input.greenfieldPanelActive);
-  const composerDisabled = agentBusy || (hasProject && input.scanStatus === "scanning");
+  const composerDisabled =
+    agentBusy ||
+    (hasProject && (input.scanStatus === "scanning" || input.scanStatus === "idle"));
   const composerReady = !composerDisabled && !composerBlockReason;
 
   const previewUrl = input.appPreview.url;
@@ -100,6 +104,7 @@ export function computeStudioReadinessState(
     desktopApiReady: input.apiReady,
     projectPath: input.projectPath ?? null,
     scanStatus: input.scanStatus,
+    sourceFileCount: countProjectSourceFiles(input.scan),
     composerReady,
     composerBlockReason,
     centerTab: input.centerTab,

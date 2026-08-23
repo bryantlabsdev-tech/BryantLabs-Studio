@@ -2,6 +2,10 @@ import { getProviderInfo } from "@/core/providers/registry";
 import { modelForProvider } from "@/core/providers/AnthropicProvider";
 import { PROVIDER_CONNECTION_LABELS } from "@/core/providers/connectionStatus";
 import {
+  formatProviderEnablementRoutingLog,
+  isProviderEnabled,
+} from "@/core/providers/providerEnablement";
+import {
   formatPipelinePillText,
   formatSingleAgentPillText,
   isPipelineMode,
@@ -61,6 +65,7 @@ function configWarning(
   settings: ProviderSettings,
   provider: ProviderId,
 ): string | null {
+  if (!isProviderEnabled(settings, provider)) return "Disabled";
   if (provider === "gemini" && !settings.hasGeminiKey) {
     return "Missing Key";
   }
@@ -188,6 +193,7 @@ function formatTooltip(opts: {
   if (provider === "ollama" || settings.provider === "ollama") {
     lines.push(`Server URL: ${settings.ollamaBaseUrl || "—"}`);
   }
+  lines.push(formatProviderEnablementRoutingLog(settings));
   if (lastCheckedAt) {
     lines.push(`Last health check: ${new Date(lastCheckedAt).toLocaleString()}`);
   } else {

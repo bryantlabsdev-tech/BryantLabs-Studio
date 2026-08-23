@@ -1,5 +1,6 @@
 import {
   applyFinishStudioRunPatch,
+  isTerminalStudioSuccess,
   PROVIDER_HEALTH_ACTIONS,
 } from "@/app/orchestration/studioActionGuards";
 import type { StudioActionOrchestrationHost } from "@/app/orchestration/studioActionTypes";
@@ -67,7 +68,7 @@ export function finishStudioActionOrchestration(
       opts,
     );
     host.persistAnalyticsRecord(next, ok, message, opts?.details);
-    if (ok) {
+    if (isTerminalStudioSuccess(actionType, ok, message)) {
       host.offerMemoryCandidatesFromRun(
         next,
         ok,

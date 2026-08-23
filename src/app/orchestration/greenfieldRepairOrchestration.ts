@@ -206,6 +206,7 @@ async function startPreview(
           uiOutcome.uiAuditHistory,
           null,
           uiOutcome.repaired,
+          uiOutcome.setup,
         );
         return { ok: true, message: uiOutcome.finalMessage };
       }
@@ -224,7 +225,7 @@ async function startPreview(
 
     host.updateGreenfieldRun({
       setupStatus: "done",
-      setupResult: setup,
+      setupResult: uiOutcome.setup,
       runResult: "success",
       lastSuccessfulRunAt: Date.now(),
       finalMessage: uiOutcome.finalMessage,

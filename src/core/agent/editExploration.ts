@@ -4,11 +4,11 @@ import {
   readReferencedFileContents,
   type ReferencedFileContent,
 } from "@/core/context/referencedFileContext";
+import { DEFAULT_MAX_EXPLORE_FILES } from "@/core/agent/agentContextLimits";
 import type { BryantLabsApi } from "@/types";
 import type { RepositoryIndex } from "@/core/repository/types";
 
-/** Max files pre-read before edit planning (raised after incremental index). */
-export const DEFAULT_MAX_EXPLORE_FILES = 10;
+export { DEFAULT_MAX_EXPLORE_FILES };
 
 const MAX_EXPLORE_FILES = DEFAULT_MAX_EXPLORE_FILES;
 
@@ -25,7 +25,7 @@ export async function exploreRepositoryBeforeEdit(opts: {
   let hits = lexical;
   if (api.semanticSearch) {
     try {
-      const semantic = await api.semanticSearch(prompt, 10);
+      const semantic = await api.semanticSearch(prompt, MAX_EXPLORE_FILES);
       hits = mergeRepositoryAndSemanticHits(lexical, semantic);
     } catch {
       hits = lexical;

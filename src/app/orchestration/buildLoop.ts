@@ -37,6 +37,9 @@ import {
 } from "@/core/planner/aiPlanFailureMessage";
 import type { PlanApplySession } from "@/core/planApply";
 import type { BuildPipelineHost, BuildStatusInput } from "@/app/orchestration/types";
+import { recordFollowUpRunFailure } from "@/app/orchestration/followUpRunFailure";
+import { mergeActiveEditorReferencedContents } from "@/core/context/activeEditorContext";
+import { sealSupersededRunningLogEntries } from "@/core/greenfield/runState";
 
 export function computeBuildStatus(input: BuildStatusInput): BuildLoopStatus {
   const phase = deriveBuildPhase({
@@ -84,6 +87,11 @@ async function executeSingleAgentFollowUp(
     semanticBoostPaths,
   });
   host.editExplorationContentsRef.current = explored;
+  host.editExplorationContentsRef.current = mergeActiveEditorReferencedContents(
+    host.editExplorationContentsRef.current,
+    host.activeEditorContextRef.current,
+    trimmed,
+  );
   if (explored.length > 0) {
     host.appendGreenfieldRunLog(
       "pipeline",
@@ -131,6 +139,10 @@ async function executeSingleAgentFollowUp(
   const autoContinue =
     shouldAutoContinueFollowUpApply(trimmed) || !readFollowUpReviewFirst();
   const applyResult = await host.startApplyPlan({ autoContinue });
+  if (applyResult.featureAlreadySatisfied) {
+    recordRunTimelineStage("patch_generated", "feature_already_present");
+    return null;
+  }
   if (applyResult.waitingForReview) {
     recordRunTimelineStage("waiting_for_review", `${applyResult.validReady} file(s)`);
     host.releaseBuildRunForReview?.();
@@ -184,6 +196,7 @@ export async function runSingleAgentBuildLoop(
     scan: host.scan,
     projectPath: host.project.path,
     greenfieldRun: host.greenfieldRun,
+    persistedModifiedFiles: host.sessionMemory.modifiedFiles,
   });
   if (!effectiveScan) {
     callbacks.setBuildError(
@@ -216,15 +229,19 @@ export async function runSingleAgentBuildLoop(
   }
 
   host.clearRunContextForNewSubmit();
+  host.resetAiCallTracker?.();
 
   const runBlockReason = host.getAgentRunBlockReason();
   if (runBlockReason) {
+    recordFollowUpRunFailure(host, runBlockReason);
     callbacks.setBuildError(runBlockReason);
     return;
   }
 
   if (host.buildRunning || host.pipelineRunning) {
-    callbacks.setBuildError("A follow-up run is already in progress.");
+    const message = "A follow-up run is already in progress.";
+    recordFollowUpRunFailure(host, message);
+    callbacks.setBuildError(message);
     return;
   }
 
@@ -244,14 +261,18 @@ export async function runSingleAgentBuildLoop(
     logProviderSelected(settings, stage, "settings");
   }
   const plannerRouting = resolveStageRouting(settings, "planner");
+  const runStartedAt = Date.now();
   host.updateGreenfieldRun({
     actionType: "apply_plan",
     projectPath: host.project.path,
     runResult: "running",
-    runStartedAt: Date.now(),
+    runStartedAt,
     endedAt: null,
     durationMs: null,
     appliedFileDiffs: [],
+    failureReport: null,
+    entries: sealSupersededRunningLogEntries(host.greenfieldRun.entries, runStartedAt),
+    workflow: { ...(host.greenfieldRun?.workflow ?? {}), errors: [] },
     provider: plannerRouting?.provider ?? settings.provider,
     model:
       plannerRouting?.model ?? modelForProvider(settings, settings.provider),
@@ -280,8 +301,7 @@ export async function runSingleAgentBuildLoop(
       const message =
         err instanceof Error ? err.message : "Agent follow-up failed unexpectedly.";
       callbacks.setBuildError(message);
-      host.recordFollowUpFailureMessage?.(message);
-      failRunTimeline(message);
+      recordFollowUpRunFailure(host, message);
     } finally {
       callbacks.setBuildRunning(false);
       host.finalizeFollowUpActivityRun?.();
@@ -307,8 +327,7 @@ export async function runSingleAgentBuildLoop(
     }
 
     callbacks.setBuildError(error);
-    host.recordFollowUpFailureMessage?.(error);
-    failRunTimeline(error);
+    recordFollowUpRunFailure(host, error, "apply_plan");
 
     if (attempt === 0 && host.attemptFollowUpAutoEscalation) {
       const escalated = await host.attemptFollowUpAutoEscalation(error);
@@ -336,13 +355,20 @@ export async function resumeBuildReviewOrchestration(
   const phase = planApplySession.phase;
 
   if (phase === "review" || phase === "waiting_for_review") {
+    const simulated = planApplySession.files.every((file) => file.selectionReason === "e2e");
+    if (!readFollowUpReviewFirst() && !simulated) {
+      await callbacks.continueBuildAfterReview();
+    }
     return;
   }
 
   if (phase === "proposing") {
     callbacks.setBuildRunning(true);
     try {
-      await host.executeApplyPlan({ directRewrite: false });
+      await host.executeApplyPlan({
+        directRewrite: false,
+        autoContinue: !readFollowUpReviewFirst(),
+      });
     } catch (err) {
       callbacks.setBuildError(
         err instanceof Error ? err.message : "Build resume failed during propose.",

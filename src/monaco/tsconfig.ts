@@ -50,6 +50,43 @@ export interface ParsedTsCompilerOptions {
   readonly paths?: Record<string, string[]>;
 }
 
+/** Monaco JsxEmit.ReactJSX */
+const JSX_REACT_JSX = 4;
+/** Monaco ModuleResolutionKind.NodeJs */
+const MODULE_RESOLUTION_NODE = 2;
+
+function parseJsxOption(value: unknown): number | undefined {
+  if (typeof value !== "string") return undefined;
+  switch (value.toLowerCase()) {
+    case "react-jsx":
+      return JSX_REACT_JSX;
+    case "react-jsxdev":
+      return 5;
+    case "react":
+      return 2;
+    case "preserve":
+      return 1;
+    default:
+      return undefined;
+  }
+}
+
+function parseModuleResolutionOption(value: unknown): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const v = value.toLowerCase();
+  if (
+    v === "node" ||
+    v === "nodejs" ||
+    v === "node10" ||
+    v === "nodenext" ||
+    v === "node16" ||
+    v === "bundler"
+  ) {
+    return MODULE_RESOLUTION_NODE;
+  }
+  return undefined;
+}
+
 export function parseTsconfigCompilerOptions(
   raw: string,
 ): ParsedTsCompilerOptions | null {
@@ -59,6 +96,8 @@ export function parseTsconfigCompilerOptions(
     };
     const co = parsed.compilerOptions;
     if (!co || typeof co !== "object") return null;
+    const jsx = parseJsxOption(co.jsx);
+    const moduleResolution = parseModuleResolutionOption(co.moduleResolution);
     return {
       ...(typeof co.strict === "boolean" ? { strict: co.strict } : {}),
       ...(typeof co.noEmit === "boolean" ? { noEmit: co.noEmit } : {}),
@@ -73,6 +112,8 @@ export function parseTsconfigCompilerOptions(
       ...(co.paths && typeof co.paths === "object"
         ? { paths: co.paths as Record<string, string[]> }
         : {}),
+      ...(jsx !== undefined ? { jsx } : {}),
+      ...(moduleResolution !== undefined ? { moduleResolution } : {}),
     };
   } catch {
     return null;

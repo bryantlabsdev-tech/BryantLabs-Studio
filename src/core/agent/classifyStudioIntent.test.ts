@@ -164,7 +164,7 @@ describe("classifyStudioIntent", () => {
     assert.equal(result.intent, "repair");
   });
 
-  it("routes audit prompts to audit on existing projects", () => {
+  it("routes audit prompts to consultation on existing projects", () => {
     const scan = mockProjectScan(["src/App.tsx"]);
     const result = classifyStudioIntent({
       prompt: "Audit the codebase for issues",
@@ -172,7 +172,8 @@ describe("classifyStudioIntent", () => {
       scan,
       scanStatus: "done",
     });
-    assert.equal(result.intent, "audit");
+    assert.equal(result.intent, "consultation");
+    assert.equal(result.promptIntent, "analyze");
   });
 
   it("detects repair phrasing", () => {
@@ -254,7 +255,7 @@ describe("classifyStudioIntent", () => {
     assert.equal(result.routeReason, "edit_keywords");
   });
 
-  it("defaults package.json projects to edit even for build phrasing", () => {
+  it("routes build phrasing on existing projects to generate apply plan", () => {
     const scan = mockProjectScan(["package.json", "src/App.tsx"]);
     const result = classifyStudioIntent({
       prompt: "Build a premium Sudoku app",
@@ -264,7 +265,8 @@ describe("classifyStudioIntent", () => {
     });
     assert.equal(result.intent, "follow_up");
     assert.equal(result.routeMode, "edit");
-    assert.equal(result.routeReason, "existing_project");
+    assert.equal(result.routeReason, "generate_keywords");
+    assert.equal(result.promptIntent, "generate");
   });
 });
 

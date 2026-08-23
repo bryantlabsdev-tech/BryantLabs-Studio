@@ -1,4 +1,5 @@
 import type { Patch } from "@/core/editor/types";
+import type { PlanApplySession } from "@/core/planApply";
 import type { AIPatchSession } from "@/core/planner/aiTypes";
 
 export interface EditorPatchReview {
@@ -32,6 +33,27 @@ export function deriveSafeEditPatchReview(
     before: patch.before,
     after: patch.after,
     label: patch.description,
+  };
+}
+
+/** Inline review for Apply Plan when the active editor tab matches a ready proposal. */
+export function derivePlanApplyPatchReview(
+  session: PlanApplySession | null,
+  activeAbsPath: string | null,
+): EditorPatchReview | null {
+  if (!session || !activeAbsPath) return null;
+  const file = session.files.find((f) => f.absPath === activeAbsPath);
+  if (!file || file.status !== "ready" || !file.proposal || file.decision === "rejected") {
+    return null;
+  }
+  if (file.diffStats && !file.diffStats.changed) return null;
+  const before = file.basisContent ?? "";
+  const after = file.appliedNewContent ?? file.proposal.newContent;
+  if (before === after) return null;
+  return {
+    before,
+    after,
+    label: "Plan apply",
   };
 }
 

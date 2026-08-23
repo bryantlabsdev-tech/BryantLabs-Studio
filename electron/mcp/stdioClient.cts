@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
+import { spawnProcessEnv } from "../processSpawn.cjs";
 
 export interface McpStdioClientOptions {
   readonly command: string;
@@ -28,7 +29,7 @@ export class McpStdioClient {
     this.timeoutMs = opts.timeoutMs ?? 20_000;
     this.proc = spawn(opts.command, [...(opts.args ?? [])], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ...(opts.env ?? {}) },
+      env: spawnProcessEnv(opts.env),
     });
     const rl = createInterface({ input: this.proc.stdout! });
     rl.on("line", (line) => this.onLine(line));

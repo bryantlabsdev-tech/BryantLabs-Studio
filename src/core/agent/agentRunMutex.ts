@@ -17,7 +17,6 @@ const ACTIVE_PLAN_APPLY_PHASES = new Set([
   "proposing",
   "applying",
   "verifying",
-  "waiting_for_review",
 ]);
 
 const ACTIVE_AUTO_FIX_PHASES = new Set(["running", "proposing"]);
@@ -84,6 +83,9 @@ export function isAgentWorkflowBusy(input: AgentRunMutexInput): boolean {
 }
 
 export function getAgentRunBlockReason(input: AgentRunMutexInput): string | null {
+  if (input.planApplyPhase === "waiting_for_review") {
+    return "Review pending — approve, reject, or regenerate patches before starting another run.";
+  }
   if (!isAgentRunActive(input)) return null;
 
   if (isGreenfieldRunActive(input.greenfieldRun, input.greenfieldPanelActive)) {
@@ -107,9 +109,6 @@ export function getAgentRunBlockReason(input: AgentRunMutexInput): string | null
 
   if (input.aiPlanStatus === "running") {
     return "AI Plan is running. Wait for it to finish.";
-  }
-  if (input.planApplyPhase === "waiting_for_review") {
-    return "Review pending — approve, reject, or regenerate patches before starting another run.";
   }
   if (input.planApplyPhase === "proposing") {
     return "Apply Plan is generating patches. Wait for proposals to finish.";

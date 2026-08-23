@@ -2,6 +2,10 @@ import { providersForHealthCheck } from "@/app/orchestration/studioActionGuards"
 import type { ProviderInvokeOrchestrationHost } from "@/app/orchestration/providerInvokeTypes";
 import { emptyRunAnalyticsAccumulator } from "@/core/analytics/recordRun";
 import {
+  formatProviderEnablementRoutingLog,
+  listDisabledProviders,
+} from "@/core/providers/providerEnablement";
+import {
   configureGreenfieldCallReservations,
   configureMultiPhaseGreenfieldCallReservations,
 } from "@/core/providers/greenfieldCallBudget";
@@ -12,6 +16,7 @@ import {
 } from "@/core/providers/reliability";
 import { recordProviderReliabilityEvent } from "@/core/providers/reliabilityStore";
 import { buildProviderStatusSnapshot } from "@/core/providers/providerStatus";
+import { normalizeProviderSettings } from "@/core/providers/orchestration";
 import type { AiCallLogEntry, AiCallGatePurpose } from "@/core/providers/costControls";
 import type { ProviderFallbackRequest } from "@/core/providers/costControls";
 import type { ProviderFallbackChoice } from "@/core/providers/reliability";
@@ -143,7 +148,27 @@ export function promptProviderFallbackOrchestration(
 ): Promise<ProviderFallbackChoice> {
   if (!host) return Promise.resolve("cancel");
   return new Promise((resolve) => {
-    host.fallbackResolverRef.current = resolve;
+    let settled = false;
+    const finish = (choice: ProviderFallbackChoice) => {
+      if (settled) return;
+      settled = true;
+      if (fallbackTimer) clearTimeout(fallbackTimer);
+      host.fallbackResolverRef.current = null;
+      host.setProviderFallbackRequest(null);
+      resolve(choice);
+    };
+    // Never block apply-plan / coder forever if the fallback dialog is ignored
+    // (headless e2e, user stepped away). Prefer cancel over an indefinite hang.
+    const fallbackTimer = setTimeout(() => {
+      host.appendGreenfieldRunLog(
+        "provider_fallback",
+        "failed",
+        "Fallback offer timed out — cancelled",
+        "No response to provider fallback within 90s",
+      );
+      finish("cancel");
+    }, 90_000);
+    host.fallbackResolverRef.current = (choice) => finish(choice);
     host.setProviderFallbackRequest(request);
   });
 }
@@ -153,9 +178,9 @@ export function resolveProviderFallbackChoiceOrchestration(
   choice: ProviderFallbackChoice,
 ): void {
   if (!host) return;
-  host.setProviderFallbackRequest(null);
   const resolve = host.fallbackResolverRef.current;
   host.fallbackResolverRef.current = null;
+  host.setProviderFallbackRequest(null);
   resolve?.(choice);
 }
 
@@ -360,7 +385,7 @@ export async function refreshProviderStatusOrchestration(
   host.providerHealthInFlightRef.current = true;
   let settings: ProviderSettings;
   try {
-    settings = await host.api.getProviderSettings();
+    settings = normalizeProviderSettings(await host.api.getProviderSettings());
   } catch {
     host.providerHealthInFlightRef.current = false;
     return;
@@ -374,6 +399,7 @@ export async function refreshProviderStatusOrchestration(
   );
   const checkedAt = new Date().toISOString();
   const targets = providersForHealthCheck(settings);
+  const excluded = listDisabledProviders(settings);
   try {
     if (opts?.logToRun) {
       logProviderReliabilityOrchestration(
@@ -381,7 +407,13 @@ export async function refreshProviderStatusOrchestration(
         {
           kind: "provider_health",
           status: "checked",
-          message: targets.join(", "),
+          message: [
+            targets.join(", ") || "(none)",
+            formatProviderEnablementRoutingLog(settings),
+            excluded.length ? `Excluded: ${excluded.join(", ")}` : "",
+          ]
+            .filter(Boolean)
+            .join(" · "),
         },
         { skipRunLog: false },
       );

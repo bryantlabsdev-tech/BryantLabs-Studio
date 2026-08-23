@@ -14,6 +14,7 @@ import {
 } from "@/monaco/inlineTabCompletion";
 import type { InlineEditSelection } from "@/core/editor/inlineEdit";
 import { selectionFromMonaco } from "@/core/editor/inlineEdit";
+import { publishActiveEditorContext } from "@/core/context/activeEditorContext";
 import type { SymbolEntry } from "@/types";
 import { applyPatchReviewDecorations } from "@/monaco/patchReviewDecorations";
 import type { PatchReviewDecorationInput } from "@/monaco/patchReviewDecorations";
@@ -173,8 +174,53 @@ export function MonacoEditorView({
           () => onSaveRequest(),
         );
       }
+
+      editorInstance.addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP,
+        () => window.dispatchEvent(new CustomEvent("bryantlabs:open-go-to-file")),
+      );
+      editorInstance.addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyG,
+        () => window.dispatchEvent(new CustomEvent("bryantlabs:open-go-to-line")),
+      );
+      editorInstance.addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyO,
+        () => window.dispatchEvent(new CustomEvent("bryantlabs:open-go-to-symbol")),
+      );
+      editorInstance.addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.Backslash,
+        () => window.dispatchEvent(new CustomEvent("bryantlabs:toggle-editor-split")),
+      );
+
+      const publishSelectionContext = () => {
+        if (!relPath) return;
+        const model = editorInstance.getModel();
+        const sel = editorInstance.getSelection();
+        if (!model) return;
+        let selection: InlineEditSelection | null = null;
+        if (sel) {
+          const text = model.getValueInRange(sel);
+          selection = selectionFromMonaco(
+            relPath,
+            sel.startLineNumber,
+            sel.endLineNumber,
+            text,
+          );
+        }
+        publishActiveEditorContext({
+          relPath,
+          absPath,
+          content: model.getValue(),
+          selection,
+          updatedAt: Date.now(),
+        });
+      };
+
+      publishSelectionContext();
+      editorInstance.onDidChangeCursorSelection(() => publishSelectionContext());
+      editorInstance.onDidChangeModelContent(() => publishSelectionContext());
     },
-    [enableInlineEdit, fetchAiInlineSuffix, onContentChange, onSaveRequest, projectSymbols, readOnly, relPath, requestInlineEdit],
+    [enableInlineEdit, fetchAiInlineSuffix, onContentChange, onSaveRequest, projectSymbols, readOnly, relPath, requestInlineEdit, absPath],
   );
 
   useEffect(() => {

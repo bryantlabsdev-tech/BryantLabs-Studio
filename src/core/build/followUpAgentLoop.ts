@@ -1,13 +1,13 @@
 const STORAGE_KEY = "bryantlabs.useAgentLoopForEdits";
 
-/** When true (default), follow-up edits use the reasoning agent loop instead of plan→apply only. */
+/** When true, follow-up edits use the reasoning agent loop instead of structured build_loop. */
 export function readUseAgentLoopForEdits(): boolean {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === null) return true;
+    if (raw === null) return false;
     return raw === "1";
   } catch {
-    return true;
+    return false;
   }
 }
 

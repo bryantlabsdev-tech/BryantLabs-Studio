@@ -4,7 +4,7 @@ import {
   emptyAgentWorkspaceSession,
   formatAgentFullReportJson,
   formatAgentFullReportMarkdown,
-  patchAgentContext,
+  syncAgentSessionFromPipeline,
   type AgentWorkspaceSession,
 } from "@/core/agentWorkspace";
 import type { AgentLoopWorkspaceState } from "@/app/workspace/useAgentLoopWorkspaceState";
@@ -39,7 +39,7 @@ export function useWorkspaceAgentSessionActions(input: {
         return update(base);
       });
     },
-    [input.agentLoop],
+    [input.agentLoop.setAgentSession],
   );
 
   const exportAgentReport = useCallback(
@@ -75,52 +75,48 @@ export function useWorkspaceAgentSessionActions(input: {
 
   const clearAgentSession = useCallback(() => {
     input.agentLoop.setAgentSession(null);
-  }, [input.agentLoop]);
+  }, [input.agentLoop.setAgentSession]);
+
+  const builderSession = input.builderSession;
+  const executionSession = input.executionSession;
+  const builderPhase = builderSession?.currentPhaseId
+    ? builderSession.phases.find((p) => p.id === builderSession.currentPhaseId)
+    : null;
+  const executionStep = executionSession?.currentStepId
+    ? executionSession.steps.find((s) => s.id === executionSession.currentStepId)
+    : null;
+  const proposingFile = executionSession?.files.find((f) => f.status === "proposing");
+  const modelLabel = input.aiPlan?.ok
+    ? `${input.aiPlan.provider} · ${input.aiPlan.model}`
+    : input.greenfieldRun.provider && input.greenfieldRun.model
+      ? `${input.greenfieldRun.provider} · ${input.greenfieldRun.model}`
+      : null;
+  const tokenHint = input.aiPlan?.ok && input.aiPlan.latencyMs
+    ? `${input.aiPlan.latencyMs}ms`
+    : null;
 
   useEffect(() => {
-    input.agentLoop.setAgentSession((prev) => {
-      if (!prev || prev.status === "idle") return prev;
-      let next = prev;
-      const builderSession = input.builderSession;
-      const executionSession = input.executionSession;
-      if (builderSession) {
-        const phase = builderSession.currentPhaseId
-          ? builderSession.phases.find((p) => p.id === builderSession.currentPhaseId)
-          : null;
-        next = patchAgentContext(next, {
-          goal: builderSession.goal.rawPrompt,
-          phase: phase ? `Phase ${phase.index + 1}: ${phase.title}` : null,
-        });
-      }
-      if (executionSession) {
-        const step = executionSession.currentStepId
-          ? executionSession.steps.find((s) => s.id === executionSession.currentStepId)
-          : null;
-        const activeFile = executionSession.files.find((f) => f.status === "proposing");
-        next = patchAgentContext(next, {
-          task: step?.title ?? executionSession.planSummary,
-          file: activeFile?.relPath ?? next.context.file,
-        });
-      }
-      if (input.aiPlan?.ok) {
-        const tokenHint = input.aiPlan.latencyMs ? `${input.aiPlan.latencyMs}ms` : null;
-        next = patchAgentContext(next, {
-          model: `${input.aiPlan.provider} · ${input.aiPlan.model}`,
-          ...(tokenHint ? { tokens: tokenHint } : {}),
-        });
-      } else if (input.greenfieldRun.provider && input.greenfieldRun.model) {
-        next = patchAgentContext(next, {
-          model: `${input.greenfieldRun.provider} · ${input.greenfieldRun.model}`,
-        });
-      }
-      return next;
-    });
+    const setAgentSession = input.agentLoop.setAgentSession;
+    setAgentSession((prev) =>
+      syncAgentSessionFromPipeline(prev, {
+        goal: builderSession?.goal.rawPrompt ?? null,
+        phase: builderPhase ? `Phase ${builderPhase.index + 1}: ${builderPhase.title}` : null,
+        task: executionStep?.title ?? executionSession?.planSummary ?? null,
+        file: proposingFile?.relPath ?? null,
+        model: modelLabel,
+        tokens: tokenHint,
+      }),
+    );
   }, [
-    input.agentLoop,
-    input.builderSession,
-    input.executionSession,
-    input.aiPlan,
-    input.greenfieldRun,
+    input.agentLoop.setAgentSession,
+    builderSession?.goal.rawPrompt,
+    builderPhase?.index,
+    builderPhase?.title,
+    executionStep?.title,
+    executionSession?.planSummary,
+    proposingFile?.relPath,
+    modelLabel,
+    tokenHint,
   ]);
 
   return {

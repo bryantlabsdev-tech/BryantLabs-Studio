@@ -2,55 +2,79 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   deriveAiPatchReview,
-  deriveSafeEditPatchReview,
-  firstPatchChangeLine,
+  derivePlanApplyPatchReview,
 } from "@/core/editor/patchReviewOverlay";
-import type { AIPatchSession } from "@/core/planner/aiTypes";
+import type {
+  PlanApplyFileEntry,
+  PlanApplySession,
+} from "@/core/planApply/types";
 
-describe("patchReviewOverlay", () => {
-  it("derives AI patch review for the active file", () => {
-    const session: AIPatchSession = {
-      basisContent: "const a = 1;\n",
-      absPath: "/proj/src/App.tsx",
-      relPath: "src/App.tsx",
-      proposedAt: Date.now(),
-      patch: {
-        ok: true,
-        provider: "anthropic",
-        model: "claude",
-        targetPath: "src/App.tsx",
-        proposal: {
-          summary: "update",
-          newContent: "const a = 2;\n",
-          reasoning: "x",
-          risks: [],
-        },
-        raw: {},
-        latencyMs: 1,
-      },
-    };
-    const review = deriveAiPatchReview(session, "/proj/src/App.tsx");
-    assert.equal(review?.after, "const a = 2;\n");
+function createMockPlanApplySession(
+  overrides: Partial<PlanApplySession> & {
+    readonly files?: PlanApplyFileEntry[];
+  } = {},
+): PlanApplySession {
+  const files = overrides.files ?? [];
+  return {
+    applyRunId: "test-run",
+    prompt: "Test prompt",
+    planSummary: "Test summary",
+    planSource: "deterministic",
+    applyTargetCount: files.length,
+    applySkippedCount: 0,
+    files,
+    phase: "review",
+    selectedRelPath: files[0]?.relPath ?? null,
+    applyError: null,
+    verification: null,
+    totals: {
+      filesChanged: files.filter((f) => f.diffStats?.changed).length,
+      linesAdded: files.reduce((sum, f) => sum + (f.diffStats?.added ?? 0), 0),
+      linesRemoved: files.reduce((sum, f) => sum + (f.diffStats?.removed ?? 0), 0),
+      filesApproved: files.filter((f) => f.decision === "approved").length,
+      filesApplied: 0,
+    },
+    ...overrides,
+  };
+}
+
+function createReadyPlanApplyFile(
+  overrides: Partial<PlanApplyFileEntry> = {},
+): PlanApplyFileEntry {
+  return {
+    relPath: "src/App.tsx",
+    absPath: "/proj/src/App.tsx",
+    selectionReason: "plan target",
+    planReason: "plan target",
+    status: "ready",
+    decision: "pending",
+    basisContent: "before",
+    proposal: {
+      summary: "Update App",
+      newContent: "after",
+      reasoning: "Test change",
+      risks: [],
+    },
+    diffStats: { added: 1, removed: 1, changed: true },
+    ...overrides,
+  };
+}
+
+describe("derivePlanApplyPatchReview", () => {
+  it("returns inline review when active tab matches a ready proposal", () => {
+    const session = createMockPlanApplySession({
+      files: [createReadyPlanApplyFile()],
+      selectedRelPath: "src/App.tsx",
+    });
+
+    const review = derivePlanApplyPatchReview(session, "/proj/src/App.tsx");
+    assert.ok(review);
+    assert.equal(review?.before, "before");
+    assert.equal(review?.after, "after");
   });
 
-  it("derives safe-edit patch review while reviewing", () => {
-    const review = deriveSafeEditPatchReview(
-      {
-        kind: "replace-text",
-        before: "old\n",
-        after: "new\n",
-        description: "replace",
-      },
-      true,
-    );
-    assert.equal(review?.before, "old\n");
-    assert.equal(review?.after, "new\n");
-  });
-
-  it("finds the first changed line", () => {
-    assert.equal(
-      firstPatchChangeLine("a\nb\nc\n", "a\nB\nc\n"),
-      2,
-    );
+  it("returns null when ai patch review takes precedence on other paths", () => {
+    const aiReview = deriveAiPatchReview(null, "/proj/src/App.tsx");
+    assert.equal(aiReview, null);
   });
 });

@@ -29,6 +29,9 @@ export type AgentMode = "single" | "pipeline";
 /** Safe = empty folders only; Workspace = overwrite existing project files. */
 export type FileWriteMode = "safe" | "workspace";
 
+/** Standard = same model for all stages; Economy = cheaper coder/repair + tighter caps. */
+export type CostMode = "standard" | "economy";
+
 /** Sanitized settings sent to the renderer — never contains a raw API key. */
 export interface ProviderSettings {
   /** The provider the user has selected (the "requested" provider). */
@@ -75,6 +78,10 @@ export interface ProviderSettings {
   fileWriteMode?: FileWriteMode;
   /** Max output tokens for planner generate/retry (Gemini thinking models need headroom). */
   plannerMaxOutputTokens?: number;
+  /** When false, provider is excluded from routing, health checks, and fallbacks. */
+  providerEnabled?: Partial<Record<ProviderId, boolean>>;
+  /** Economy uses cheaper coder/repair models and skips planner when possible. */
+  costMode?: CostMode;
 }
 
 /** Partial update from the renderer. A provided `geminiApiKey` is stored as-is. */
@@ -106,6 +113,8 @@ export interface ProviderSettingsInput {
   askBeforeFallback?: boolean;
   fileWriteMode?: FileWriteMode;
   plannerMaxOutputTokens?: number;
+  providerEnabled?: Partial<Record<ProviderId, boolean>>;
+  costMode?: CostMode;
 }
 
 export interface HealthCheck {

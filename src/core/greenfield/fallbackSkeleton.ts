@@ -116,6 +116,34 @@ export function isFallbackSkeletonAppContent(content: string): boolean {
   );
 }
 
+/**
+ * Detect incomplete App shells that ship inline stub pages instead of
+ * wiring real `src/pages/*` modules (common provider truncation failure).
+ */
+export function isIncompleteStubAppContent(content: string): boolean {
+  if (!content.trim()) return false;
+  if (
+    /Stub pages|these will be replaced once the real page modules|Using inline components avoids TS\d+/i.test(
+      content,
+    )
+  ) {
+    return true;
+  }
+  if (/Page scaffold — generated to complete routing/i.test(content)) {
+    return true;
+  }
+  const hasRoutes = /<Routes[\s>]/.test(content);
+  const importsPages =
+    /from\s+["']\.\/pages\//.test(content) ||
+    /from\s+["']@\/pages\//.test(content) ||
+    /from\s+["']\.\.\/pages\//.test(content);
+  if (hasRoutes && !importsPages) {
+    const inlineFns = (content.match(/function\s+[A-Z]\w*\s*\(/g) ?? []).length;
+    if (inlineFns >= 3) return true;
+  }
+  return false;
+}
+
 function extractAppTitle(userPrompt: string | undefined): string {
   if (!userPrompt?.trim()) return "App";
   const called = userPrompt.match(/\bcalled\s+([A-Za-z][\w-]*)/i);

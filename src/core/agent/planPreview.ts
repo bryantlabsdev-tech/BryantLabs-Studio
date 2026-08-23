@@ -1,3 +1,9 @@
+import {
+  consultationPreviewLine,
+  intentIsConsultation,
+  type AgentPromptIntent,
+} from "@/core/agent/agentIntentRouter";
+
 const FEATURE_VERB_RE =
   /\b(?:add|create|introduce|enable|implement)\s+(?:a\s+|an\s+|the\s+)?([a-z][\w\s-]{0,40})/i;
 
@@ -16,7 +22,17 @@ function extractFeatureAction(prompt: string): string | null {
   return `Adding ${feature}`;
 }
 
-export function buildPlanPreviewLine(prompt: string): string {
+export function buildPlanPreviewLine(
+  prompt: string,
+  promptIntent?: AgentPromptIntent,
+): string {
+  if (promptIntent && intentIsConsultation(promptIntent)) {
+    return consultationPreviewLine(promptIntent);
+  }
+  if (promptIntent === "run" || promptIntent === "terminal") {
+    return consultationPreviewLine(promptIntent);
+  }
+
   const trimmed = prompt.trim();
   const lower = trimmed.toLowerCase();
   const actions: string[] = [];

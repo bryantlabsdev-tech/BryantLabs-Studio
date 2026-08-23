@@ -8,7 +8,8 @@ export type PlanApplyPhase =
   | "waiting_for_review"
   | "applying"
   | "verifying"
-  | "done";
+  | "done"
+  | "failed";
 
 export type PlanApplyFileStatus =
   | "pending"
@@ -41,6 +42,8 @@ export interface PlanApplyFileEntry {
   status: PlanApplyFileStatus;
   decision: PlanApplyFileDecision;
   basisContent?: string;
+  /** Per-hunk merged content overriding proposal.newContent when set. */
+  appliedNewContent?: string;
   proposal?: AIPatchProposal;
   patch?: AIPatchResult;
   error?: string;

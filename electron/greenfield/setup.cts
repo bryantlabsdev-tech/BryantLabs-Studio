@@ -6,6 +6,15 @@ import {
   repairPackageJsonOnDiskForEtarget,
   sanitizePackageJsonOnDisk,
 } from "./packageJsonSanitizer.cjs";
+import {
+  buildSpawnDiagnostics,
+  formatNpmInstallFailureMessage,
+  formatPosixSpawnError,
+  logSpawnDiagnostics,
+  resolveShellCommand,
+  resolveSpawnCwdSync,
+  spawnProcessEnv,
+} from "../processSpawn.cjs";
 
 /**
  * Post-generation setup (Phase 10): npm install, then typecheck + build.
@@ -13,9 +22,9 @@ import {
  */
 
 const OUTPUT_CAP = 200_000;
-const INSTALL_TIMEOUT_MS = 600_000;
+const INSTALL_TIMEOUT_MS = 180_000;
 const TYPECHECK_TIMEOUT_MS = 120_000;
-const BUILD_TIMEOUT_MS = 300_000;
+const BUILD_TIMEOUT_MS = 120_000;
 
 export interface CommandResult {
   command: string;
@@ -74,6 +83,11 @@ export function runGreenfieldCommand(
   root: string,
   timeoutMs: number,
 ): Promise<CommandResult> {
+  const resolvedCommand = resolveShellCommand(command);
+  const { cwd, exists } = resolveSpawnCwdSync(root);
+  const diagnostics = buildSpawnDiagnostics({ command: resolvedCommand, cwd });
+  logSpawnDiagnostics(diagnostics, "greenfield:command");
+
   return new Promise((resolve) => {
     const start = Date.now();
     let stdout = "";
@@ -92,15 +106,13 @@ export function runGreenfieldCommand(
       }
     };
 
-    const env = {
-      ...process.env,
-      PATH: `${process.env.PATH ?? ""}:/usr/local/bin:/opt/homebrew/bin`,
+    const env = spawnProcessEnv({
       CI: "1",
       FORCE_COLOR: "0",
-    };
+    });
 
-    const child = spawn(command, {
-      cwd: root,
+    const child = spawn(resolvedCommand, {
+      cwd: exists ? cwd : root,
       shell: true,
       env,
       windowsHide: true,
@@ -117,7 +129,7 @@ export function runGreenfieldCommand(
       clearTimeout(timer);
       const combined = `${stdout}\n${stderr}`;
       resolve({
-        command,
+        command: resolvedCommand,
         ok: exitCode === 0 && !timedOut,
         exitCode,
         stdout,
@@ -133,7 +145,7 @@ export function runGreenfieldCommand(
     child.stdout?.on("data", (d: Buffer) => append("out", d.toString()));
     child.stderr?.on("data", (d: Buffer) => append("err", d.toString()));
     child.on("error", (err) => {
-      append("err", `\n${String(err)}`);
+      append("err", `\n${formatPosixSpawnError(err)}`);
       finish(null);
     });
     child.on("close", (code) => finish(code));
@@ -143,38 +155,72 @@ export function runGreenfieldCommand(
 export async function runGreenfieldSetup(
   root: string,
 ): Promise<GreenfieldSetupResult> {
+  const { cwd, exists } = resolveSpawnCwdSync(root);
+  if (!exists) {
+    const diagnostics = buildSpawnDiagnostics({
+      command: resolveShellCommand("npm install"),
+      cwd,
+    });
+    logSpawnDiagnostics(diagnostics, "greenfield:setup");
+    const install: CommandResult = {
+      command: resolveShellCommand("npm install"),
+      ok: false,
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      durationMs: 0,
+      errorCount: 0,
+      warningCount: 0,
+      timedOut: false,
+      truncated: false,
+    };
+    return {
+      ok: false,
+      install,
+      error: formatNpmInstallFailureMessage({ cwd }),
+    };
+  }
+
   const dependencyRepairs: string[] = [];
-  const preSanitize = await sanitizePackageJsonOnDisk(root);
+  const preSanitize = await sanitizePackageJsonOnDisk(cwd);
   if (preSanitize.repairs.length > 0) {
     dependencyRepairs.push(...preSanitize.repairs);
   }
 
-  let install = await runGreenfieldCommand("npm install", root, INSTALL_TIMEOUT_MS);
+  let install = await runGreenfieldCommand("npm install", cwd, INSTALL_TIMEOUT_MS);
   let installRetried = false;
 
   if (!install.ok && isNpmEtargetFailure(install.stdout, install.stderr)) {
     const target = parseEtargetPackage(install.stdout, install.stderr);
     if (target) {
-      const repaired = await repairPackageJsonOnDiskForEtarget(root, target.packageName);
+      const repaired = await repairPackageJsonOnDiskForEtarget(cwd, target.packageName);
       if (repaired.changed) {
         dependencyRepairs.push(...repaired.repairs);
         installRetried = true;
-        install = await runGreenfieldCommand("npm install", root, INSTALL_TIMEOUT_MS);
+        install = await runGreenfieldCommand("npm install", cwd, INSTALL_TIMEOUT_MS);
       }
     }
   }
 
   if (!install.ok) {
+    const npmFailure = formatNpmInstallFailureMessage({
+      cwd,
+      stdout: install.stdout,
+      stderr: install.stderr,
+    });
     return {
       ok: false,
       install,
-      error: formatCommandFailure("npm install", install),
+      error:
+        npmFailure === "npm install failed."
+          ? formatCommandFailure("npm install", install)
+          : npmFailure,
       ...(dependencyRepairs.length > 0 ? { dependencyRepairs } : {}),
       ...(installRetried ? { installRetried: true } : {}),
     };
   }
 
-  const typecheck = await runGreenfieldTypecheck(root);
+  const typecheck = await runGreenfieldTypecheck(cwd);
   if (!typecheck.ok) {
     const typecheckDetails = buildTypeScriptCheckDetails(typecheck);
     const n = typecheckDetails.diagnostics.filter((d) => d.category === "error")
@@ -193,7 +239,7 @@ export async function runGreenfieldSetup(
     };
   }
 
-  const build = await runGreenfieldBuild(root);
+  const build = await runGreenfieldBuild(cwd);
   if (!build.ok) {
     return {
       ok: false,

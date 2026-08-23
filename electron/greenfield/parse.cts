@@ -110,14 +110,16 @@ function trimContent(text: string): string {
 function formatParseError(diagnostics: GreenfieldParseDiagnostics): string {
   const parsed = diagnostics.parsedFiles.length;
   const expected = GREENFIELD_PATHS.length;
-  if (parsed > 0) {
-    return `Greenfield parse incomplete: parsed ${parsed}/${expected} expected files. Missing: [${diagnostics.missingFiles.join(", ")}].`;
-  }
   const parts: string[] = [];
-  if (diagnostics.missingFiles.length > 0) {
+  if (diagnostics.missingFiles.length > 0 || parsed < expected) {
     parts.push(
-      `Missing required files: ${diagnostics.missingFiles.join(", ")}`,
+      `Greenfield parse incomplete: parsed ${parsed}/${expected} expected files. Missing: [${diagnostics.missingFiles.join(", ")}].`,
     );
+    if (diagnostics.missingFiles.length > 0) {
+      parts.push(
+        `Missing required files: ${diagnostics.missingFiles.join(", ")}`,
+      );
+    }
   }
   if (diagnostics.unexpectedFiles.length > 0) {
     parts.push(
@@ -125,7 +127,7 @@ function formatParseError(diagnostics: GreenfieldParseDiagnostics): string {
     );
   }
   if (parts.length > 0) return parts.join(". ");
-  return `Greenfield parse incomplete: parsed 0/${expected} expected files.`;
+  return `Greenfield parse incomplete: parsed ${parsed}/${expected} expected files.`;
 }
 
 export function parseGreenfieldResponseDetailed(

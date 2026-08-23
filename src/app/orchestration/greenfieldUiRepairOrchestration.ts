@@ -57,6 +57,7 @@ export interface GreenfieldUiAuditAndRepairResult {
   readonly repaired: boolean;
   readonly finalMessage: string;
   readonly uiAuditHistory: readonly UiAuditHistoryEntry[];
+  readonly setup: GreenfieldSetupResult;
 }
 
 async function readProjectFile(
@@ -197,6 +198,7 @@ function finishAdvisoryUiAudit(
     repaired,
     finalMessage: msg,
     uiAuditHistory: history,
+    setup,
   };
 }
 
@@ -306,6 +308,7 @@ export async function runGreenfieldUiAuditAndRepair(
       repaired: false,
       finalMessage: msg,
       uiAuditHistory: history,
+      setup,
     };
   }
 
@@ -338,7 +341,7 @@ export async function runGreenfieldUiAuditAndRepair(
     const msg = successMessage(audit, false);
     host.updateGreenfieldRun({ uiAuditResult: audit, uiAuditHistory: history });
     logRunComplete(true);
-    return { ok: true, audit, repaired: false, finalMessage: msg, uiAuditHistory: history };
+    return { ok: true, audit, repaired: false, finalMessage: msg, uiAuditHistory: history, setup };
   }
 
   host.appendGreenfieldRunLog(
@@ -355,7 +358,7 @@ export async function runGreenfieldUiAuditAndRepair(
     const msg = "UI audit failed and App.tsx is not readable.";
     host.updateGreenfieldRun({ uiAuditResult: audit, uiAuditHistory: history });
     logRunComplete(false);
-    return { ok: false, audit, repaired: false, finalMessage: msg, uiAuditHistory: history };
+    return { ok: false, audit, repaired: false, finalMessage: msg, uiAuditHistory: history, setup };
   }
 
   const repair = await applyDeterministicUiRepair(
@@ -373,7 +376,7 @@ export async function runGreenfieldUiAuditAndRepair(
     host.appendGreenfieldRunLog("ui_repair", "failed", "UI repair failed", msg);
     host.updateGreenfieldRun({ uiAuditResult: audit, uiAuditHistory: history });
     logRunComplete(false);
-    return { ok: false, audit, repaired: false, finalMessage: msg, uiAuditHistory: history };
+    return { ok: false, audit, repaired: false, finalMessage: msg, uiAuditHistory: history, setup };
   }
 
   host.appendGreenfieldRunLog("typescript", "running", "TypeScript check after UI repair");
@@ -383,7 +386,7 @@ export async function runGreenfieldUiAuditAndRepair(
     host.appendGreenfieldRunLog("typescript", "failed", "TypeScript failed after UI repair");
     host.updateGreenfieldRun({ uiAuditResult: audit, uiAuditHistory: history });
     logRunComplete(false);
-    return { ok: false, audit, repaired: true, finalMessage: msg, uiAuditHistory: history };
+    return { ok: false, audit, repaired: true, finalMessage: msg, uiAuditHistory: history, setup: nextSetup };
   }
   host.appendGreenfieldRunLog("typescript", "success", "TypeScript passed after UI repair");
 
@@ -394,7 +397,7 @@ export async function runGreenfieldUiAuditAndRepair(
     host.appendGreenfieldRunLog("build", "failed", "Build failed after UI repair");
     host.updateGreenfieldRun({ uiAuditResult: audit, uiAuditHistory: history });
     logRunComplete(false);
-    return { ok: false, audit, repaired: true, finalMessage: msg, uiAuditHistory: history };
+    return { ok: false, audit, repaired: true, finalMessage: msg, uiAuditHistory: history, setup: nextSetup };
   }
   host.appendGreenfieldRunLog("build", "success", "Build passed after UI repair");
 
@@ -403,7 +406,7 @@ export async function runGreenfieldUiAuditAndRepair(
     const msg = preview.error ?? "Preview failed after UI repair.";
     host.updateGreenfieldRun({ uiAuditResult: audit, uiAuditHistory: history });
     logRunComplete(false);
-    return { ok: false, audit, repaired: true, finalMessage: msg, uiAuditHistory: history };
+    return { ok: false, audit, repaired: true, finalMessage: msg, uiAuditHistory: history, setup: nextSetup };
   }
 
   host.appendGreenfieldRunLog(
@@ -435,7 +438,7 @@ export async function runGreenfieldUiAuditAndRepair(
       setupResult: nextSetup,
     });
     logRunComplete(false);
-    return { ok: false, audit, repaired: true, finalMessage: msg, uiAuditHistory: history };
+    return { ok: false, audit, repaired: true, finalMessage: msg, uiAuditHistory: history, setup: nextSetup };
   }
 
   host.appendGreenfieldRunLog(
@@ -451,7 +454,7 @@ export async function runGreenfieldUiAuditAndRepair(
   });
   const msg = successMessage(audit, true);
   logRunComplete(true);
-  return { ok: true, audit, repaired: true, finalMessage: msg, uiAuditHistory: history };
+  return { ok: true, audit, repaired: true, finalMessage: msg, uiAuditHistory: history, setup: nextSetup };
 }
 
 export function markGreenfieldUiAuditFailure(
@@ -484,6 +487,7 @@ export function markGreenfieldUiAuditAdvisorySuccess(
   history: readonly UiAuditHistoryEntry[],
   runStartedAt: number | null | undefined,
   repaired: boolean,
+  setup?: GreenfieldSetupResult,
 ): void {
   const endedAt = Date.now();
   const durationMs =
@@ -501,6 +505,7 @@ export function markGreenfieldUiAuditAdvisorySuccess(
     lastSuccessfulRunAt: endedAt,
     uiAuditResult: advisoryAudit,
     uiAuditHistory: history,
+    ...(setup ? { setupResult: setup } : {}),
     finalMessage,
     latestAction: createLatestAction("success", "Greenfield complete (UI audit advisory)", {
       stage: "ui_audit",

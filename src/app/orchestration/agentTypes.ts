@@ -48,6 +48,9 @@ export interface AgentOrchestrationHost {
   readonly applyPlanSuccessRef: MutableRefObject<ApplyPlanSuccessOutcome | null>;
   readonly createPlanErrorRef: MutableRefObject<string | null>;
   readonly editExplorationContentsRef: MutableRefObject<readonly ReferencedFileContent[]>;
+  readonly activeEditorContextRef: MutableRefObject<
+    import("@/core/context/activeEditorContext").ActiveEditorContext | null
+  >;
   readonly setAgentLoopSession: Dispatch<
     SetStateAction<AgentLoopSession | null>
   >;

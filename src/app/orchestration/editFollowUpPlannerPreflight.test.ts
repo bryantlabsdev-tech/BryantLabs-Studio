@@ -105,6 +105,7 @@ function createMockPlanningHost(input: {
     aiPlanRef,
     createPlanErrorRef,
     editExplorationContentsRef: { current: [] },
+    activeEditorContextRef: { current: null },
     setPlan: (value) => {
       planState = typeof value === "function" ? value(planState) : value;
       if (!input.stalePlanState) {

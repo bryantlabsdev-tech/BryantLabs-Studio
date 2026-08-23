@@ -56,7 +56,6 @@ export function PipelineView() {
     continueMultiAgentPipeline,
     continueMultiAgentPipelineRepair,
     cancelMultiAgentPipeline,
-    approveAllPlanApplyFiles,
     autoFixSession,
     setCenterTab,
     setRailTool,
@@ -116,7 +115,7 @@ export function PipelineView() {
           className="prov-btn"
           onClick={() => setRailTool("providers")}
         >
-          Open Providers
+          Open Settings
         </button>
       </div>
     );
@@ -199,7 +198,6 @@ export function PipelineView() {
               className="prov-btn prov-btn--primary"
               disabled={!canContinue}
               onClick={() => {
-                approveAllPlanApplyFiles();
                 void continueMultiAgentPipeline();
               }}
             >

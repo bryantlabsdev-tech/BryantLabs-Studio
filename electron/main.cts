@@ -1,6 +1,16 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from "electron";
+
+// Chromium HTTP/2 in Electron truncates some JSON POST bodies (~8 KiB), which
+// Anthropic rejects as "request body is not valid JSON". Force HTTP/1.1 before ready.
+app.commandLine.appendSwitch("disable-http2");
 import * as path from "node:path";
 import { configureE2eRuntimePaths } from "./e2eRuntime.cjs";
+import { resolveAppIconPath } from "./appIcon.cjs";
+import {
+  approveWorkspaceRoot,
+  isApprovedWorkspaceRoot,
+  normalizeWorkspaceRoot,
+} from "./approvedWorkspaceRoot.cjs";
 
 configureE2eRuntimePaths();
 import { promises as fs } from "node:fs";
@@ -32,6 +42,11 @@ import {
   readFeatureInventory,
   writeFeatureInventory,
 } from "./features.cjs";
+import {
+  readFollowUpChat,
+  writeFollowUpChat,
+  normalizeFollowUpChatRecord,
+} from "./followUpChatStore.cjs";
 import { applyEdit, createProjectFile, deleteProjectFile, writeVerified } from "./fileWriter.cjs";
 import { runVerification, type VerificationResult } from "./verifier.cjs";
 import {
@@ -72,6 +87,7 @@ import {
   getPreviewState,
   probePreviewUrl,
   auditGreenfieldPreviewUrl,
+  isAllowedPreviewUrl,
   type GeneratedFile,
 } from "./greenfield/index.cjs";
 import {
@@ -87,6 +103,7 @@ import {
 import { registerSemanticIndexIpc } from "./semanticIndex/register.cjs";
 import { registerProjectIndexIpc } from "./projectIndex/register.cjs";
 import { registerProjectProblemsIpc } from "./projectProblems/register.cjs";
+import { registerShadowWorkspaceIpc } from "./shadowWorkspace.cjs";
 import {
   activateProjectIndex,
   getCachedProjectScan,
@@ -156,6 +173,17 @@ interface ReadFileResult {
   reason?: string;
 }
 
+function rejectUnapprovedRoot(root: unknown): string | { error: string } {
+  if (typeof root !== "string" || root.trim().length === 0) {
+    return { error: "Invalid project path." };
+  }
+  const resolved = normalizeWorkspaceRoot(root);
+  if (!isApprovedWorkspaceRoot(resolved, projectRoot)) {
+    return { error: "Path is not an approved project folder." };
+  }
+  return resolved;
+}
+
 /** Ensure a resolved path is inside the opened project root (no traversal). */
 function isWithinProject(target: string): boolean {
   if (!projectRoot) return false;
@@ -206,6 +234,7 @@ function languageFromExtension(filePath: string): string | null {
 }
 
 function createWindow(): void {
+  const iconPath = resolveAppIconPath();
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -214,6 +243,7 @@ function createWindow(): void {
     backgroundColor: "#0b0d12",
     show: false,
     title: "BryantLabs Studio",
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -240,11 +270,12 @@ function createWindow(): void {
 
 /** Switch the open project — tears down PTYs, preview, and stale index work first. */
 async function switchProjectRoot(selected: string): Promise<void> {
-  await prepareProjectSwitch(selected);
-  projectRoot = selected;
+  const approved = approveWorkspaceRoot(selected);
+  await prepareProjectSwitch(approved);
+  projectRoot = approved;
   lastEdit = null;
-  hydrateProjectAfterSwitch(selected);
-  await activateProjectIndex(selected, () => mainWindow);
+  hydrateProjectAfterSwitch(approved);
+  await activateProjectIndex(approved, () => mainWindow);
 }
 
 function notifyIndexFileChange(filePath: string, deleted = false): void {
@@ -498,6 +529,25 @@ function registerIpcHandlers(): void {
     return readFeatureInventory(projectRoot);
   });
 
+  ipcMain.handle("project:followUpChat:read", async () => {
+    if (!projectRoot) return null;
+    return readFollowUpChat(projectRoot);
+  });
+
+  ipcMain.handle(
+    "project:followUpChat:write",
+    async (_event, messages: unknown): Promise<{ ok: boolean; reason?: string }> => {
+      if (!projectRoot) {
+        return { ok: false, reason: "No project open." };
+      }
+      const record = normalizeFollowUpChatRecord(
+        { version: 1, projectPath: projectRoot, updatedAt: Date.now(), messages },
+        projectRoot,
+      );
+      return writeFollowUpChat(projectRoot, record.messages);
+    },
+  );
+
   ipcMain.handle(
     "project:features:write",
     async (_event, inventory: unknown): Promise<{ ok: boolean; reason?: string }> => {
@@ -647,6 +697,20 @@ function registerIpcHandlers(): void {
     if (typeof provider !== "string") {
       return { ok: false, error: "Invalid provider." };
     }
+    const e2e =
+      Boolean(process.env.BRYANTLABS_E2E_PROJECT) ||
+      process.env.BRYANTLABS_MOCK_PROVIDER === "1";
+    if (!e2e && mainWindow && !mainWindow.isDestroyed()) {
+      const { response } = await dialog.showMessageBox(mainWindow, {
+        type: "warning",
+        buttons: ["Reveal", "Cancel"],
+        defaultId: 1,
+        cancelId: 1,
+        message: "Reveal stored API key?",
+        detail: "The key will be shown in Settings.",
+      });
+      if (response !== 0) return { ok: false, error: "Cancelled." };
+    }
     return revealApiKey(provider as ProviderId);
   });
 
@@ -654,6 +718,33 @@ function registerIpcHandlers(): void {
     "providers:health",
     async (_event, provider: ProviderId) => checkHealth(provider),
   );
+
+  ipcMain.handle("providers:cancelActive", async () => {
+    const { cancelActiveProviderRequests } = await import(
+      "./providers/providerRequestRegistry.cjs"
+    );
+    return { cancelled: cancelActiveProviderRequests("user_cancel") };
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const transportDiag = require("./providers/transportDiagnostics.cjs") as typeof import("./providers/transportDiagnostics.cjs");
+  transportDiag.setTransportDiagnosticsBroadcast((event) => {
+    if (!transportDiag.isTransportEventInteresting(event)) return;
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send("providers:transport-event", event);
+      }
+    }
+  });
+  ipcMain.handle("providers:getTransportDiagnostics", async () =>
+    transportDiag
+      .getTransportDiagnosticsRing()
+      .filter(transportDiag.isTransportEventInteresting),
+  );
+  ipcMain.handle("providers:clearTransportDiagnostics", async () => {
+    transportDiag.clearTransportDiagnosticsRing();
+    return { ok: true as const };
+  });
 
   ipcMain.handle(
     "providers:test",
@@ -702,6 +793,66 @@ function registerIpcHandlers(): void {
       ),
   );
 
+  ipcMain.handle("providers:applyPlanBatchPing", async () => {
+    console.error("[ipc:applyPlanBatchPing] ok");
+    return { ok: true as const };
+  });
+
+  ipcMain.handle(
+    "providers:applyPlanBatchJson",
+    async (_event, payloadJson: unknown) => {
+      const started = Date.now();
+      console.error(
+        `[ipc:applyPlanBatchJson] start bytes=${typeof payloadJson === "string" ? payloadJson.length : -1}`,
+      );
+      if (typeof payloadJson !== "string" || payloadJson.length === 0) {
+        return {
+          ok: false,
+          provider: "anthropic",
+          model: "",
+          raw: null,
+          latencyMs: 0,
+          error: "Apply Plan payload missing or not a JSON string.",
+          missingPaths: [],
+        };
+      }
+      let parsed: {
+        provider?: ProviderId;
+        prompt?: string;
+        context?: PlanContext;
+        files?: PatchTargetFile[];
+        meta?: { planSummary: string; targetPaths: string[]; repair?: boolean };
+      };
+      try {
+        parsed = JSON.parse(payloadJson) as typeof parsed;
+      } catch (err) {
+        return {
+          ok: false,
+          provider: "anthropic",
+          model: "",
+          raw: null,
+          latencyMs: Date.now() - started,
+          error: `Invalid Apply Plan JSON payload: ${err instanceof Error ? err.message : String(err)}`,
+          missingPaths: [],
+        };
+      }
+      const provider = parsed.provider ?? "anthropic";
+      const prompt = typeof parsed.prompt === "string" ? parsed.prompt : "";
+      const files = Array.isArray(parsed.files) ? parsed.files : [];
+      const context = (parsed.context ?? {}) as PlanContext;
+      const meta =
+        parsed.meta &&
+        typeof parsed.meta.planSummary === "string" &&
+        Array.isArray(parsed.meta.targetPaths)
+          ? parsed.meta
+          : { planSummary: "", targetPaths: [] };
+      console.error(
+        `[ipc:applyPlanBatchJson] parsed provider=${provider} files=${files.length} promptChars=${prompt.length}`,
+      );
+      return runApplyPlanBatchPatch(provider, prompt, context, files, meta);
+    },
+  );
+
   ipcMain.handle(
     "providers:applyPlanBatch",
     async (
@@ -711,8 +862,11 @@ function registerIpcHandlers(): void {
       context: PlanContext,
       files: PatchTargetFile[],
       meta?: { planSummary: string; targetPaths: string[]; repair?: boolean },
-    ) =>
-      runApplyPlanBatchPatch(
+    ) => {
+      console.error(
+        `[ipc:applyPlanBatch] provider=${provider} files=${Array.isArray(files) ? files.length : -1}`,
+      );
+      return runApplyPlanBatchPatch(
         provider,
         typeof prompt === "string" ? prompt : "",
         context,
@@ -722,7 +876,8 @@ function registerIpcHandlers(): void {
         Array.isArray(meta.targetPaths)
           ? meta
           : { planSummary: "", targetPaths: [] },
-      ),
+      );
+    },
   );
 
   ipcMain.handle(
@@ -760,7 +915,7 @@ function registerIpcHandlers(): void {
         if (result.canceled || result.filePaths.length === 0) {
           return null;
         }
-        const selected = path.resolve(result.filePaths[0]!);
+        const selected = approveWorkspaceRoot(result.filePaths[0]!);
         if (writeMode === "safe" && !(await isEmptyDirectory(selected))) {
           return {
             error:
@@ -847,27 +1002,25 @@ function registerIpcHandlers(): void {
       | { error: string; code?: typeof FOLDER_NOT_EMPTY_CODE }
     > => {
       try {
-      if (typeof root !== "string" || root.trim().length === 0) {
-        return { error: "Invalid project path." };
-      }
-      const resolved = path.resolve(root.trim());
+      const approved = rejectUnapprovedRoot(root);
+      if (typeof approved !== "string") return approved;
       const settings = await loadRawSettings();
       const writeMode = settings.fileWriteMode ?? "workspace";
-      if (writeMode === "safe" && !(await isEmptyDirectory(resolved))) {
+      if (writeMode === "safe" && !(await isEmptyDirectory(approved))) {
         const message = folderNotEmptyErrorMessage();
-        console.warn(`[greenfield:write] blocked — ${message} path=${resolved}`);
+        console.warn(`[greenfield:write] blocked — ${message} path=${approved}`);
         return {
           error: message,
           code: FOLDER_NOT_EMPTY_CODE,
         };
       }
       const result = await writeGreenfieldFiles(
-        resolved,
+        approved,
         Array.isArray(files) ? files : [],
         { mode: writeMode },
       );
       if (result.ok) {
-        await switchProjectRoot(resolved);
+        await switchProjectRoot(approved);
         return { ok: true, written: result.written, logs: result.logs };
       }
       return {
@@ -888,12 +1041,12 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     "greenfield:nextNumberedFolder",
     async (_event, current: unknown) => {
-      if (typeof current !== "string" || current.trim().length === 0) {
-        return { error: "Invalid project path." };
-      }
+      const approved = rejectUnapprovedRoot(current);
+      if (typeof approved !== "string") return approved;
       try {
-        const next = await findNextNumberedSiblingFolder(path.resolve(current.trim()));
+        const next = await findNextNumberedSiblingFolder(approved);
         await fs.mkdir(next, { recursive: true });
+        approveWorkspaceRoot(next);
         return { path: next, name: path.basename(next) };
       } catch (err) {
         const message =
@@ -904,23 +1057,23 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle("greenfield:clearFolder", async (_event, root: unknown) => {
-    if (typeof root !== "string" || root.trim().length === 0) {
-      return { error: "Invalid project path." };
-    }
-    const cleared = await clearDirectoryContents(path.resolve(root.trim()));
+    const approved = rejectUnapprovedRoot(root);
+    if (typeof approved !== "string") return approved;
+    const cleared = await clearDirectoryContents(approved);
     if (!cleared.ok) return { error: cleared.error };
     return { ok: true as const };
   });
 
   ipcMain.handle("greenfield:setup", async (_event, root: string) => {
-    if (typeof root !== "string") return { error: "Invalid project path." };
-    return runGreenfieldSetup(path.resolve(root));
+    const approved = rejectUnapprovedRoot(root);
+    if (typeof approved !== "string") return approved;
+    return runGreenfieldSetup(approved);
   });
 
   ipcMain.handle("greenfield:typecheck", async (_event, root: string) => {
-    if (typeof root !== "string") return { error: "Invalid project path." };
-    const resolved = path.resolve(root);
-    const typecheck = await runGreenfieldTypecheck(resolved);
+    const approved = rejectUnapprovedRoot(root);
+    if (typeof approved !== "string") return approved;
+    const typecheck = await runGreenfieldTypecheck(approved);
     const { buildTypeScriptCheckDetails } = await import(
       "./greenfield/tscDiagnostics.cjs"
     );
@@ -933,13 +1086,15 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("greenfield:build", async (_event, root: string) => {
-    if (typeof root !== "string") return { error: "Invalid project path." };
-    return { build: await runGreenfieldBuild(path.resolve(root)) };
+    const approved = rejectUnapprovedRoot(root);
+    if (typeof approved !== "string") return approved;
+    return { build: await runGreenfieldBuild(approved) };
   });
 
   ipcMain.handle("greenfield:previewStart", async (_event, root: string) => {
-    if (typeof root !== "string") return { ok: false, error: "Invalid project path." };
-    return startPreview(path.resolve(root));
+    const approved = rejectUnapprovedRoot(root);
+    if (typeof approved !== "string") return { ok: false, error: approved.error };
+    return startPreview(approved);
   });
 
   ipcMain.handle("greenfield:previewStop", async () => {
@@ -950,12 +1105,12 @@ function registerIpcHandlers(): void {
   ipcMain.handle("greenfield:previewState", async () => getPreviewState());
 
   ipcMain.handle("greenfield:previewProbe", async (_event, url: string) => {
-    if (typeof url !== "string") {
+    if (typeof url !== "string" || !isAllowedPreviewUrl(url)) {
       return {
         ok: false,
         httpStatus: null,
         contentType: null,
-        error: "Invalid URL.",
+        error: "Invalid preview URL.",
         errorKind: "unknown" as const,
         probedAt: new Date().toISOString(),
       };
@@ -964,7 +1119,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("greenfield:uiAudit", async (_event, url: string) => {
-    if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+    if (typeof url !== "string" || !isAllowedPreviewUrl(url)) {
       return {
         ok: false,
         snapshot: null,
@@ -982,8 +1137,8 @@ function registerIpcHandlers(): void {
     return { ok: true };
   });
 
-  registerTerminalIpc(ipcMain, () => mainWindow, isWithinProject);
-  registerTerminalExecIpc(ipcMain, isWithinProject);
+  registerTerminalIpc(ipcMain, () => mainWindow, isWithinProject, () => projectRoot);
+  registerTerminalExecIpc(ipcMain, isWithinProject, () => projectRoot);
 
   registerProjectGrepIpc(ipcMain, () => projectRoot);
 
@@ -991,6 +1146,8 @@ function registerIpcHandlers(): void {
   registerProjectProblemsIpc(ipcMain, () => projectRoot, () => mainWindow);
 
   registerSemanticIndexIpc(ipcMain, () => projectRoot);
+
+  registerShadowWorkspaceIpc(ipcMain, () => projectRoot);
 
   registerMcpIpc({
     ipcMain,
@@ -1061,16 +1218,6 @@ function registerIpcHandlers(): void {
   });
 }
 
-function isAllowedPreviewUrl(url: string): boolean {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-    return u.hostname === "127.0.0.1" || u.hostname === "localhost";
-  } catch {
-    return false;
-  }
-}
-
 console.log("[electron:startup] Electron app:", typeof app);
 console.log("[electron:startup] process.type:", process.type);
 console.log(
@@ -1101,6 +1248,13 @@ app.whenReady().then(async () => {
   registerIpcHandlers();
 
   await applyE2eRealProviderSettings();
+
+  if (process.platform === "darwin" && app.dock) {
+    const dockIcon = nativeImage.createFromPath(resolveAppIconPath());
+    if (!dockIcon.isEmpty()) {
+      app.dock.setIcon(dockIcon);
+    }
+  }
 
   const e2eProject = process.env.BRYANTLABS_E2E_PROJECT;
   if (e2eProject && typeof e2eProject === "string") {

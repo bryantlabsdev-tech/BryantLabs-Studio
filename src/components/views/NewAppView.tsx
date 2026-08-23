@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import {
   PROVIDERS,
   getProviderInfo,
@@ -178,6 +178,7 @@ export function NewAppView({
     ) => Promise<void>
   >(async () => {});
   const autoStartedRef = useRef(false);
+  const autoStartKeyRef = useRef("");
   const autoPipelineTriggeredRef = useRef(false);
   const recoveryStartedRef = useRef(false);
   const lastGreenfieldActivityRef = useRef<string | null>(null);
@@ -211,9 +212,22 @@ export function NewAppView({
     if (!embedded) return;
     const target = initialFolder ?? (project ? { path: project.path, name: project.name } : null);
     if (!target?.path) return;
-    setFolder((prev) => prev ?? target);
-    updateGreenfieldRun({ targetFolder: target.path });
-  }, [embedded, initialFolder, project?.path, project?.name, updateGreenfieldRun]);
+    setFolder((prev) => {
+      if (prev?.path === target.path) return prev;
+      return prev ?? target;
+    });
+    if (greenfieldRun.targetFolder !== target.path) {
+      updateGreenfieldRun({ targetFolder: target.path });
+    }
+  }, [
+    embedded,
+    initialFolder?.path,
+    initialFolder?.name,
+    project?.path,
+    project?.name,
+    greenfieldRun.targetFolder,
+    updateGreenfieldRun,
+  ]);
 
   useEffect(() => {
     if (!embedded || !autoStartGeneration || autoStartedRef.current) return;
@@ -244,12 +258,15 @@ export function NewAppView({
 
   useEffect(() => {
     if (initialPrompt?.trim()) {
-      setPrompt(initialPrompt.trim());
+      setPrompt((prev) => (prev === initialPrompt.trim() ? prev : initialPrompt.trim()));
     }
   }, [initialPrompt]);
 
   useEffect(() => {
     if (!embedded || !autoStartGeneration) return;
+    const key = `${initialFolder?.path ?? ""}::${(initialPrompt ?? "").trim()}`;
+    if (autoStartKeyRef.current === key) return;
+    autoStartKeyRef.current = key;
     autoStartedRef.current = false;
     autoPipelineTriggeredRef.current = false;
     if (greenfieldRecovery) {
@@ -401,9 +418,9 @@ export function NewAppView({
     setFolder((prev) => prev ?? { path: target, name });
 
     if (greenfieldRun.setupResult) {
-      setSetupResult(greenfieldRun.setupResult);
+      setSetupResult((prev) => prev ?? greenfieldRun.setupResult ?? prev);
       if (greenfieldRun.setupResult.ok) {
-        setSetupStatus("done");
+        setSetupStatus((prev) => (prev === "done" ? prev : "done"));
       } else if (greenfieldRun.setupStatus === "repair_needed") {
         setSetupStatus("repair_needed");
       } else {
@@ -1382,12 +1399,13 @@ export function NewAppView({
             uiOutcome.uiAuditHistory,
             greenfieldRun.runStartedAt,
             uiOutcome.repaired,
+            uiOutcome.setup,
           );
           setFinalMessage(uiOutcome.finalMessage);
           if (embedded) {
             finishEmbedded(
               buildEmbeddedSuccessInput(
-                setup,
+                uiOutcome.setup,
                 writtenFilesForSetup,
                 true,
                 true,
@@ -1408,6 +1426,8 @@ export function NewAppView({
 
       updateGreenfieldRun({
         runResult: "success",
+        setupStatus: "done",
+        setupResult: uiOutcome.setup,
         failureReport: null,
         lastSuccessfulRunAt: Date.now(),
         finalMessage: uiOutcome.finalMessage,
@@ -1422,7 +1442,7 @@ export function NewAppView({
       if (embedded) {
         finishEmbedded(
           buildEmbeddedSuccessInput(
-            setup,
+            uiOutcome.setup,
             writtenFilesForSetup,
             true,
             uiOutcome.audit.ok || uiOutcome.audit.skipped,

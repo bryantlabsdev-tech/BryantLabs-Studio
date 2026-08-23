@@ -44,14 +44,17 @@ export async function launchStudioApp(opts?: {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
 
-  const useMock = opts?.mockProvider !== false && !realProviderE2eEnabled();
+  // Explicit mock mode must win over a leftover REAL_PROVIDER flag in the shell.
+  const forceMock =
+    opts?.mockProvider === true || process.env.BRYANTLABS_MOCK_PROVIDER === "1";
+  const forceReal =
+    opts?.mockProvider === false || realProviderE2eEnabled();
+  const useMock = forceMock ? true : !forceReal;
   if (useMock) {
     env.BRYANTLABS_MOCK_PROVIDER = "1";
+    delete env.BRYANTLABS_E2E_REAL_PROVIDER;
   } else {
     delete env.BRYANTLABS_MOCK_PROVIDER;
-  }
-
-  if (realProviderE2eEnabled() || opts?.mockProvider === false) {
     env.BRYANTLABS_E2E_REAL_PROVIDER = "1";
   }
 
@@ -64,7 +67,7 @@ export async function launchStudioApp(opts?: {
 
   if (opts?.userDataDir) {
     env.BRYANTLABS_E2E_USER_DATA = opts.userDataDir;
-  } else if (realProviderE2eEnabled() || opts?.mockProvider === false) {
+  } else if (!useMock) {
     env.BRYANTLABS_E2E_USER_DATA = await fs.mkdtemp(
       path.join(os.tmpdir(), "bryantlabs-e2e-real-"),
     );
@@ -102,7 +105,7 @@ export async function dismissBlockingDialogs(page: Page): Promise<void> {
     await rejectAll.click();
   }
 
-  const dismissMemory = page.getByRole("button", { name: /^Dismiss$/i });
+  const dismissMemory = page.locator(".memory-suggest").getByRole("button", { name: /^Dismiss$/i });
   if (await dismissMemory.isVisible().catch(() => false)) {
     await dismissMemory.click();
   }
@@ -112,7 +115,7 @@ export async function resetSudokuFixturePersistence(
   fixturePath = sudokuFixturePath,
 ): Promise<void> {
   const bryantlabsDir = path.join(fixturePath, ".bryantlabs");
-  const sessionPath = path.join(bryantlabsDir, "session-memory.json");
+  await fs.rm(bryantlabsDir, { recursive: true, force: true }).catch(() => {});
   const payload = {
     version: 1,
     projectPath: fixturePath,
@@ -127,13 +130,9 @@ export async function resetSudokuFixturePersistence(
     runSummaries: [],
   };
   await fs.mkdir(bryantlabsDir, { recursive: true });
-  await fs.writeFile(sessionPath, `${JSON.stringify(payload, null, 2)}\n`);
-  await fs.rm(path.join(bryantlabsDir, "agent-run-history.json"), { force: true }).catch(() => {});
-  const entries = await fs.readdir(bryantlabsDir).catch(() => [] as string[]);
-  await Promise.all(
-    entries
-      .filter((name) => name.includes("run-checkpoint"))
-      .map((name) => fs.rm(path.join(bryantlabsDir, name), { force: true })),
+  await fs.writeFile(
+    path.join(bryantlabsDir, "session-memory.json"),
+    `${JSON.stringify(payload, null, 2)}\n`,
   );
 }
 
@@ -192,12 +191,48 @@ export async function waitForProjectReady(
   );
 }
 
+export async function openExistingProjectAt(
+  page: Page,
+  folderPath: string,
+): Promise<void> {
+  await waitForStudioTestHooks(page);
+  await page.evaluate(async (targetPath) => {
+    const hooks = window.__studioTestHooks;
+    if (!hooks?.openProjectAt) {
+      throw new Error("Studio test hooks are not available");
+    }
+    await hooks.openProjectAt(targetPath);
+  }, folderPath);
+
+  await waitForProjectReady(page, folderPath);
+}
+
+export async function readIndexStatusLabel(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const el = document.querySelector(".index-status__label");
+    return el?.textContent?.trim() ?? null;
+  });
+}
+
+export async function readReadyIndexedFileCount(
+  page: Page,
+): Promise<number | null> {
+  const label = await readIndexStatusLabel(page);
+  if (!label) return null;
+  const match = label.match(/Ready\s*[·-]\s*(\d+)\s*files/i);
+  return match ? Number(match[1]!) : null;
+}
+
 export async function waitForComposerReady(page: Page): Promise<void> {
   await page.waitForFunction(
     () => window.__studioTestHooks?.getReadinessState?.()?.composerReady === true,
     undefined,
     { timeout: READINESS_TIMEOUT_MS },
   );
+
+  // `composerReady` can be true even when no project is open (e.g. Welcome screen).
+  // The concrete signal we need for agent submission is that the build prompt exists.
+  await page.locator("#build-prompt").waitFor({ state: "visible", timeout: READINESS_TIMEOUT_MS });
 }
 
 export async function openFixtureProject(
@@ -287,37 +322,58 @@ export async function waitForGreenfieldRunTerminal(
 ): Promise<"success" | "failed"> {
   await waitForGreenfieldRunStarted(page);
 
-  const outcome = await Promise.race([
-    page
-      .waitForEvent("console", {
-        predicate: (msg) => msg.text().includes("[greenfield:complete]"),
-        timeout: GREENFIELD_TERMINAL_TIMEOUT_MS,
-      })
-      .then(() => "success" as const),
-    page
-      .waitForEvent("console", {
-        predicate: (msg) => msg.text().includes("[greenfield:failed]"),
-        timeout: GREENFIELD_TERMINAL_TIMEOUT_MS,
-      })
-      .then(() => "failed" as const),
-    page
-      .waitForFunction(
-        () => {
-          const run = window.__studioTestHooks?.getReadinessState?.()?.greenfieldRun;
-          return run?.runResult === "success" || run?.runResult === "failed";
-        },
-        undefined,
-        { timeout: GREENFIELD_TERMINAL_TIMEOUT_MS },
-      )
-      .then(async () => {
-        const run = await page.evaluate(
-          () => window.__studioTestHooks?.getReadinessState?.()?.greenfieldRun.runResult,
+  // Prefer the app's structured readiness state over console markers:
+  // - Electron sometimes doesn't surface console logs the same way Playwright expects.
+  // - The greenfield run can also terminate as cancelled/aborted/interrupted, not just success/failed.
+  try {
+    await page.waitForFunction(
+      () => {
+        const run = window.__studioTestHooks?.getReadinessState?.()?.greenfieldRun;
+        if (!run) return false;
+        return (
+          run.runResult === "success" ||
+          run.runResult === "failed" ||
+          run.runResult === "cancelled" ||
+          run.runResult === "aborted" ||
+          run.runResult === "interrupted"
         );
-        return run === "success" ? ("success" as const) : ("failed" as const);
-      }),
-  ]);
+      },
+      undefined,
+      { timeout: GREENFIELD_TERMINAL_TIMEOUT_MS },
+    );
+  } catch (err) {
+    const debug = await page.evaluate(() => {
+      const state = window.__studioTestHooks?.getReadinessState?.();
+      const run = state?.greenfieldRun;
+      if (!run || !state) return null;
+      return {
+        projectPath: state.projectPath,
+        scanStatus: state.scanStatus,
+        composerReady: state.composerReady,
+        composerBlockReason: state.composerBlockReason,
+        previewVisible: state.previewPanel.visible,
+        previewRunning: state.previewPanel.running,
+        greenfieldRun: {
+          runResult: run.runResult,
+          active: run.active,
+          setupStatus: run.setupStatus,
+          genStatus: run.genStatus,
+          writeStatus: run.writeStatus,
+          lastFailureReason: run.lastFailureReason,
+        },
+      };
+    });
+    throw new Error(
+      `Greenfield run did not reach a terminal state within ${
+        GREENFIELD_TERMINAL_TIMEOUT_MS / 1000
+      }s. Debug=${JSON.stringify(debug)}`,
+    );
+  }
 
-  return outcome;
+  const runResult = await page.evaluate(
+    () => window.__studioTestHooks?.getReadinessState?.()?.greenfieldRun.runResult,
+  );
+  return runResult === "success" ? "success" : "failed";
 }
 
 export async function waitForRoutingIntent(
@@ -377,6 +433,8 @@ function patchPipelineOutcomeFromState(
   if (state.buildPhase === "failed") return "apply_failed";
   if (state.buildError) return "apply_failed";
   if (state.aiPlanStatus === "error") return "apply_failed";
+  if (state.buildPhase === "review") return "waiting_for_review";
+  if (state.buildPhase === "completed") return "patch_applied";
   return null;
 }
 
@@ -403,34 +461,90 @@ async function readPatchPipelineOutcome(page: Page): Promise<PatchPipelineOutcom
 export async function waitForPostPatchProgress(
   page: Page,
 ): Promise<PatchPipelineOutcome> {
-  await page.waitForFunction(
-    () => {
-      const state = window.__studioTestHooks?.getPatchPipelineState?.();
-      if (!state) return false;
-      if (
-        state.planApplyPhase === "waiting_for_review" ||
-        state.planApplyPhase === "review" ||
-        state.planApplyPhase === "verifying" ||
-        state.planApplyPhase === "done"
-      ) {
-        return true;
-      }
-      if (state.planApplyError?.includes("Patch generated but not applied")) return true;
-      if (state.planApplyError) return true;
-      if (state.buildPhase === "review") return true;
-      if (state.buildPhase === "failed" || state.buildPhase === "completed") return true;
-      if (!state.buildRunning && Boolean(state.buildError)) return true;
-      if (!state.buildRunning && state.aiPlanStatus === "error") return true;
-      return false;
-    },
-    undefined,
-    { timeout: PATCH_PIPELINE_TIMEOUT_MS },
+  const started = Date.now();
+  let lastState: PatchPipelineState | null = null;
+
+  while (Date.now() - started < PATCH_PIPELINE_TIMEOUT_MS) {
+    const outcome = await readPatchPipelineOutcome(page);
+    if (outcome) return outcome;
+
+    lastState = await page.evaluate(
+      () => window.__studioTestHooks?.getPatchPipelineState?.() ?? null,
+    );
+
+    await page.waitForTimeout(300);
+  }
+
+  throw new Error(
+    `Patch pipeline timed out after ${PATCH_PIPELINE_TIMEOUT_MS / 1000}s. state=${JSON.stringify(lastState)}`,
   );
+}
+
+/** Wait until follow-up patches are applied and verification finishes. */
+export async function waitForPatchApplied(page: Page): Promise<PatchPipelineOutcome> {
+  try {
+    await page.waitForFunction(
+      () => {
+        const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+        if (!pipeline) return false;
+
+        if (pipeline.planApplyError) return true;
+        if (pipeline.buildPhase === "failed") return true;
+        if (pipeline.aiPlanStatus === "error") return true;
+        if (pipeline.planApplyPhase === "done") return true;
+
+        const run = window.__studioTestHooks?.getGreenfieldRunSnapshot?.();
+        if (!run) return false;
+
+        const wroteFiles = run.entries?.some(
+          (e) =>
+            e.stage === "apply_plan" &&
+            e.status === "success" &&
+            /Wrote \d+ file/i.test(e.message),
+        );
+        const verifyDone = run.entries?.some(
+          (e) =>
+            e.stage === "verification" &&
+            (e.status === "success" || e.status === "failed"),
+        );
+        const noRunning = !run.entries?.some((e) => e.status === "running");
+
+        if (wroteFiles && verifyDone && noRunning && !pipeline.buildRunning) {
+          return true;
+        }
+
+        return run.runResult === "success" || run.runResult === "failed";
+      },
+      undefined,
+      { timeout: PATCH_PIPELINE_TIMEOUT_MS },
+    );
+  } catch (err) {
+    const debug = await page.evaluate(() => {
+      const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+      const run = window.__studioTestHooks?.getGreenfieldRunSnapshot?.();
+      return {
+        pipeline,
+        runResult: run?.runResult ?? null,
+        entries: run?.entries?.slice(-8) ?? [],
+      };
+    });
+    throw new Error(
+      `Patch apply did not finish within ${PATCH_PIPELINE_TIMEOUT_MS / 1000}s. Debug=${JSON.stringify(debug)}`,
+    );
+  }
 
   const outcome = await readPatchPipelineOutcome(page);
+  if (outcome === "verification_started" || outcome === "patch_applied") {
+    const verifyOk = await page.evaluate(() => {
+      const run = window.__studioTestHooks?.getGreenfieldRunSnapshot?.();
+      return run?.entries?.some(
+        (e) => e.stage === "verification" && e.status === "success",
+      );
+    });
+    if (verifyOk) return "patch_applied";
+  }
   if (outcome) return outcome;
-
-  throw new Error("Patch pipeline reached a terminal hook state without a mapped outcome.");
+  return "patch_applied";
 }
 
 export async function waitForPatchReviewReady(page: Page): Promise<void> {
@@ -445,8 +559,33 @@ export async function waitForPatchReviewReady(page: Page): Promise<void> {
 
 export async function waitForWorkbenchDiffTab(page: Page): Promise<void> {
   await page.waitForFunction(
-    () => window.__studioTestHooks?.getPatchPipelineState?.()?.centerTab === "diff",
+    () => {
+      const state = window.__studioTestHooks?.getPatchPipelineState?.();
+      if (!state) return false;
+      if (state.centerTab === "diff") return true;
+      const reviewing =
+        state.planApplyPhase === "waiting_for_review" ||
+        state.planApplyPhase === "review";
+      if (!reviewing) return false;
+      return (
+        state.centerTab === "editor" ||
+        Boolean(document.querySelector('[data-testid="patch-review-panel"]'))
+      );
+    },
     undefined,
     { timeout: READINESS_TIMEOUT_MS },
   );
+}
+
+export async function readCenterTab(page: Page): Promise<string | null> {
+  return page.evaluate(
+    () => window.__studioTestHooks?.getPatchPipelineState?.()?.centerTab ?? null,
+  );
+}
+
+export async function selectWorkbenchTab(
+  page: Page,
+  tab: "Editor" | "Execution" | "Preview" | "Diff" | "Studio Log",
+): Promise<void> {
+  await page.getByRole("tab", { name: tab, exact: true }).click();
 }

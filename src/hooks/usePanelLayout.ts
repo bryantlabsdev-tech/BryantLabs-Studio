@@ -4,6 +4,7 @@ import {
   clampLeftWidth,
   clampPanelLayout,
   clampRightWidth,
+  ensureDetailsPanelVisible,
   layoutForAgentFocus,
   loadPanelLayout,
   PANEL_LAYOUT_DEFAULTS,
@@ -11,6 +12,7 @@ import {
   savePanelLayout,
   type PanelLayout,
 } from "@/core/layout/panelLayout";
+import { OPEN_DETAILS_PANEL_EVENT } from "@/core/layout/settingsNavigation";
 
 export function usePanelLayout() {
   const [layout, setLayout] = useState<PanelLayout>(() => {
@@ -26,7 +28,7 @@ export function usePanelLayout() {
   useEffect(() => {
     if (!layout.agentFocusMode) return;
     const columns = columnsRef.current;
-    if (!columns) return;
+    if (!columns || columns.clientWidth <= 0) return;
     setLayout((prev) => {
       if (!prev.agentFocusMode) return prev;
       const next = layoutForAgentFocus(prev, columns.clientWidth);
@@ -40,6 +42,29 @@ export function usePanelLayout() {
       return next;
     });
   }, [layout.agentFocusMode]);
+
+  useEffect(() => {
+    const onOpenDetailsPanel = () => {
+      setLayout((prev) => {
+        const next = ensureDetailsPanelVisible(prev);
+        if (
+          next.agentFocusMode === prev.agentFocusMode &&
+          next.rightWidth === prev.rightWidth
+        ) {
+          return prev;
+        }
+        savePanelLayout(next);
+        window.dispatchEvent(
+          new CustomEvent("bryantlabs:agent-focus-changed", {
+            detail: { agentFocusMode: false },
+          }),
+        );
+        return next;
+      });
+    };
+    window.addEventListener(OPEN_DETAILS_PANEL_EVENT, onOpenDetailsPanel);
+    return () => window.removeEventListener(OPEN_DETAILS_PANEL_EVENT, onOpenDetailsPanel);
+  }, []);
 
   const commitLayout = useCallback(() => {
     setLayout((current) => {

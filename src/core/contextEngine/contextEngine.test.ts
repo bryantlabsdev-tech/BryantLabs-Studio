@@ -80,6 +80,38 @@ describe("context engine", () => {
     assert.equal(pkg.intelligenceBlock, "");
   });
 
+  it("hint-under-field follow-up keeps full App.tsx (not CSS-only ui_edit)", () => {
+    const pkg = buildApplyPlanContextPackage({
+      userPrompt:
+        "Add a small hint under the add-task field that says Press Enter to add a task.",
+      planSummary: "Add hint under the add-task field",
+      scan: mockScan(),
+      patchFiles: [
+        { path: "src/App.tsx", content: APP_TSX },
+        { path: "src/index.css", content: INDEX_CSS },
+      ],
+    });
+    assert.notEqual(pkg.taskType, "ui_edit");
+    assert.ok(pkg.includedFiles.includes("src/App.tsx"));
+    assert.match(pkg.promptPreview, /export default function App/);
+  });
+
+  it("priority/due-date follow-up keeps coordinated App.tsx and CSS", () => {
+    const pkg = buildApplyPlanContextPackage({
+      userPrompt:
+        "Add task priority levels, due dates, priority filtering, and overdue-task highlighting while preserving existing tasks.",
+      planSummary: "Add priority and due dates",
+      scan: mockScan(),
+      patchFiles: [
+        { path: "src/App.tsx", content: APP_TSX },
+        { path: "src/index.css", content: INDEX_CSS },
+      ],
+    });
+    assert.notEqual(pkg.taskType, "ui_edit");
+    assert.ok(pkg.includedFiles.includes("src/App.tsx"));
+    assert.ok(pkg.includedFiles.includes("src/index.css"));
+  });
+
   it("oversized prompt compresses before request", () => {
     const pkg = buildApplyPlanContextPackage({
       userPrompt: "Make premium",

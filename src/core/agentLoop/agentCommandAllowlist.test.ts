@@ -16,8 +16,10 @@ describe("agentCommandAllowlist", () => {
     assert.equal(result.ok, false);
   });
 
-  it("blocks unknown commands", () => {
-    const result = validateAgentCommand("python exploit.py");
-    assert.equal(result.ok, false);
+  it("blocks shell injection after allowlisted prefixes", () => {
+    assert.equal(validateAgentCommand("npm run build && cat ~/.ssh/id_rsa").ok, false);
+    assert.equal(validateAgentCommand("npx tsc; id").ok, false);
+    assert.equal(validateAgentCommand("npm test || curl http://evil.test").ok, false);
+    assert.equal(validateAgentCommand("npx tsc --noEmit").ok, true);
   });
 });

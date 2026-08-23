@@ -39,6 +39,8 @@ export type AutoFixMode = "off" | "ask" | "automatic";
 
 export type AgentMode = "single" | "pipeline";
 
+export type CostMode = "standard" | "economy";
+
 /** Greenfield / agent file writes: empty folders only vs overwrite in workspace. */
 export type FileWriteMode = "safe" | "workspace";
 
@@ -78,6 +80,8 @@ export interface RawProviderSettings {
   askBeforeFallback: boolean;
   fileWriteMode: FileWriteMode;
   plannerMaxOutputTokens: number;
+  providerEnabled: Partial<Record<ProviderId, boolean>>;
+  costMode: CostMode;
 }
 
 export interface ProviderSettingsView {
@@ -111,6 +115,8 @@ export interface ProviderSettingsView {
   askBeforeFallback: boolean;
   fileWriteMode: FileWriteMode;
   plannerMaxOutputTokens: number;
+  providerEnabled: Partial<Record<ProviderId, boolean>>;
+  costMode: CostMode;
 }
 
 export interface ProviderSettingsInput {
@@ -140,6 +146,31 @@ export interface ProviderSettingsInput {
   askBeforeFallback?: boolean;
   fileWriteMode?: FileWriteMode;
   plannerMaxOutputTokens?: number;
+  providerEnabled?: Partial<Record<ProviderId, boolean>>;
+  costMode?: CostMode;
+}
+
+function normalizeProviderEnabled(
+  partial?: Partial<Record<ProviderId, boolean>>,
+): Record<ProviderId, boolean> {
+  return {
+    gemini: partial?.gemini !== false,
+    anthropic: partial?.anthropic !== false,
+    openrouter: partial?.openrouter !== false,
+    groq: partial?.groq !== false,
+    ollama: partial?.ollama !== false,
+  };
+}
+
+export function isAllowedOllamaBaseUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+    const host = parsed.hostname.toLowerCase();
+    return host === "127.0.0.1" || host === "localhost" || host === "::1";
+  } catch {
+    return false;
+  }
 }
 
 function defaults(): RawProviderSettings {
@@ -170,6 +201,8 @@ function defaults(): RawProviderSettings {
     askBeforeFallback: true,
     fileWriteMode: "workspace",
     plannerMaxOutputTokens: DEFAULT_PLANNER_MAX_OUTPUT_TOKENS,
+    providerEnabled: normalizeProviderEnabled(),
+    costMode: "standard",
   };
 }
 
@@ -188,6 +221,11 @@ function coerceAgentMode(value: unknown): AgentMode {
   return "single";
 }
 
+function coerceCostMode(value: unknown): CostMode {
+  if (value === "economy") return "economy";
+  return "standard";
+}
+
 function coercePositiveInt(value: unknown, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   const n = Math.floor(value);
@@ -197,6 +235,79 @@ function coercePositiveInt(value: unknown, fallback: number): number {
 function coerceBoolean(value: unknown, fallback: boolean): boolean {
   if (typeof value === "boolean") return value;
   return fallback;
+}
+
+const ENABLEMENT_ORDER: readonly ProviderId[] = [
+  "gemini",
+  "anthropic",
+  "openrouter",
+  "groq",
+  "ollama",
+];
+
+function providerHasCredential(raw: RawProviderSettings, id: ProviderId): boolean {
+  switch (id) {
+    case "anthropic":
+      return raw.anthropicApiKey.trim().length > 0;
+    case "gemini":
+      return raw.geminiApiKey.trim().length > 0;
+    case "groq":
+      return raw.groqApiKey.trim().length > 0;
+    case "openrouter":
+      return raw.openrouterApiKey.trim().length > 0;
+    default:
+      return true;
+  }
+}
+
+function stageModelCompatible(model: string, provider: ProviderId): boolean {
+  const value = model.trim();
+  if (!value) return true;
+  if (value.includes("/")) return provider === "openrouter";
+  if (/^claude/i.test(value)) return provider === "anthropic";
+  if (/^gemini/i.test(value)) return provider === "gemini";
+  if (value.includes(":") && !/^claude/i.test(value)) {
+    return provider === "ollama" || provider === "groq";
+  }
+  return true;
+}
+
+/** Remap disabled active/stage providers so generate() cannot stay on OpenRouter. */
+export function coerceRawToEnabledProviders(
+  raw: RawProviderSettings,
+): RawProviderSettings {
+  const enabled = normalizeProviderEnabled(raw.providerEnabled);
+  const pick = (current: ProviderId): ProviderId => {
+    if (enabled[current]) return current;
+    for (const id of ENABLEMENT_ORDER) {
+      if (enabled[id] && providerHasCredential(raw, id)) return id;
+    }
+    for (const id of ENABLEMENT_ORDER) {
+      if (enabled[id]) return id;
+    }
+    return current;
+  };
+  const provider = pick(raw.provider);
+  const plannerProvider = pick(raw.plannerProvider);
+  const coderProvider = pick(raw.coderProvider);
+  const repairProvider = pick(raw.repairProvider);
+  const backupProvider =
+    raw.backupProvider && enabled[raw.backupProvider] ? raw.backupProvider : null;
+  return {
+    ...raw,
+    provider,
+    plannerProvider,
+    coderProvider,
+    repairProvider,
+    backupProvider,
+    plannerModel: stageModelCompatible(raw.plannerModel, plannerProvider)
+      ? raw.plannerModel
+      : "",
+    coderModel: stageModelCompatible(raw.coderModel, coderProvider) ? raw.coderModel : "",
+    repairModel: stageModelCompatible(raw.repairModel, repairProvider)
+      ? raw.repairModel
+      : "",
+  };
 }
 
 function coerceApiKey(value: unknown): string {
@@ -258,12 +369,15 @@ function normalizeLoaded(raw: RawProviderSettings): RawProviderSettings {
     typeof raw.geminiModel === "string" ? raw.geminiModel : defaults().geminiModel;
   const provider = coerceProviderId(raw.provider);
   const base = defaults();
-  return {
+  const normalized: RawProviderSettings = {
     provider,
     geminiModel,
     geminiApiKey,
     ollamaModel: typeof raw.ollamaModel === "string" ? raw.ollamaModel : base.ollamaModel,
-    ollamaBaseUrl: typeof raw.ollamaBaseUrl === "string" ? raw.ollamaBaseUrl : base.ollamaBaseUrl,
+    ollamaBaseUrl:
+      typeof raw.ollamaBaseUrl === "string" && isAllowedOllamaBaseUrl(raw.ollamaBaseUrl)
+        ? raw.ollamaBaseUrl
+        : base.ollamaBaseUrl,
     anthropicModel:
       typeof raw.anthropicModel === "string" ? raw.anthropicModel : base.anthropicModel,
     anthropicApiKey,
@@ -294,7 +408,10 @@ function normalizeLoaded(raw: RawProviderSettings): RawProviderSettings {
     plannerMaxOutputTokens: coercePlannerMaxOutputTokens(
       raw.plannerMaxOutputTokens ?? DEFAULT_PLANNER_MAX_OUTPUT_TOKENS,
     ),
+    providerEnabled: normalizeProviderEnabled(raw.providerEnabled),
+    costMode: coerceCostMode(raw.costMode),
   };
+  return coerceRawToEnabledProviders(normalized);
 }
 
 function settingsFile(): string {
@@ -347,6 +464,8 @@ function sanitize(raw: RawProviderSettings): ProviderSettingsView {
     askBeforeFallback: raw.askBeforeFallback,
     fileWriteMode: raw.fileWriteMode,
     plannerMaxOutputTokens: raw.plannerMaxOutputTokens,
+    providerEnabled: normalizeProviderEnabled(raw.providerEnabled),
+    costMode: raw.costMode,
   };
 }
 
@@ -374,7 +493,10 @@ export function sanitizeProviderSettingsInput(
   if (isProviderId(o.provider)) out.provider = o.provider;
   if (typeof o.geminiModel === "string") out.geminiModel = o.geminiModel;
   if (typeof o.ollamaModel === "string") out.ollamaModel = o.ollamaModel;
-  if (typeof o.ollamaBaseUrl === "string") out.ollamaBaseUrl = o.ollamaBaseUrl;
+  if (typeof o.ollamaBaseUrl === "string") {
+    const trimmed = o.ollamaBaseUrl.trim();
+    if (isAllowedOllamaBaseUrl(trimmed)) out.ollamaBaseUrl = trimmed;
+  }
   if (typeof o.anthropicModel === "string") out.anthropicModel = o.anthropicModel;
   if (typeof o.groqModel === "string") out.groqModel = o.groqModel;
   if (typeof o.openrouterModel === "string") out.openrouterModel = o.openrouterModel;
@@ -417,6 +539,17 @@ export function sanitizeProviderSettingsInput(
   }
   if (o.plannerMaxOutputTokens !== undefined) {
     out.plannerMaxOutputTokens = coercePlannerMaxOutputTokens(o.plannerMaxOutputTokens);
+  }
+  if (o.providerEnabled && typeof o.providerEnabled === "object") {
+    const enabled = o.providerEnabled as Record<string, unknown>;
+    const patch: Partial<Record<ProviderId, boolean>> = {};
+    for (const id of ALL_PROVIDER_IDS) {
+      if (typeof enabled[id] === "boolean") patch[id] = enabled[id];
+    }
+    if (Object.keys(patch).length > 0) out.providerEnabled = patch;
+  }
+  if (o.costMode === "standard" || o.costMode === "economy") {
+    out.costMode = o.costMode;
   }
   return out;
 }
@@ -484,12 +617,24 @@ export async function saveSettings(
       input.plannerMaxOutputTokens !== undefined
         ? coercePlannerMaxOutputTokens(input.plannerMaxOutputTokens)
         : current.plannerMaxOutputTokens,
+    providerEnabled:
+      input.providerEnabled !== undefined
+        ? {
+            ...normalizeProviderEnabled(current.providerEnabled),
+            ...normalizeProviderEnabled(input.providerEnabled),
+          }
+        : current.providerEnabled,
+    costMode:
+      input.costMode !== undefined
+        ? coerceCostMode(input.costMode)
+        : current.costMode,
   };
-  const saved = await writeJsonAtomic(settingsFile(), next, "filesystem");
+  const coerced = coerceRawToEnabledProviders(next);
+  const saved = await writeJsonAtomic(settingsFile(), coerced, "filesystem");
   if (!saved.ok) {
     throw new Error(saved.reason ?? "Could not save provider settings.");
   }
-  return sanitize(next);
+  return sanitize(coerced);
 }
 
 function readApiKeyFromRaw(raw: RawProviderSettings, provider: ProviderId): string {

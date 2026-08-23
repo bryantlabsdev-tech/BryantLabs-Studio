@@ -79,7 +79,7 @@ export function useWorkspaceGitWorkspace(input: {
     return () => {
       cancelled = true;
     };
-  }, [input.api, input.selectedGitPath, input]);
+  }, [input.api, input.selectedGitPath]);
 
   const gitStage = useCallback(
     async (paths: string[]) => {

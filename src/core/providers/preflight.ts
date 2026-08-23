@@ -20,6 +20,7 @@ import {
   isProviderInCooldown,
   type ProviderReliabilityStatus,
 } from "@/core/providers/reliability";
+import { isProviderEnabled } from "@/core/providers/providerEnablement";
 import type { HealthResult, ProviderId, ProviderSettings } from "@/core/providers/types";
 import { isRendererE2eMockMode } from "@/core/providers/e2eMockMode";
 
@@ -107,6 +108,7 @@ export function runProviderPreflight(opts: {
 }): PreflightResult {
   const provider = opts.provider;
   const model = (opts.model ?? resolveStageModel(opts.settings, opts.stage, provider)).trim();
+
   const estimatedTokens =
     opts.estimatedTokens ??
     (opts.promptPayload ? estimateTokens(opts.promptPayload) : 0);
@@ -126,6 +128,14 @@ export function runProviderPreflight(opts: {
     message,
     status,
   });
+
+  if (!isProviderEnabled(opts.settings, provider)) {
+    return fail(
+      "provider_offline",
+      `${provider} is disabled in Settings.`,
+      "offline",
+    );
+  }
 
   const cloudProviders: ProviderId[] = [
     "gemini",

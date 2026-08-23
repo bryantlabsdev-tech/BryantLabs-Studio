@@ -67,6 +67,12 @@ const FUNCTIONAL_FEATURE_PHRASES = [
   "localstorage",
   "use state",
   "state management",
+  "due date",
+  "due dates",
+  "priority",
+  "overdue",
+  "clear completed",
+  "empty state",
 ] as const;
 
 const FUNCTIONAL_FEATURE_KEYWORDS = [
@@ -80,6 +86,14 @@ export function isFunctionalFeaturePrompt(promptLower: string): boolean {
   for (const phrase of FUNCTIONAL_FEATURE_PHRASES) {
     if (promptLower.includes(phrase)) return true;
   }
+  // Markup/copy additions belong in App.tsx — not CSS-only ui_edit.
+  if (
+    /\b(hint|footer|placeholder|label)\b/.test(promptLower) &&
+    /\b(add|under|says?|show|display|text)\b/.test(promptLower)
+  ) {
+    return true;
+  }
+  if (/\bthat says\b/.test(promptLower)) return true;
   if (/\badd\s+.+\s+feature\b/.test(promptLower)) return true;
   if (/\bcreate\s+(a\s+)?(separate\s+)?\w+\s+component\b/.test(promptLower)) {
     return true;
@@ -111,7 +125,10 @@ export function isUiLayoutPrompt(promptLower: string): boolean {
     if (promptLower.includes(phrase)) return true;
   }
   for (const kw of UI_LAYOUT_KEYWORDS) {
-    if (promptLower.includes(kw)) return true;
+    // Word boundaries: otherwise "ui" matches "hint" and CSS-only routing
+    // strips App.tsx down to class names (zero valid App.tsx proposals).
+    const pattern = kw.length <= 4 ? `\\b${kw}\\b` : `(^|[^a-z])${kw}([^a-z]|$)`;
+    if (new RegExp(pattern).test(promptLower)) return true;
   }
   return false;
 }
@@ -129,6 +146,8 @@ const GAMEPLAY_SIGNALS = [
   "resume",
   "timer",
   "difficulty",
+  "stats panel",
+  "games completed",
   "keyboard controls",
   "statistics",
   "selected cell",

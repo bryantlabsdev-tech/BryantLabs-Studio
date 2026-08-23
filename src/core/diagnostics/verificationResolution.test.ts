@@ -205,3 +205,48 @@ describe("verificationResolution", () => {
     assert.equal(resolved.uiAudit, "skipped");
   });
 });
+
+describe("clearGreenfieldVerificationStatePatch", () => {
+  it("preserves setup completion signals when starting a follow-up edit", async () => {
+    const { clearGreenfieldVerificationStatePatch } = await import(
+      "@/core/diagnostics/verificationResolution"
+    );
+    const prev = {
+      ...emptyGreenfieldRun(),
+      setupResult: {
+        ok: true,
+        install: cmd("npm install", true),
+        typecheck: cmd("npx tsc --noEmit", true),
+        build: cmd("npm run build", true),
+      },
+      setupStatus: "done",
+      genStatus: "done",
+      writeStatus: "done",
+      lastSuccessfulRunAt: Date.now(),
+      entries: [createRunLogEntry("build", "success", "Build finished")],
+    };
+    const patch = clearGreenfieldVerificationStatePatch(prev);
+    assert.equal(patch.setupResult, undefined);
+    assert.equal(patch.entries, undefined);
+    assert.equal(patch.genStatus, undefined);
+    assert.equal(patch.runResult, "running");
+  });
+
+  it("preserves setup proof when prior greenfield run succeeded with files on disk", async () => {
+    const { clearGreenfieldVerificationStatePatch } = await import(
+      "@/core/diagnostics/verificationResolution"
+    );
+    const prev = {
+      ...emptyGreenfieldRun(),
+      runResult: "success" as const,
+      filesWritten: ["package.json", "src/App.tsx"],
+      setupResult: null,
+      entries: [],
+      lastSuccessfulRunAt: null,
+    };
+    const patch = clearGreenfieldVerificationStatePatch(prev);
+    assert.equal(patch.setupResult, undefined);
+    assert.equal(patch.entries, undefined);
+    assert.equal(patch.genStatus, undefined);
+  });
+});

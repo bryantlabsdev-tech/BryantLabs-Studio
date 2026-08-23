@@ -13,6 +13,7 @@ import {
 } from "@/core/agentWorkspace";
 import { buildAgentPlanContext } from "@/core/context/buildAgentContext";
 import { attachReferencedFileContents } from "@/core/context/referencedFileContext";
+import { readProjectRulesText } from "@/core/projectRules/readProjectRules";
 import { mergeProjectMemoryIntoPlannerPreview } from "@/core/projectIntelligence/buildProjectMemoryContext";
 import { getIntelligenceHost } from "@/app/intelligence/intelligenceHost";
 import { recordPromptVisibility } from "@/core/intelligence/promptVisibility";
@@ -32,6 +33,7 @@ import {
   readPreflightGate,
   type PlannerPreflightGate,
 } from "@/core/planner/plannerPreflight";
+import { canSkipAiPlannerCall, isEconomyMode } from "@/core/providers/economyModels";
 import { isDisallowedPlanPrompt, resolveUserPlanPrompt } from "@/core/planApply";
 import {
   estimateAiCalls,
@@ -48,6 +50,7 @@ import {
   recordProviderUsage,
 } from "@/core/sessionMemory";
 import { activeProviderModel } from "@/core/studioRun/types";
+import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
 import type { PlanningOrchestrationHost } from "@/app/orchestration/planningTypes";
 import type { BryantLabsApi, ProjectScan } from "@/types";
 
@@ -76,6 +79,7 @@ export function createPlanOrchestration(
     scan: host.scan,
     projectPath: host.project?.path ?? null,
     greenfieldRun: host.greenfieldRun,
+    persistedModifiedFiles: host.sessionMemory.modifiedFiles,
   });
   if (!effectiveScan) {
     host.createPlanErrorRef.current = "Project scan not available.";
@@ -155,6 +159,50 @@ type ResolvedAiPlanHost = PlanningOrchestrationHost & {
 
 function resolvePlannerRoute(host: PlanningOrchestrationHost): string | null {
   return host.greenfieldRun?.runTimeline?.route ?? null;
+}
+
+function readLastProviderStopReason(run: GreenfieldRunSnapshot): string | null {
+  for (let i = run.entries.length - 1; i >= 0; i -= 1) {
+    const entry = run.entries[i]!;
+    if (
+      (entry.stage === "provider" ||
+        entry.stage === "provider_call" ||
+        entry.stage === "ai_call") &&
+      entry.status === "failed"
+    ) {
+      const detail = entry.details?.trim();
+      const message = entry.message?.trim();
+      if (detail) return detail;
+      if (message && !/^\[provider_/.test(message)) return message;
+    }
+  }
+  return null;
+}
+
+function resolvePlannerInvokeNullReason(run: GreenfieldRunSnapshot): {
+  gate: PlannerPreflightGate;
+  message: string;
+} {
+  const text = readLastProviderStopReason(run) ?? "";
+  if (/max ai calls|budget exhausted|ai call budget/i.test(text)) {
+    return {
+      gate: "budget_exceeded",
+      message: text || preflightGateUserMessage("budget_exceeded"),
+    };
+  }
+  if (/no .+ api key|missing key|not connected|preflight blocked/i.test(text)) {
+    return { gate: "provider_not_connected", message: text };
+  }
+  if (/fallback declined|cancelled/i.test(text)) {
+    return { gate: "provider_request_failed", message: text };
+  }
+  if (text) {
+    return { gate: "provider_request_failed", message: text };
+  }
+  return {
+    gate: "budget_exceeded",
+    message: preflightGateUserMessage("budget_exceeded"),
+  };
 }
 
 function resolveActivePlan(host: PlanningOrchestrationHost): Plan | null {
@@ -321,6 +369,7 @@ function blockPlanner(
     host.finishStudioAction("ai_plan", "ai_plan", false, "AI Plan blocked", {
       details: input.message,
       patch: {
+        finalMessage: input.message,
         workflow: {
           prompt: input.userPrompt,
           errors: [input.message],
@@ -344,6 +393,7 @@ export async function runAIPlanOrchestration(
           scan: host.scan,
           projectPath: host.project.path,
           ...(host.greenfieldRun ? { greenfieldRun: host.greenfieldRun } : {}),
+          persistedModifiedFiles: host.sessionMemory.modifiedFiles,
         })
       : null;
 
@@ -391,25 +441,40 @@ export async function runAIPlanOrchestration(
   }
 
   const proactiveRoute = resolvePlannerRoute(resolved);
+  const earlySettings = normalizeProviderSettings(await resolved.api.getProviderSettings());
+  const earlyComplexity = getIntelligenceHost()
+    ? (
+        await getIntelligenceHost()!.applyComplexityRouting(
+          userPrompt,
+          resolved.scan.files.length,
+          earlySettings,
+        )
+      ).decision
+    : null;
   if (
-    canUseDeterministicPlanWithoutProviderCall(
+    canSkipAiPlannerCall({
+      settings: earlySettings,
       userPrompt,
-      resolved.plan,
-      proactiveRoute,
-    )
+      plan: resolved.plan,
+      route: proactiveRoute,
+      ...(earlyComplexity?.tier ? { complexityTier: earlyComplexity.tier } : {}),
+    })
   ) {
+    const skipReason = isEconomyMode(earlySettings)
+      ? "Skipped — economy mode + deterministic plan sufficient"
+      : "Skipped — deterministic plan sufficient for UI-only follow-up";
     const preflight = buildPlannerPreflightDiagnostics({
       userPrompt,
       plan: resolved.plan,
       route: proactiveRoute,
       providerCallAttempted: false,
-      skipReason: "Skipped — deterministic plan sufficient for UI-only follow-up",
+      skipReason,
       fallbackAttempted: true,
       fallbackUsed: true,
     });
     const blockedStub = buildBlockedPlannerResult({
       gate: "deterministic_fallback_unavailable",
-      message: "Skipped — deterministic plan sufficient for UI-only follow-up",
+      message: skipReason,
       provider: fallbackProvider,
       model: fallbackModel,
       preflight,
@@ -578,6 +643,10 @@ export async function runAIPlanOrchestration(
         operation: "ai_plan",
         memoryRetrieval,
       }) ?? null;
+    const projectRules =
+      resolved.api && resolved.project?.path
+        ? await readProjectRulesText(resolved.api, resolved.project.path)
+        : "";
     const { context, diagnostics, projectMemoryInjection } = buildAgentPlanContext(
       resolved.scan,
       userPrompt,
@@ -588,6 +657,7 @@ export async function runAIPlanOrchestration(
       intelligence,
       resolved.projectIntelligence,
       resolvePlannerRoute(resolved),
+      projectRules,
     );
     const planContext = attachReferencedFileContents(
       context,
@@ -640,21 +710,21 @@ export async function runAIPlanOrchestration(
       (provider) => resolved.api.planWithProvider(provider, userPrompt, planContext),
     );
     if (!result) {
-      const budgetMessage = preflightGateUserMessage("budget_exceeded");
+      const { gate, message } = resolvePlannerInvokeNullReason(resolved.greenfieldRun);
       const blocked = buildBlockedPlannerResult({
-        gate: "budget_exceeded",
-        message: budgetMessage,
+        gate,
+        message,
         provider: routingProvider,
         model: routingModel,
         preflight: buildPlannerPreflightDiagnostics({
           userPrompt,
           plan: resolved.plan,
           route: resolvePlannerRoute(resolved),
-          gate: "budget_exceeded",
+          gate,
           providerCallAttempted: false,
-          providerBlockedReason: budgetMessage,
-          skipReason: budgetMessage,
-          message: budgetMessage,
+          providerBlockedReason: message,
+          skipReason: message,
+          message,
           fallbackAttempted: true,
         }),
       });
@@ -669,8 +739,8 @@ export async function runAIPlanOrchestration(
         resolved.appendGreenfieldRunLog(
           "ai_plan",
           "success",
-          "Using deterministic plan (planner budget exceeded)",
-          budgetMessage,
+          "Using deterministic plan (planner unavailable)",
+          message,
         );
         void intelHost?.persistSessionMemory();
         return publishPlannerResult(
@@ -683,8 +753,8 @@ export async function runAIPlanOrchestration(
       }
       return blockPlanner(resolved, resolved.plan, {
         userPrompt,
-        gate: "budget_exceeded",
-        message: budgetMessage,
+        gate,
+        message,
         provider: routingProvider,
         model: routingModel,
         fallbackAttempted: true,
@@ -742,6 +812,7 @@ export async function executeAIPlanForPromptOrchestration(
           scan: host.scan,
           projectPath: host.project.path,
           greenfieldRun: host.greenfieldRun,
+          persistedModifiedFiles: host.sessionMemory.modifiedFiles,
         })
       : null;
   if (!host?.api || !effectiveScan) return null;
@@ -761,6 +832,10 @@ export async function executeAIPlanForPromptOrchestration(
       host.setSessionMemory(mem);
     }
     const memoryRetrieval = host.resolveMemoriesForPrompt(userPrompt, "agent");
+    const projectRules =
+      host.api && host.project?.path
+        ? await readProjectRulesText(host.api, host.project.path)
+        : "";
     const { context, diagnostics, projectMemoryInjection } = buildAgentPlanContext(
       effectiveScan,
       userPrompt,
@@ -771,6 +846,7 @@ export async function executeAIPlanForPromptOrchestration(
       undefined,
       host.projectIntelligence,
       host.greenfieldRun?.runTimeline?.route ?? null,
+      projectRules,
     );
     const planContext = attachReferencedFileContents(
       context,

@@ -4,7 +4,7 @@ A local-first AI app builder. This repository is a **fresh, independent project*
 
 > See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full vision, phase status, BLAI lessons learned, and the roadmap (Phases 5–9).
 
-> **Status: Phase 18 — Studio Agent.** A reasoning-driven agent loop (observe → think → act) that explores the repo, plans dynamically, executes, verifies, and repairs — without predefined builder roadmaps.
+> **Status:** Local-first Electron studio with unified Agent/Build routing over greenfield generation, follow-up Apply Plan, verification, and a provider layer (Gemini, Anthropic, Groq, OpenRouter, Ollama). Phase 18 (Studio Agent loop) remains in the tree alongside those engines.
 
 ## What Phase 18 includes
 

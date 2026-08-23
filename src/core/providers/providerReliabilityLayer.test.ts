@@ -93,10 +93,11 @@ describe("provider reliability layer", () => {
   });
 
   it("uses stage-specific timeouts", () => {
-    assert.equal(resolveStageTimeoutMs("planner"), 30_000);
-    assert.equal(resolveStageTimeoutMs("coder", { patchSize: "small" }), 60_000);
-    assert.equal(resolveStageTimeoutMs("coder", { patchSize: "large" }), 120_000);
-    assert.equal(resolveStageTimeoutMs("repair"), 60_000);
+    assert.equal(resolveStageTimeoutMs("planner"), 180_000);
+    assert.equal(resolveStageTimeoutMs("coder", { patchSize: "small" }), 180_000);
+    assert.equal(resolveStageTimeoutMs("coder", { patchSize: "large" }), 180_000);
+    assert.equal(resolveStageTimeoutMs("repair"), 180_000);
+    assert.equal(resolveStageTimeoutMs("greenfield"), 180_000);
   });
 
   it("repairs JSON from markdown fences", () => {

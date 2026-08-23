@@ -21,6 +21,7 @@ import type { PipelineReviewGates } from "@/app/orchestration/pipelineGates";
 import type { BryantLabsApi, ProjectInfo, ProjectScan } from "@/types";
 import type { BuildPipelineHost } from "@/app/orchestration/types";
 import type { PipelineRunnerDeps } from "@/app/multiAgentPipeline";
+import { AUTO_APPLY_FOLLOW_UP_PATCHES } from "@/core/build/followUpPrefs";
 
 type ResolvedPipelineHost = BuildPipelineHost & {
   api: BryantLabsApi;
@@ -36,6 +37,7 @@ function requireHost(host: BuildPipelineHost | null): ResolvedPipelineHost {
     scan: host.scan,
     projectPath: host.project.path,
     greenfieldRun: host.greenfieldRun,
+    persistedModifiedFiles: host.sessionMemory.modifiedFiles,
   });
   if (!effectiveScan) {
     throw new Error("Pipeline requires an open project.");
@@ -157,7 +159,10 @@ export function buildPipelineRunnerDeps(
       };
     },
     runApplyAndVerify: async () => {
-      const result = await host.applyApprovedPlanFiles({ pipelineMode: true });
+      const result = await host.applyApprovedPlanFiles({
+        pipelineMode: true,
+        approveReadyFiles: true,
+      });
       return {
         ok: result.ok,
         verification: result.verification,
@@ -193,7 +198,8 @@ export function buildPipelineRunnerDeps(
         },
       };
     },
-    awaitReviewApproval: () => gates.awaitReviewApproval(),
+    awaitReviewApproval: () =>
+      AUTO_APPLY_FOLLOW_UP_PATCHES ? Promise.resolve(true) : gates.awaitReviewApproval(),
     awaitRepairApproval: () => gates.awaitRepairApproval(),
     getMaxRepairAttempts: () => effectiveMaxRepairAttempts(settings),
   };

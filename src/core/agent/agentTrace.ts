@@ -12,6 +12,10 @@ import {
   type AgentRouteDecisionTrace,
 } from "@/core/agent/unifiedAgentRoute";
 import {
+  formatExecutionModeLogDetails,
+  EXECUTION_MODE_LOG_LABEL,
+} from "@/core/agent/executionModeConfirmation";
+import {
   GREENFIELD_BLOCKED_BY_ROUTE_LABEL,
 } from "@/core/agent/followUpExecution";
 import {
@@ -34,6 +38,7 @@ export type AgentTraceEventKind =
   | "create_target_rejected"
   | "scaffold_target_skipped"
   | "mode_selected"
+  | "execution_mode_resolved"
   | "files_scanned"
   | "files_read"
   | "plan_generated"
@@ -283,6 +288,33 @@ export function buildAgentTrace(input: BuildAgentTraceInput): AgentTraceViewMode
         "Route selected",
         formatRouteDecisionDetail(routeDecision),
         routeDecision.selectedRoute === "greenfield" ? "info" : "success",
+      ),
+    );
+  }
+
+  const executionModeEntry = entries.find(
+    (entry) => entry.message === EXECUTION_MODE_LOG_LABEL,
+  );
+  if (executionModeEntry) {
+    events.push(
+      makeEvent(
+        "trace-execution-mode",
+        "execution_mode_resolved",
+        entryTimestamp(executionModeEntry),
+        EXECUTION_MODE_LOG_LABEL,
+        executionModeEntry.details ?? null,
+        "success",
+      ),
+    );
+  } else if (run.executionMode) {
+    events.push(
+      makeEvent(
+        "trace-execution-mode",
+        "execution_mode_resolved",
+        startedAt + 1,
+        EXECUTION_MODE_LOG_LABEL,
+        formatExecutionModeLogDetails(run.executionMode),
+        "success",
       ),
     );
   }

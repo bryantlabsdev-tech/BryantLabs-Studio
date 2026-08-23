@@ -26,6 +26,27 @@ describe("studioTestReadiness", () => {
     assert.equal(state.scanStatus, "scanning");
   });
 
+  it("marks composer blocked while project scan has not started", () => {
+    const state = computeStudioReadinessState({
+      apiReady: true,
+      projectPath: "/tmp/app",
+      scan: null,
+      scanStatus: "idle",
+      greenfieldRun: emptyGreenfieldRun(),
+      greenfieldPanelActive: false,
+      buildRunning: false,
+      pipelineRunning: false,
+      aiPlanStatus: "idle",
+      planApplySession: null,
+      autoFixPhase: null,
+      centerTab: "editor",
+      appPreview: EMPTY_PREVIEW,
+      providerStatus: null,
+    });
+    assert.equal(state.composerReady, false);
+    assert.equal(state.scanStatus, "idle");
+  });
+
   it("marks preview visible when preview tab is active with url", () => {
     const state = computeStudioReadinessState({
       apiReady: true,

@@ -31,4 +31,17 @@ describe("resolveEffectiveProjectScan", () => {
     assert.equal(effective?.files.length, 2);
     assert.equal(effective?.files[0]?.absPath, "/tmp/app/package.json");
   });
+
+  it("replaces stale empty cached scan with persisted modified files after reopen", () => {
+    const stale = mockProjectScan([], { packageJson: false });
+    const effective = resolveEffectiveProjectScan({
+      scan: stale,
+      projectPath: "/tmp/app",
+      greenfieldRun: emptyGreenfieldRun(),
+      persistedModifiedFiles: ["src/App.tsx", "src/index.css"],
+    });
+    assert.ok(effective);
+    assert.equal(effective?.files.length, 2);
+    assert.equal(effective?.files[0]?.path, "src/App.tsx");
+  });
 });

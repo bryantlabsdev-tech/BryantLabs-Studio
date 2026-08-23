@@ -9,21 +9,24 @@ import {
   LazyContextInspectorView,
   LazyExecutionView,
   LazyExplorerView,
+  LazyGitView,
   LazyInsightsView,
   LazyMemoryView,
   LazyPipelineView,
   LazyPlanComposerView,
-  LazyProvidersView,
   LazyRepositoryView,
   LazyRepoMapView,
   LazySearchView,
+  LazySettingsView,
 } from "@/components/lazyViews";
+import { SETTINGS_RAIL_TOOL } from "@/core/layout/settingsNavigation";
 
 const TOOL_TITLES: Record<string, string> = {
   insights: "Insights",
   newapp: "New App",
   files: "Files",
   search: "Search",
+  git: "Source Control",
   repomap: "Repo map",
   repository: "Repository",
   memory: "Memory",
@@ -75,6 +78,8 @@ export function WorkflowPanel() {
             <LazyExplorerView />
           ) : railTool === "search" ? (
             <LazySearchView />
+          ) : railTool === "git" ? (
+            <LazyGitView />
           ) : railTool === "repomap" ? (
             <LazyRepoMapView />
           ) : railTool === "repository" ? (
@@ -97,8 +102,8 @@ export function WorkflowPanel() {
             <LazyPlanComposerView />
           ) : railTool === "patch" ? (
             <LazyAIPatchView />
-          ) : railTool === "providers" ? (
-            <LazyProvidersView />
+          ) : railTool === SETTINGS_RAIL_TOOL ? (
+            <LazySettingsView />
           ) : (
             <LazyExplorerView />
           )}

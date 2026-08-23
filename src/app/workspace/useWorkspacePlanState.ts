@@ -11,6 +11,7 @@ import type {
 } from "@/core/planner/aiTypes";
 import type { PlanApplySession } from "@/core/planApply";
 import type { ReferencedFileContent } from "@/core/context/referencedFileContext";
+import type { ActiveEditorContext } from "@/core/context/activeEditorContext";
 import type { PipelineCoderResult } from "@/app/orchestration";
 import type { AIPatchStatus } from "@/app/orchestration";
 
@@ -77,6 +78,7 @@ export interface WorkspacePlanState {
   readonly editExplorationContentsRef: React.MutableRefObject<
     readonly ReferencedFileContent[]
   >;
+  readonly activeEditorContextRef: React.MutableRefObject<ActiveEditorContext | null>;
   readonly pipelineCoderResultRef: React.MutableRefObject<PipelineCoderResult | null>;
   readonly executionNoChangeGuardRef: React.MutableRefObject<Map<string, number>>;
   readonly createPlanErrorRef: React.MutableRefObject<string | null>;
@@ -113,6 +115,7 @@ export function useWorkspacePlanState(): WorkspacePlanState {
   const applyPlanCompletedRunIdRef = useRef<string | null>(null);
   const lastContextSnapshotIdRef = useRef<string | null>(null);
   const editExplorationContentsRef = useRef<readonly ReferencedFileContent[]>([]);
+  const activeEditorContextRef = useRef<ActiveEditorContext | null>(null);
   const pipelineCoderResultRef = useRef<PipelineCoderResult | null>(null);
   const executionNoChangeGuardRef = useRef(new Map<string, number>());
   const createPlanErrorRef = useRef<string | null>(null);
@@ -161,6 +164,7 @@ export function useWorkspacePlanState(): WorkspacePlanState {
     applyPlanCompletedRunIdRef,
     lastContextSnapshotIdRef,
     editExplorationContentsRef,
+    activeEditorContextRef,
     pipelineCoderResultRef,
     executionNoChangeGuardRef,
     createPlanErrorRef,

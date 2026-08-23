@@ -74,6 +74,43 @@ Reports: `benchmarks/results/stress-latest.md`, `stress-fast-latest.md`, `repair
 
 Unit tests: `npm run bench:unit` (includes `benchmarks/stress/stress.test.ts`)
 
+## Brownfield edit stress (10 follow-up prompts)
+
+Dry-run validates routing (`build_loop`), submit action, and deterministic planner file selection on brownfield fixtures — CI-safe, no API key.
+
+```bash
+npm run edit:stress
+npm run edit:stress -- --prompt sudoku-gameplay
+npm run edit:stress -- --json
+```
+
+Reports: `benchmarks/results/edit-stress-latest.md`
+
+### Live mock patch validation (`edit:stress:live`)
+
+Extends dry-run with `validateProposalQuality`, hunk splitting, and partial-merge checks on fixture file content (reads `e2e/fixtures/sudoku-vite` when available).
+
+```bash
+npm run edit:stress:live
+npm run edit:stress:live -- --prompt sudoku-gameplay
+npm run edit:stress:live -- --json
+```
+
+Reports: `benchmarks/results/edit-stress-live-latest.md`
+
+### Mock provider pipeline (`edit:stress:provider`)
+
+Full headless path: deterministic plan → `executeApplyPlanOrchestration` (mock `proposeApplyPlanPatches`) → auto-apply → optional `npm run typecheck` + build.
+
+```bash
+npm run edit:stress:provider:fast    # 4 sudoku prompts (CI default)
+npm run edit:stress:provider         # all 10 prompts
+npm run edit:stress:provider -- --skip-verify
+npm run edit:stress:provider -- --prompt sudoku-gameplay
+```
+
+Reports: `benchmarks/results/edit-stress-provider-latest.md`
+
 ## Scorecard output
 
 Each run writes:

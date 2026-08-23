@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { FOLDER_SELECTION_GATE_COPY } from "@/core/agent/folderSelectionGate";
 import { latestPromptsByStage } from "@/core/intelligence/promptVisibility";
 import type { FeasibilityResult } from "@/core/intelligence";
@@ -52,6 +52,135 @@ export function FolderSelectionGate({
         </button>
         <button type="button" className="prov-btn" disabled={busy} onClick={onCancel}>
           {FOLDER_SELECTION_GATE_COPY.cancelLabel}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+import type { ExecutionModeChoice, ExecutionModeResolution } from "@/core/agent/executionModeConfirmation";
+import type { RouteAgentPromptResult } from "@/core/agent/unifiedAgentRoute";
+
+interface ExecutionModeConfirmGateProps {
+  readonly prompt: string;
+  readonly route: RouteAgentPromptResult;
+  readonly resolution: ExecutionModeResolution;
+  readonly currentProjectPath: string | null;
+  readonly onContinue: (
+    choice: ExecutionModeChoice,
+    createTargetFolder: string,
+  ) => void;
+  readonly onCancel: () => void;
+}
+
+export function ExecutionModeConfirmGate({
+  resolution,
+  currentProjectPath,
+  onContinue,
+  onCancel,
+}: ExecutionModeConfirmGateProps) {
+  const { profile, diagnostics, recommendedChoice, createTargetFolder } = resolution;
+  const [choice, setChoice] = useState<ExecutionModeChoice>(recommendedChoice);
+  const [createTarget, setCreateTarget] = useState(
+    createTargetFolder ?? currentProjectPath ?? "",
+  );
+
+  const workspaceDetail = profile.isExistingApplication
+    ? profile.applicationLabel
+      ? `Existing ${profile.applicationLabel} detected.`
+      : "Existing application source files detected."
+    : profile.isEmptyWorkspace
+      ? "No application source files detected."
+      : "Partial project scaffold detected.";
+
+  return (
+    <section className="feasibility-gate execution-mode-gate" aria-label="Execution mode confirmation">
+      <h4 className="build-view__heading">Confirm how to run this prompt</h4>
+      <p className="plan__muted">
+        This prompt could either modify your current project or create a brand-new application.
+      </p>
+      <div className="execution-mode-gate__workspace">
+        <p className="execution-mode-gate__label">Current workspace</p>
+        <p className="execution-mode-gate__value">
+          <strong>{profile.workspaceLabel}</strong>
+        </p>
+        <p className="plan__muted">{workspaceDetail}</p>
+      </div>
+      <p className="plan__muted execution-mode-gate__question">How would you like to continue?</p>
+      <div className="execution-mode-gate__options" role="radiogroup" aria-label="Execution mode">
+        <label
+          className={`execution-mode-gate__option${
+            choice === "edit_current" ? " execution-mode-gate__option--selected" : ""
+          }${recommendedChoice === "edit_current" ? " execution-mode-gate__option--recommended" : ""}`}
+        >
+          <input
+            type="radio"
+            name="execution-mode"
+            value="edit_current"
+            checked={choice === "edit_current"}
+            onChange={() => setChoice("edit_current")}
+          />
+          <span>
+            Edit Current Project
+            {recommendedChoice === "edit_current" ? (
+              <span className="execution-mode-gate__badge">Recommended</span>
+            ) : null}
+          </span>
+        </label>
+        <label
+          className={`execution-mode-gate__option${
+            choice === "create_new" ? " execution-mode-gate__option--selected" : ""
+          }${recommendedChoice === "create_new" ? " execution-mode-gate__option--recommended" : ""}`}
+        >
+          <input
+            type="radio"
+            name="execution-mode"
+            value="create_new"
+            checked={choice === "create_new"}
+            onChange={() => setChoice("create_new")}
+          />
+          <span>
+            Create New App
+            {recommendedChoice === "create_new" ? (
+              <span className="execution-mode-gate__badge">Recommended</span>
+            ) : null}
+          </span>
+        </label>
+      </div>
+      <div className="execution-mode-gate__folders">
+        <label className="execution-mode-gate__field">
+          <span className="execution-mode-gate__label">Target folder</span>
+          <input
+            type="text"
+            className="execution-mode-gate__input"
+            value={currentProjectPath ?? ""}
+            readOnly
+            aria-readonly="true"
+          />
+        </label>
+        {choice === "create_new" ? (
+          <label className="execution-mode-gate__field">
+            <span className="execution-mode-gate__label">Create as</span>
+            <input
+              type="text"
+              className="execution-mode-gate__input"
+              value={createTarget}
+              onChange={(e) => setCreateTarget(e.target.value)}
+            />
+          </label>
+        ) : null}
+      </div>
+      <p className="plan__muted execution-mode-gate__reason">{diagnostics.reason}</p>
+      <div className="build-view__actions">
+        <button
+          type="button"
+          className="prov-btn prov-btn--primary"
+          onClick={() => onContinue(choice, createTarget.trim())}
+        >
+          Continue
+        </button>
+        <button type="button" className="prov-btn" onClick={onCancel}>
+          Cancel
         </button>
       </div>
     </section>

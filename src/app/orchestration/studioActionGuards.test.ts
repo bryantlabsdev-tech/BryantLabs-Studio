@@ -127,4 +127,31 @@ describe("applyFinishStudioRunPatch", () => {
     assert.equal(next.latestAction?.status, "failed");
     assert.equal(next.latestAction?.detail, "parse error");
   });
+
+  it("parks follow-up review without terminal success or dangling running logs", () => {
+    const prev = {
+      ...emptyGreenfieldRun(),
+      runResult: "running" as const,
+      runStartedAt: Date.now() - 5_000,
+      entries: [
+        {
+          id: "apply-running",
+          stage: "apply_plan" as const,
+          status: "running" as const,
+          message: "Apply Plan — proposing patches",
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    };
+    const next = applyFinishStudioRunPatch(
+      prev,
+      "apply_plan",
+      true,
+      "Changes ready for review",
+      "apply_plan",
+    );
+    assert.equal(next.runResult, "running");
+    assert.equal(next.lastSuccessfulRunAt, null);
+    assert.equal(next.entries.every((entry) => entry.status !== "running"), true);
+  });
 });

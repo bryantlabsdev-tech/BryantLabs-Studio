@@ -11,6 +11,9 @@ export const GREENFIELD_EMPTY_FOLDER_ACTIVITY =
 export const NO_FOLDER_GREENFIELD_MESSAGE =
   "Choose an empty folder to create a new app.";
 
+export const EMPTY_FOLDER_EXTEND_PROJECT_MESSAGE =
+  "This folder has no source files. Open the project you want to extend (for example, a folder that already contains your app), then resubmit.";
+
 export const NON_EMPTY_FOLDER_GREENFIELD_MESSAGE =
   "This folder is not empty. Choose a new folder or ask me to improve this project.";
 

@@ -16,3 +16,4 @@ export * from "./reliability";
 export * from "./reliabilityStore";
 export * from "./providerDiagnostics";
 export * from "./providerConnectionGate";
+export * from "./providerEnablement";

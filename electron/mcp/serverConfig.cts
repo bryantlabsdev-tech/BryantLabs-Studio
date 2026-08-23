@@ -39,7 +39,8 @@ export async function loadMcpServerConfigs(
   const userPath = path.join(app.getPath("userData"), "mcp-servers.json");
   const merged = await readServersFile(userPath);
 
-  if (projectRoot) {
+  // Project-local MCP servers are opt-in — untrusted repos must not auto-spawn.
+  if (projectRoot && process.env.BRYANTLABS_ALLOW_PROJECT_MCP === "1") {
     const projectPath = path.join(projectRoot, ".bryantlabs", "mcp.json");
     const projectServers = await readServersFile(projectPath);
     Object.assign(merged, projectServers);

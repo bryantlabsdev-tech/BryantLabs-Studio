@@ -1635,6 +1635,52 @@ webview.preview-frame {
   gap: var(--space-3);
 }
 
+.prov-enablement-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-3);
+}
+
+.prov-enablement-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--surface-elevated);
+}
+
+.prov-enablement-card--disabled {
+  opacity: 0.72;
+}
+
+.prov-enablement-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: 13px;
+}
+
+.prov-badge--disabled {
+  color: var(--text-muted);
+}
+
+.prov-badge--enabled {
+  color: var(--text-secondary);
+}
+
+.prov-badge--missing_key {
+  color: var(--warning-text, #c9a227);
+}
+
+.prov-badge--connected {
+  color: var(--success-text, #3ecf8e);
+}
+
+.prov-badge--error {
+  color: var(--danger-text, #f87171);
+}
+
 .prov-reliability-card {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);

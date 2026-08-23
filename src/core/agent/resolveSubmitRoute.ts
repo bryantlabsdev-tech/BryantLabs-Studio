@@ -58,6 +58,8 @@ export function resolveAgentSubmitRoute(input: {
       reason: "incomplete_greenfield_edit_blocked",
       execution: "blocked",
       intent: "blocked",
+      promptIntent: "ask",
+      mixedEdit: false,
       blockedReason: incompleteGreenfieldEditBlockMessage(input.greenfieldRun),
       activityNote: null,
       needsEmptyFolder: false,

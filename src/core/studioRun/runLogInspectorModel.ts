@@ -143,7 +143,7 @@ function readDetailMap(details: string): Map<string, string> {
   return map;
 }
 
-function parseProviderCallLine(details: string): RunLogProviderCallDetails | null {
+export function parseProviderCallLine(details: string): RunLogProviderCallDetails | null {
   if (!details.includes("stage=") && !details.includes("provider=")) return null;
   const firstLine = details.split("\n")[0] ?? details;
   const read = (key: string): string | null => {

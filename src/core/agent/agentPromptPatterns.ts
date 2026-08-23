@@ -51,6 +51,23 @@ const EXPLICIT_GREENFIELD_RESTART_PATTERNS: readonly RegExp[] = [
   /\bbrand\s+new\b[\s\S]{0,40}\b(new\s+folder|in\s+a\s+new)\b/i,
 ];
 
+const PRESERVE_EXISTING_APP_PATTERNS: readonly RegExp[] = [
+  /\bdo\s+not\s+redesign\s+the\s+existing\b/i,
+  /\bpreserv(e|ing)\s+(every\s+)?existing\b/i,
+  /\bkeep\s+working\s*:/i,
+  /\bextend\s+the\s+current\b/i,
+  /\bdo\s+not\s+remove\s+any\s+existing\b/i,
+  /\bwithout\s+removing\b/i,
+  /\bexisting\s+(visual\s+style|features?)\b/i,
+  /\btransform\s+this\s+into\b/i,
+];
+
+export function looksLikePreserveExistingAppPrompt(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (trimmed.length < 4) return false;
+  return PRESERVE_EXISTING_APP_PATTERNS.some((re) => re.test(trimmed));
+}
+
 export function looksLikeEditExistingProjectPrompt(prompt: string): boolean {
   const trimmed = prompt.trim();
   if (trimmed.length < 4) return false;

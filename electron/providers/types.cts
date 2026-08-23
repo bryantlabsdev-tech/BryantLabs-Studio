@@ -1,4 +1,5 @@
 import type { ProviderId } from "./settings.cjs";
+import { requestHttpJson } from "./httpJson.cjs";
 
 export type { ProviderId };
 
@@ -44,12 +45,65 @@ export interface ProviderResponse {
   errorCode?: string;
 }
 
-/** fetch with an abort-based timeout. Returns the parsed JSON or throws. */
+function parseJsonResponse(text: string): unknown {
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return { rawText: text };
+  }
+}
+
+/** HTTP JSON client with abort-based timeout. POST bodies use Node HTTPS (fetch truncates in Electron). */
 export async function fetchJson(
   url: string,
   init: RequestInit,
   timeoutMs: number,
-): Promise<{ status: number; ok: boolean; json: unknown; headers: Record<string, string> }> {
+  opts?: {
+    attempt?: number;
+    requestId?: string;
+    structure?: import("./transportDiagnostics.cjs").RequestStructureDiagnostics | null;
+  },
+): Promise<{
+  status: number;
+  ok: boolean;
+  json: unknown;
+  headers: Record<string, string>;
+  transport?: import("./httpJson.cjs").RequestBodyTransportMetrics;
+}> {
+  const method = (init.method ?? "GET").toUpperCase();
+  const hasBody = init.body != null && method !== "GET" && method !== "HEAD";
+
+  if (hasBody) {
+    const res = await requestHttpJson(url, init, timeoutMs, opts);
+    const text = res.text;
+    let responseParsed = true;
+    let json: unknown;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      responseParsed = false;
+      json = { rawText: text };
+    }
+    const transport = res.transport
+      ? {
+          ...res.transport,
+          ...(responseParsed
+            ? {}
+            : {
+                truncationSource: "inbound_response_json_truncated" as const,
+                parserStage: "fetchJson_parseJsonResponse",
+              }),
+        }
+      : undefined;
+    return {
+      status: res.status,
+      ok: res.ok,
+      json,
+      headers: res.headers,
+      ...(transport ? { transport } : {}),
+    };
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -58,14 +112,13 @@ export async function fetchJson(
     res.headers.forEach((value, key) => {
       headers[key.toLowerCase()] = value;
     });
-    let json: unknown = null;
     const text = await res.text();
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch {
-      json = { rawText: text };
-    }
-    return { status: res.status, ok: res.ok, json, headers };
+    return {
+      status: res.status,
+      ok: res.ok,
+      json: parseJsonResponse(text),
+      headers,
+    };
   } finally {
     clearTimeout(timer);
   }

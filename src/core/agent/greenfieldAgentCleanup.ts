@@ -12,6 +12,33 @@ export function closeStaleGreenfieldRunningEntries(
   );
 }
 
+/** Snapshot patch after embedded Agent greenfield create succeeds. */
+export function buildAgentGreenfieldSuccessRunPatch(
+  prev: GreenfieldRunSnapshot,
+  successInput: {
+    readonly filesWritten: readonly string[];
+    readonly typecheckPassed: boolean;
+    readonly buildPassed: boolean;
+  },
+): Partial<GreenfieldRunSnapshot> {
+  const filesWritten =
+    successInput.filesWritten.length > 0
+      ? [...successInput.filesWritten]
+      : prev.filesWritten;
+  const terminalSuccess = prev.runResult === "success";
+  return {
+    ...finalizeGreenfieldAgentRun({
+      ...prev,
+      filesWritten,
+      ...(terminalSuccess ? {} : { runResult: "success" }),
+    }),
+    filesWritten,
+    setupStatus:
+      prev.setupStatus === "done" || successInput.buildPassed ? "done" : prev.setupStatus,
+    lastSuccessfulRunAt: prev.lastSuccessfulRunAt ?? Date.now(),
+  };
+}
+
 /**
  * Normalize greenfield run snapshot after embedded Agent create/repair success.
  * Clears busy flags so follow-up runs are not blocked by stale greenfield state.

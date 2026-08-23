@@ -4,6 +4,7 @@ import {
   incompleteGreenfieldEditBlockMessage,
   shouldBlockEditForIncompleteGreenfield,
 } from "@/core/agent/greenfieldRecoveryRouting";
+import { NO_PENDING_CHANGES_MESSAGE } from "@/core/diagnostics/pipelineInspector";
 import { resolveEffectiveProjectScan } from "@/core/agent/resolveEffectiveProjectScan";
 import {
   computePlanApplyTotals,
@@ -16,6 +17,7 @@ import type { GreenfieldRunLogEntry } from "@/core/greenfield/runLog";
 import type { WorkspacePlanState } from "@/app/workspace/useWorkspacePlanState";
 import type { BryantLabsApi } from "@/types";
 import type { ExecuteApplyPlanResult } from "@/app/orchestration";
+import { discardPlanApplyShadowRun } from "@/app/orchestration/shadowStage";
 
 export function useWorkspacePlanApplyControls(input: {
   readonly api: BryantLabsApi | null | undefined;
@@ -30,6 +32,7 @@ export function useWorkspacePlanApplyControls(input: {
     | "setPlanApplyError"
     | "applyPlanActiveRunIdRef"
     | "applyPlanCompletedRunIdRef"
+    | "applyPlanSuccessRef"
   >;
   readonly greenfieldRun: GreenfieldRunSnapshot;
   readonly appendGreenfieldRunLog: (
@@ -44,11 +47,14 @@ export function useWorkspacePlanApplyControls(input: {
   }) => Promise<ExecuteApplyPlanResult>;
 }) {
   const cancelApplyPlan = useCallback(() => {
+    void input.api?.cancelActiveProviderRequests?.();
+    const runId = input.planApplySession?.applyRunId;
+    void discardPlanApplyShadowRun(input.api ?? undefined, runId);
     input.planState.applyPlanActiveRunIdRef.current = null;
     input.planState.applyPlanCompletedRunIdRef.current = null;
     input.planState.setPlanApplySession(null);
     input.planState.setPlanApplyError(null);
-  }, [input.planState]);
+  }, [input.api, input.planApplySession?.applyRunId, input.planState]);
 
   const selectPlanApplyFile = useCallback((relPath: string) => {
     input.planState.setPlanApplySession((prev) =>
@@ -68,6 +74,19 @@ export function useWorkspacePlanApplyControls(input: {
           files,
           totals: computePlanApplyTotals(files),
         };
+      });
+    },
+    [input.planState],
+  );
+
+  const setPlanApplyFilePartialContent = useCallback(
+    (relPath: string, mergedAfter: string) => {
+      input.planState.setPlanApplySession((prev) => {
+        if (!prev) return prev;
+        const files = prev.files.map((f) =>
+          f.relPath === relPath ? { ...f, appliedNewContent: mergedAfter } : f,
+        );
+        return { ...prev, files };
       });
     },
     [input.planState],
@@ -140,6 +159,15 @@ export function useWorkspacePlanApplyControls(input: {
             : "Apply prerequisites missing (deterministic plan not ready).",
         };
       }
+      if (
+        !opts?.autoContinue &&
+        !input.planApplySession &&
+        input.planState.applyPlanSuccessRef.current &&
+        input.planState.applyPlanCompletedRunIdRef.current
+      ) {
+        input.appendGreenfieldRunLog("apply_plan", "success", NO_PENDING_CHANGES_MESSAGE);
+        return { validReady: 0, autoContinued: false };
+      }
       return input.executeApplyPlan({
         directRewrite: false,
         ...(opts?.autoContinue !== undefined ? { autoContinue: opts.autoContinue } : {}),
@@ -173,6 +201,7 @@ export function useWorkspacePlanApplyControls(input: {
     cancelApplyPlan,
     selectPlanApplyFile,
     setPlanApplyFileDecision,
+    setPlanApplyFilePartialContent,
     approveAllPlanApplyFiles,
     beginApplyPlanRun,
     completeApplyPlanRun,

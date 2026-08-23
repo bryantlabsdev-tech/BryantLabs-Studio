@@ -1,6 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import * as http from "node:http";
 import {
+  buildSpawnDiagnostics,
+  logSpawnDiagnostics,
+  resolveShellCommand,
+  resolveSpawnCwdSync,
+  spawnProcessEnv,
+} from "../processSpawn.cjs";
+import {
   buildPreviewDiagnostics,
   collectPreviewProjectContext,
   DEFAULT_PREVIEW_PORT,
@@ -11,18 +18,19 @@ import {
 } from "./previewDiagnostics.cjs";
 import {
   extractPreviewUrl,
+  isAllowedPreviewUrl,
   normalizePreviewUrl,
   previewUrlForPort,
 } from "./previewUrlParse.cjs";
 
-export { normalizePreviewUrl, extractPreviewUrl } from "./previewUrlParse.cjs";
+export { normalizePreviewUrl, extractPreviewUrl, isAllowedPreviewUrl } from "./previewUrlParse.cjs";
 
 /**
  * Vite preview for a generated app (Phase 10). Spawns `npm run preview` in the
  * project root and parses the local URL from stdout. Single preview at a time.
  */
 
-const START_WAIT_MS = 30_000;
+const START_WAIT_MS = 60_000;
 const POLL_INTERVAL_MS = 400;
 
 let previewProc: ChildProcess | null = null;
@@ -88,8 +96,18 @@ export function previewPortFromUrl(url: string | null): number {
 }
 
 export function probePreviewUrl(url: string): Promise<PreviewProbeResult> {
-  const target = normalizePreviewUrl(url);
   const probedAt = new Date().toISOString();
+  if (!isAllowedPreviewUrl(url)) {
+    return Promise.resolve({
+      ok: false,
+      httpStatus: null,
+      contentType: null,
+      error: "Preview probe is limited to localhost URLs.",
+      errorKind: "unknown" as const,
+      probedAt,
+    });
+  }
+  const target = normalizePreviewUrl(url);
 
   return new Promise((resolve) => {
     const req = http.get(
@@ -271,7 +289,10 @@ export async function startPreview(root: string): Promise<PreviewStartResult> {
 
   const port = picked.port;
   previewPort = port;
-  const command = previewCommand(port);
+  const command = resolveShellCommand(previewCommand(port));
+  const { cwd: spawnRoot, exists: rootExists } = resolveSpawnCwdSync(root);
+  const diagnostics = buildSpawnDiagnostics({ command, cwd: spawnRoot });
+  logSpawnDiagnostics(diagnostics, "greenfield:preview");
   const portInUseBeforeStart = await isPortInUse(port);
 
   return new Promise((resolve) => {
@@ -279,16 +300,14 @@ export async function startPreview(root: string): Promise<PreviewStartResult> {
     let stderrBuf = "";
     let settled = false;
 
-    const env = {
-      ...process.env,
-      PATH: `${process.env.PATH ?? ""}:/usr/local/bin:/opt/homebrew/bin`,
+    const env = spawnProcessEnv({
       CI: "1",
       FORCE_COLOR: "0",
       NO_COLOR: "1",
-    };
+    });
 
     const child = spawn(command, {
-      cwd: root,
+      cwd: rootExists ? spawnRoot : root,
       shell: true,
       env,
       windowsHide: true,

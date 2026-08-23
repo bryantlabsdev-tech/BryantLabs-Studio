@@ -31,7 +31,7 @@ export const SCAN_IGNORED_DIR_NAMES = new Set([
 const IGNORED_DIRS = SCAN_IGNORED_DIR_NAMES;
 
 /** Largest source file we will read for indexing (bytes). */
-export const MAX_INDEX_BYTES = 512 * 1024;
+export const MAX_INDEX_BYTES = 768 * 1024;
 
 /** True when a project-relative path sits under an ignored directory. */
 export function isIgnoredProjectPath(relPath: string): boolean {

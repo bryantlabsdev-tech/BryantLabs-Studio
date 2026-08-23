@@ -3,6 +3,7 @@ import {
   GREENFIELD_BLOCKED_BY_ROUTE_LABEL,
   resolveFollowUpSubmitAction,
 } from "@/core/agent/followUpExecution";
+import type { AgentPromptIntent } from "@/core/agent/agentIntentRouter";
 import type { StudioIntentKind } from "@/core/agent/classifyStudioIntent";
 import { hasEstablishedAppContext } from "@/core/agent/agentAppContext";
 
@@ -59,7 +60,23 @@ export type BuildViewSubmitGate =
   | { readonly kind: "stale"; readonly prompt: string; readonly intent: StudioIntentKind; readonly route: RouteAgentPromptResult }
   | { readonly kind: "folder"; readonly pendingPrompt: string }
   | { readonly kind: "greenfield"; readonly prompt: string; readonly recovery: boolean }
-  | { readonly kind: "follow_up"; readonly prompt: string; readonly route: Pick<RouteAgentPromptResult, "execution" | "intent"> }
+  | {
+      readonly kind: "follow_up";
+      readonly prompt: string;
+      readonly route: Pick<RouteAgentPromptResult, "execution" | "intent" | "promptIntent" | "mixedEdit">;
+    }
+  | {
+      readonly kind: "consultation";
+      readonly prompt: string;
+      readonly promptIntent: AgentPromptIntent;
+      readonly mixedEdit: boolean;
+      readonly route: Pick<RouteAgentPromptResult, "execution" | "intent" | "promptIntent" | "mixedEdit">;
+    }
+  | {
+      readonly kind: "run_command";
+      readonly prompt: string;
+      readonly promptIntent: AgentPromptIntent;
+    }
   | { readonly kind: "blocked"; readonly message: string; readonly openProject?: boolean };
 
 export function resolveBuildViewSubmitRoute(
@@ -107,6 +124,29 @@ export function evaluateBuildViewSubmit(
     };
   }
 
+  if (route.execution === "consultation" || route.execution === "mixed_confirm") {
+    return {
+      kind: "consultation",
+      prompt: input.trimmed,
+      promptIntent: route.promptIntent,
+      mixedEdit: route.mixedEdit,
+      route: {
+        execution: route.execution,
+        intent: route.intent,
+        promptIntent: route.promptIntent,
+        mixedEdit: route.mixedEdit,
+      },
+    };
+  }
+
+  if (route.execution === "run_command") {
+    return {
+      kind: "run_command",
+      prompt: input.trimmed,
+      promptIntent: route.promptIntent,
+    };
+  }
+
   const clarity = assessPromptClarity(input.trimmed, {
     hasAppContext: hasEstablishedAppContext(
       input.currentAppContext,
@@ -124,7 +164,12 @@ export function evaluateBuildViewSubmit(
       return {
         kind: "follow_up",
         prompt: input.trimmed,
-        route: { execution: route.execution, intent: route.intent },
+        route: {
+          execution: route.execution,
+          intent: route.intent,
+          promptIntent: route.promptIntent,
+          mixedEdit: route.mixedEdit,
+        },
       };
     }
     return { kind: "feasibility", result: feasibility };
@@ -133,7 +178,12 @@ export function evaluateBuildViewSubmit(
   return {
     kind: "follow_up",
     prompt: input.trimmed,
-    route: { execution: route.execution, intent: route.intent },
+    route: {
+      execution: route.execution,
+      intent: route.intent,
+      promptIntent: route.promptIntent,
+      mixedEdit: route.mixedEdit,
+    },
   };
 }
 

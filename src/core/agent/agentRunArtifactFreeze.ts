@@ -47,6 +47,7 @@ export function shouldFreezeAgentRunArtifact(stateInput: DeriveAgentRunStateInpu
 
   const run = stateInput.greenfieldRun;
   if (followUpRunInProgress(run)) return false;
+  if (run.runResult === "running") return false;
   if (!isRunTerminal(run)) return false;
 
   return true;

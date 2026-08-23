@@ -175,6 +175,68 @@ describe("buildAgentConversationProjection", () => {
     assert.match(narrative, /weren't modified/i);
     assert.equal(narrative.match(/invalid patches/gi)?.length, 1);
   });
+
+  it("does not claim apply failed when a successful run had advisory UI audit logs", () => {
+    const projection = buildAgentConversationProjection({
+      tools: [
+        tool({
+          id: "failure:ui-audit",
+          kind: "failure",
+          label: "Generated App UI Audit found issues: form_layout",
+          status: "failed",
+        }),
+      ],
+      summary: successSummary({
+        outcome: "success",
+        filesChanged: ["src/App.tsx", "src/index.css"],
+        uiAudit: "advisory",
+      }),
+      previewReady: true,
+      isRunning: false,
+    });
+    const narrative = narrativeTargetText(projection.segments, null);
+    assert.doesNotMatch(narrative, /couldn't safely apply/i);
+    assert.match(narrative, /updated successfully/i);
+  });
+
+  it("does not claim apply failed when patch review is pending", () => {
+    const projection = buildAgentConversationProjection({
+      tools: [],
+      summary: successSummary({
+        outcome: "failed",
+        filesChanged: [],
+        errors: ["Provider returned invalid patches"],
+      }),
+      isRunning: false,
+      patchReviewPending: true,
+    });
+
+    const narrative = narrativeTargetText(projection.segments, null);
+    assert.match(narrative, /ready for your review/i);
+    assert.doesNotMatch(narrative, /couldn't safely apply/i);
+  });
+
+  it("does not describe generation as follow-up edits", () => {
+    const projection = buildAgentConversationProjection({
+      tools: [
+        tool({
+          id: "generate:main",
+          kind: "generate",
+          label: "Generating implementation",
+          status: "success",
+        }),
+      ],
+      summary: null,
+      isRunning: true,
+    });
+    assert.equal(
+      projection.actions.find((action) => action.id === "generate:main")?.label,
+      "Files prepared",
+    );
+    const narrative = narrativeTargetText(projection.segments, null);
+    assert.doesNotMatch(narrative, /\bedits\b/i);
+    assert.match(narrative, /prepared the files/i);
+  });
 });
 
 describe("pickWaitObservation", () => {

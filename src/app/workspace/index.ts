@@ -68,9 +68,5 @@ export type { RoutingIntentSnapshot } from "./routingIntentStore";
 export function isStudioTestMode(): boolean {
   const env = import.meta.env;
   if (!env) return false;
-  return (
-    env.DEV === true ||
-    env.VITE_BRYANTLABS_E2E === "1" ||
-    env.MODE === "test"
-  );
+  return env.VITE_BRYANTLABS_E2E === "1" || env.MODE === "test";
 }

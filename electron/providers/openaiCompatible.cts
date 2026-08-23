@@ -3,6 +3,7 @@ import {
   isOfflineError,
 } from "./reliability.cjs";
 import { fetchJson } from "./types.cjs";
+import { jsonRequestBody, sanitizeProviderPrompt } from "./sanitizePrompt.cjs";
 
 export type OpenAiConnectionStatus =
   | "connected"
@@ -98,6 +99,7 @@ export async function createOpenAiChatCompletion(
   httpStatus: number;
   error: string | null;
 }> {
+  const safePrompt = sanitizeProviderPrompt(prompt);
   const body: {
     model: string;
     max_tokens: number;
@@ -106,7 +108,7 @@ export async function createOpenAiChatCompletion(
   } = {
     model,
     max_tokens: maxTokens,
-    messages: [{ role: "user", content: prompt }],
+    messages: [{ role: "user", content: safePrompt }],
   };
   if (temperature !== undefined) body.temperature = temperature;
 
@@ -115,7 +117,7 @@ export async function createOpenAiChatCompletion(
     {
       method: "POST",
       headers: openAiHeaders(config.apiKey, config.extraHeaders),
-      body: JSON.stringify(body),
+      body: jsonRequestBody(body),
     },
     timeoutMs,
   );

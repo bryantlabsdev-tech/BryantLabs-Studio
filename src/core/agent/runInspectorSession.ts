@@ -40,21 +40,32 @@ export function reduceRunInspectorSession(
         lockedRunId: state.centerInspectorActive ? state.lockedRunId : null,
       };
     case "set_tab":
+      if (state.tab === action.tab) return state;
       return { ...state, tab: action.tab };
-    case "center_inspector_active":
+    case "center_inspector_active": {
       if (action.runId) {
+        const lockedRunId = state.lockedRunId ?? action.runId;
+        if (state.centerInspectorActive && state.lockedRunId === lockedRunId) {
+          return state;
+        }
         return {
           ...state,
           centerInspectorActive: true,
-          lockedRunId: state.lockedRunId ?? action.runId,
+          lockedRunId,
         };
+      }
+      const lockedRunId = state.modalOpen ? state.lockedRunId : null;
+      if (!state.centerInspectorActive && state.lockedRunId === lockedRunId) {
+        return state;
       }
       return {
         ...state,
         centerInspectorActive: false,
-        lockedRunId: state.modalOpen ? state.lockedRunId : null,
+        lockedRunId,
       };
+    }
     case "lock_run":
+      if (state.lockedRunId === action.runId) return state;
       return { ...state, lockedRunId: action.runId };
     default:
       return state;

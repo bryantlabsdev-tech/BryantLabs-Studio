@@ -1,5 +1,5 @@
 import type { MouseEvent } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 
 interface RunInspectorActionsProps {
   readonly runId: string | null;

@@ -6,6 +6,7 @@ export type RailTool =
   | "newapp"
   | "files"
   | "search"
+  | "git"
   | "repomap"
   | "repository"
   | "memory"
@@ -29,6 +30,7 @@ export type CenterTab =
   | "summary"
   | "studioLog"
   | "inspector"
+  | "pipelineInspector"
   | "metrics"
   | "memory";
 

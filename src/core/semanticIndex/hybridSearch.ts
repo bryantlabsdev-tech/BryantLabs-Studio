@@ -1,7 +1,7 @@
 import type { RepositorySearchHit } from "@/core/repository/types";
 import type { SemanticSearchHit } from "@/core/semanticIndex/types";
 
-const MAX_MERGED = 24;
+const MAX_MERGED = 32;
 
 function hitKey(path: string, symbolName?: string | null): string {
   return `${path}::${symbolName ?? ""}`;

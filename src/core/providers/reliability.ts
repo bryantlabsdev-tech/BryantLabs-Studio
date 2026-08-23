@@ -1,5 +1,6 @@
 import { getProviderInfo } from "@/core/providers/registry";
 import { modelForProvider } from "@/core/providers/AnthropicProvider";
+import { isProviderEnabled } from "@/core/providers/providerEnablement";
 import type { HealthResult, ProviderId, ProviderSettings } from "@/core/providers/types";
 import type { AgentStage } from "@/core/providers/orchestration";
 
@@ -68,6 +69,8 @@ const MODEL_UNAVAILABLE_RE =
   /model.*not found|not available|invalid model|404|models\/.*not found/i;
 const REQUEST_TOO_LARGE_RE =
   /prompt tokens limit|tokens limit exceeded|context length|too many tokens|request too large|token limit|maximum context/i;
+const TRUNCATED_REQUEST_BODY_RE =
+  /request body is not valid json|unexpected end of data|malformed request body|invalid json.*body/i;
 const INVALID_REQUEST_RE =
   /invalid request|bad request|malformed request|422/i;
 
@@ -112,6 +115,17 @@ export function reliabilityStatusLabel(status: ProviderReliabilityStatus): strin
 
 export function isRequestTooLargeError(error: string | undefined | null): boolean {
   return REQUEST_TOO_LARGE_RE.test((error ?? "").trim());
+}
+
+/** Provider rejected a truncated or malformed HTTP JSON body (retry with compression / per-file). */
+export function isTruncatedRequestBodyError(error: string | undefined | null): boolean {
+  return TRUNCATED_REQUEST_BODY_RE.test((error ?? "").trim());
+}
+
+export function shouldRetryApplyPlanWithCompression(
+  error: string | undefined | null,
+): boolean {
+  return isRequestTooLargeError(error) || isTruncatedRequestBodyError(error);
 }
 
 /** Request-size and config failures must not degrade provider health. */
@@ -241,6 +255,7 @@ function providerHasApiKey(settings: ProviderSettings, id: ProviderId): boolean 
 }
 
 function isProviderUsable(id: ProviderId, settings: ProviderSettings): boolean {
+  if (!isProviderEnabled(settings, id)) return false;
   if (isProviderInCooldown(id)) return false;
   if (id === "ollama") {
     return (
@@ -260,6 +275,7 @@ export function buildSuggestedFallbacks(
   if (
     backup &&
     backup !== failedProvider &&
+    isProviderEnabled(settings, backup) &&
     isProviderUsable(backup, settings)
   ) {
     ordered.push(backup);

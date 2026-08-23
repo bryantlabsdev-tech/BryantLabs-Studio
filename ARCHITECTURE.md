@@ -4,8 +4,8 @@
 > BryantLabs Studio. Each phase below is annotated with its real implementation
 > status and, where useful, an **_As built_** pointer to the code. Phases 1–18
 > are implemented; Phases 19–22 cover the 2026 refactor (orchestration extraction,
-> run persistence, git polish, platform layer). CI runs typecheck, 240 unit
-> tests (176 renderer + 64 electron main), and production build on every push.
+> run persistence, git polish, platform layer). CI runs typecheck, renderer and
+> electron unit tests, and a production build on every push.
 
 ## Vision
 
@@ -372,11 +372,10 @@ Features:
 > agents**. A provider-agnostic core (`src/core/providers`: common
 > response/health shapes + a pluggable registry) drives the UI; the actual
 > network calls and all secrets live in the main process
-> (`electron/providers/`: `gemini.cts`, `ollama.cts`, `settings.cts`, dispatch
-> `index.cts`). Implemented providers: **Gemini** (key-present + test-request
-> health, `generateContent` test) and **Ollama** (reachable + model-installed +
-> test-prompt health via `/api/tags` and `/api/generate`). OpenAI is registry-
-> ready but not yet implemented.
+> (`electron/providers/`: `gemini.cts`, `ollama.cts`, `anthropic.cts`,
+> `openaiCompatible.cts`, `settings.cts`, dispatch `index.cts`). Implemented
+> providers: **Gemini**, **Anthropic**, **Groq**, **OpenRouter** (OpenAI-compatible
+> models), and **Ollama**. Direct OpenAI is unused; OpenRouter covers those models.
 >
 > Routing is **explicit and strict**: requests go to the requested provider or
 > fail — no automatic fallback, no silent provider/model switching. The

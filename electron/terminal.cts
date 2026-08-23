@@ -1,6 +1,14 @@
 import type { BrowserWindow, IpcMain } from "electron";
 import * as path from "node:path";
 import * as pty from "node-pty";
+import {
+  buildSpawnDiagnostics,
+  formatPosixSpawnError,
+  logSpawnDiagnostics,
+  resolveDefaultShell,
+  resolveSpawnCwdSync,
+  spawnProcessEnv,
+} from "./processSpawn.cjs";
 
 interface TerminalSession {
   readonly pty: pty.IPty;
@@ -8,13 +16,6 @@ interface TerminalSession {
 }
 
 const sessions = new Map<string, TerminalSession>();
-
-function defaultShell(): string {
-  if (process.platform === "win32") {
-    return process.env.COMSPEC ?? "powershell.exe";
-  }
-  return process.env.SHELL ?? "/bin/zsh";
-}
 
 function sendToRenderer(
   getMainWindow: () => BrowserWindow | null,
@@ -49,6 +50,7 @@ export function registerTerminalIpc(
   ipcMain: IpcMain,
   getMainWindow: () => BrowserWindow | null,
   isWithinProject: (target: string) => boolean,
+  getProjectRoot: () => string | null = () => null,
 ): void {
   ipcMain.handle(
     "terminal:create",
@@ -61,9 +63,19 @@ export function registerTerminalIpc(
       if (typeof cwd !== "string" || cwd.length === 0) {
         return { error: "Invalid working directory." };
       }
-      const resolved = path.resolve(cwd);
+      const requested = path.resolve(cwd);
+      if (!isWithinProject(requested)) {
+        return { error: "Working directory is outside the open project." };
+      }
+      const { cwd: resolved, exists } = resolveSpawnCwdSync(
+        requested,
+        getProjectRoot(),
+      );
       if (!isWithinProject(resolved)) {
         return { error: "Working directory is outside the open project." };
+      }
+      if (!exists) {
+        return { error: "Working directory does not exist." };
       }
 
       const safeCols =
@@ -76,7 +88,9 @@ export function registerTerminalIpc(
           : 24;
 
       const id = `term-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const shell = defaultShell();
+      const shell = resolveDefaultShell();
+      const diagnostics = buildSpawnDiagnostics({ command: shell, cwd: resolved });
+      logSpawnDiagnostics(diagnostics, "terminal:create");
 
       let proc: pty.IPty;
       try {
@@ -85,15 +99,13 @@ export function registerTerminalIpc(
           cols: safeCols,
           rows: safeRows,
           cwd: resolved,
-          env: {
-            ...process.env,
+          env: spawnProcessEnv({
             TERM: "xterm-256color",
             COLORTERM: "truecolor",
-          } as Record<string, string>,
+          }) as Record<string, string>,
         });
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to spawn shell.";
-        return { error: message };
+        return { error: formatPosixSpawnError(err) };
       }
 
       sessions.set(id, { pty: proc, cwd: resolved });

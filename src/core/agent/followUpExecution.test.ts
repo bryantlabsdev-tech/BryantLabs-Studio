@@ -107,7 +107,7 @@ describe("followUpExecution", () => {
     });
 
     assert.notEqual(action.kind, "greenfield");
-    assert.equal(action.kind, "agent_loop");
+    assert.equal(action.kind, "build_loop");
   });
 
   it("prefers agent_loop for edits when enabled", () => {

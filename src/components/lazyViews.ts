@@ -9,6 +9,9 @@ export const LazyNewAppView = lazy(() =>
 export const LazyExplorerView = lazy(() =>
   import("@/components/views/ExplorerView").then((m) => ({ default: m.ExplorerView })),
 );
+export const LazyGitView = lazy(() =>
+  import("@/components/views/GitView").then((m) => ({ default: m.GitView })),
+);
 export const LazySearchView = lazy(() =>
   import("@/components/views/SearchView").then((m) => ({ default: m.SearchView })),
 );
@@ -54,6 +57,9 @@ export const LazyAIPatchView = lazy(() =>
 export const LazyProvidersView = lazy(() =>
   import("@/components/views/ProvidersView").then((m) => ({ default: m.ProvidersView })),
 );
+export const LazySettingsView = lazy(() =>
+  import("@/components/views/SettingsView").then((m) => ({ default: m.SettingsView })),
+);
 export const LazyBuildView = lazy(() =>
   import("@/components/views/BuildView").then((m) => ({ default: m.BuildView })),
 );
@@ -83,6 +89,11 @@ export const LazyGreenfieldLogsView = lazy(() =>
 export const LazyGreenfieldInspectorView = lazy(() =>
   import("@/components/views/GreenfieldInspectorView").then((m) => ({
     default: m.GreenfieldInspectorView,
+  })),
+);
+export const LazyPipelineInspectorView = lazy(() =>
+  import("@/components/views/PipelineInspectorView").then((m) => ({
+    default: m.PipelineInspectorView,
   })),
 );
 export const LazyConsoleView = lazy(() =>

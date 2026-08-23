@@ -6,7 +6,8 @@ import {
   writeOnboardingComplete,
 } from "@/core/onboarding/firstRun";
 import { readRecentProjects } from "@/core/project/recentProjects";
-import { AgentIcon, FolderOpenIcon } from "@/components/icons";
+import { FolderOpenIcon } from "@/components/icons";
+import { BrandLogo } from "@/components/BrandLogo";
 
 const WORKFLOW_STEPS = [
   {
@@ -91,7 +92,7 @@ export function WelcomeScreen() {
       <div className="welcome-screen__panel">
         <header className="welcome-screen__hero">
           <div className="welcome-screen__icon" aria-hidden>
-            <AgentIcon />
+            <BrandLogo size={56} className="welcome-screen__logo" />
           </div>
           <h1 id="welcome-screen-title" className="welcome-screen__title">
             Welcome to BryantLabs Studio

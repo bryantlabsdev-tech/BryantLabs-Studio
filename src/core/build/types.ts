@@ -70,6 +70,7 @@ export function deriveBuildPhase(input: {
     return "review";
   }
   if (input.autoFixPhase === "awaiting_approval") return "repairing";
+  if (input.planApplyPhase === "failed") return "failed";
   if (input.pipelineStatus === "completed") return "completed";
   if (input.pipelineStatus === "failed" || input.pipelineStatus === "cancelled") {
     return "failed";

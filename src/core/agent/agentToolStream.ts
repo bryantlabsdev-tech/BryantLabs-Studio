@@ -247,6 +247,24 @@ export function buildAgentToolStream(input: BuildAgentToolStreamInput): AgentToo
     }
 
     if (entry.status === "failed") {
+      if (
+        entry.stage === "ui_audit" &&
+        (card?.overallStatus === "complete" ||
+          card?.verification.build === "passed" ||
+          (card?.filesWritten?.length ?? 0) > 0 ||
+          (card?.filesModified?.length ?? 0) > 0 ||
+          input.entries.some(
+            (later) => later.stage === "ui_audit" && later.status === "success",
+          ) ||
+          input.entries.some(
+            (later) => later.stage === "write" && later.status === "success",
+          ) ||
+          input.entries.some(
+            (later) => later.stage === "build" && later.status === "success",
+          ))
+      ) {
+        continue;
+      }
       const headline =
         card?.failureDetails?.headline ??
         (entry.stage === "apply_plan" ? AGENT_COPY.failure.patch : entry.message.trim()) ??
@@ -255,7 +273,7 @@ export function buildAgentToolStream(input: BuildAgentToolStreamInput): AgentToo
       upsertTool(items, indexById, {
         id: `failure:${entry.id}`,
         kind: "failure",
-        label: headline,
+        label: headline || AGENT_COPY.failure.default,
         status: "failed",
         at,
         ...(failureDetail ? { detail: failureDetail } : {}),

@@ -48,6 +48,23 @@ describe("routeAgentPrompt unified agent", () => {
     assert.notEqual(route.execution, "build_loop");
   });
 
+  it("blocks preserve-existing prompts on empty folder", () => {
+    const scan = mockProjectScan([], { packageJson: false });
+    const route = routeAgentPrompt({
+      prompt: `Transform this into a polished Sudoku application.
+Do NOT redesign the existing visual style.
+Extend the current application while preserving every existing feature.
+Keep working:
+* Difficulty selector
+* Notes mode`,
+      projectOpen: true,
+      scan,
+      scanStatus: "done",
+    });
+    assert.equal(route.execution, "blocked");
+    assert.match(route.blockedReason ?? "", /no source files/i);
+  });
+
   it("edit override on empty folder routes to greenfield", () => {
     const scan = mockProjectScan([], { packageJson: false });
     const route = routeAgentPrompt({

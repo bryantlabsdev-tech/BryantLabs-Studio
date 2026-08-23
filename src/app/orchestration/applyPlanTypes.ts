@@ -47,6 +47,9 @@ export interface ApplyPlanOrchestrationHost {
   readonly applyPlanSuccessRef: MutableRefObject<ApplyPlanSuccessOutcome | null>;
   readonly executionNoChangeGuardRef: MutableRefObject<Map<string, number>>;
   readonly pipelineCoderResultRef: MutableRefObject<PipelineCoderResult | null>;
+  readonly activeEditorContextRef: MutableRefObject<
+    import("@/core/context/activeEditorContext").ActiveEditorContext | null
+  >;
   readonly lastContextSnapshotIdRef: MutableRefObject<string | null>;
   readonly setPlanApplyError: Dispatch<SetStateAction<string | null>>;
   readonly setBuildError?: Dispatch<SetStateAction<string | null>>;

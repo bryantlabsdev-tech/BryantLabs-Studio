@@ -41,6 +41,7 @@ function mockPlanningHost(input: {
     aiPlanRef: { current: null },
     createPlanErrorRef,
     editExplorationContentsRef: { current: [] },
+    activeEditorContextRef: { current: null },
     setPlan: (value: Plan | null | ((prev: Plan | null) => Plan | null)) => {
       planRef.current = typeof value === "function" ? value(planRef.current) : value;
     },

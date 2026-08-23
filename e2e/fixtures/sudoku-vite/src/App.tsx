@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 
+// mock: timer enhancement
 export function App() {
   const [seconds, setSeconds] = useState(0);
   const [isActive, setIsActive] = useState(false);
@@ -47,3 +48,7 @@ export function App() {
     </main>
   );
 }
+// mock apply
+// mock apply
+// mock: gameplay upgrade
+export const MOCK_GAMEPLAY = true;

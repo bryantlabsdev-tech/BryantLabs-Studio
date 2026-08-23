@@ -52,6 +52,9 @@ export interface SyncOrchestrationHostsInput {
   readonly editExplorationContentsRef: MutableRefObject<
     readonly import("@/core/context/referencedFileContext").ReferencedFileContent[]
   >;
+  readonly activeEditorContextRef: MutableRefObject<
+    import("@/core/context/activeEditorContext").ActiveEditorContext | null
+  >;
   readonly createPlanErrorRef: MutableRefObject<string | null>;
   readonly aiPlanStatus: BuildPipelineHost["aiPlanStatus"];
   readonly autoFixSession: AutoFixSession | null;
@@ -344,6 +347,7 @@ export function syncOrchestrationHosts(
     projectMemory: input.projectMemory,
     createPlanErrorRef: input.createPlanErrorRef,
     editExplorationContentsRef: input.editExplorationContentsRef,
+    activeEditorContextRef: input.activeEditorContextRef,
     aiPlanRef: input.aiPlanRef,
     lastContextSnapshotIdRef: input.lastContextSnapshotIdRef,
     pipelineCoderResultRef: input.pipelineCoderResultRef,
@@ -388,6 +392,7 @@ export function syncOrchestrationHosts(
     refreshProviderStatus: input.refreshProviderStatus,
     syncAppContextBeforeEdit: input.syncAppContextBeforeEdit,
     runAgentFollowUp: input.runAgentFollowUp,
+    resetAiCallTracker: input.resetAiCallTracker,
   };
 
   planningHostRef.current = {
@@ -404,6 +409,7 @@ export function syncOrchestrationHosts(
     aiPlanRef: input.aiPlanRef,
     createPlanErrorRef: input.createPlanErrorRef,
     editExplorationContentsRef: input.editExplorationContentsRef,
+    activeEditorContextRef: input.activeEditorContextRef,
     setPlan: input.setPlan,
     setSessionMemory: input.setSessionMemory,
     setSessionMemoryDiagnostics: input.setSessionMemoryDiagnostics,
@@ -521,6 +527,7 @@ export function syncOrchestrationHosts(
     applyPlanSuccessRef: input.applyPlanSuccessRef,
     createPlanErrorRef: input.createPlanErrorRef,
     editExplorationContentsRef: input.editExplorationContentsRef,
+    activeEditorContextRef: input.activeEditorContextRef,
     setAgentLoopSession: input.setAgentLoopSession,
     setAgentLoopError: input.setAgentLoopError,
     setExecutionSession: input.setExecutionSession,
@@ -571,6 +578,7 @@ export function syncOrchestrationHosts(
     applyPlanSuccessRef: input.applyPlanSuccessRef,
     executionNoChangeGuardRef: input.executionNoChangeGuardRef,
     pipelineCoderResultRef: input.pipelineCoderResultRef,
+    activeEditorContextRef: input.activeEditorContextRef,
     lastContextSnapshotIdRef: input.lastContextSnapshotIdRef,
     setPlanApplyError: input.setPlanApplyError,
     setBuildError: input.setBuildError,

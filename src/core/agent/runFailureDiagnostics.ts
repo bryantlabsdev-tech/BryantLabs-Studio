@@ -35,6 +35,7 @@ export type RunFailureReason =
   | "user_canceled"
   | "write_failed"
   | "verification_failed"
+  | "patch_proposal_failed"
   | "unknown_error";
 
 export const RUN_FAILURE_REASON_LABELS: Record<RunFailureReason, string> = {
@@ -54,6 +55,7 @@ export const RUN_FAILURE_REASON_LABELS: Record<RunFailureReason, string> = {
   user_canceled: "User canceled",
   write_failed: "Write failed",
   verification_failed: "Verification failed",
+  patch_proposal_failed: "Patch proposal failed",
   unknown_error: "Unknown error",
 };
 
@@ -96,6 +98,14 @@ function lastFailedLogEntry(run: GreenfieldRunSnapshot) {
   return null;
 }
 
+function lastRunningLogEntry(run: GreenfieldRunSnapshot) {
+  for (let i = run.entries.length - 1; i >= 0; i -= 1) {
+    const entry = run.entries[i]!;
+    if (entry.status === "running") return entry;
+  }
+  return null;
+}
+
 function failedStageLabel(run: GreenfieldRunSnapshot, report: StudioFailureReport | null): string | null {
   const failedEntry = lastFailedLogEntry(run);
   if (failedEntry) {
@@ -130,8 +140,16 @@ function collectRawError(
   const failedEntry = lastFailedLogEntry(run);
   if (failedEntry?.details?.trim()) parts.push(failedEntry.details.trim());
   if (failedEntry?.message?.trim()) parts.push(failedEntry.message.trim());
+  if (run.latestAction?.summary?.trim() && run.runResult === "failed") {
+    parts.push(run.latestAction.summary.trim());
+  }
+  const workflowErrors = run.workflow?.errors?.filter((e) => e?.trim()) ?? [];
+  for (const err of workflowErrors) parts.push(err.trim());
   if (run.writeError?.trim()) parts.push(run.writeError.trim());
   if (run.setupResult?.error?.trim()) parts.push(run.setupResult.error.trim());
+  const runningEntry = lastRunningLogEntry(run);
+  if (runningEntry?.details?.trim()) parts.push(runningEntry.details.trim());
+  if (runningEntry?.message?.trim()) parts.push(runningEntry.message.trim());
   const unique = [...new Set(parts)];
   return unique.length > 0 ? unique.join(" · ") : null;
 }
@@ -148,12 +166,20 @@ function collectMissingFiles(run: GreenfieldRunSnapshot): string[] {
   return collectGreenfieldMissingFiles(run);
 }
 
-function aiResponsePreview(run: GreenfieldRunSnapshot): string | null {
+function aiResponsePreview(
+  run: GreenfieldRunSnapshot,
+  report: StudioFailureReport | null,
+): string | null {
   const fromAudit = run.debug?.markerAudit?.rawResponsePreview;
   if (fromAudit?.trim()) return truncate(fromAudit, AI_PREVIEW_CHARS);
   const rawPayload = run.debug?.rawProviderPayload;
   if (typeof rawPayload === "string" && rawPayload.trim()) {
     return truncate(rawPayload, AI_PREVIEW_CHARS);
+  }
+  const reportDetail = report?.stages.find((s) => s.role === "root")?.detail ?? "";
+  const rawIdx = reportDetail.indexOf("Raw model output");
+  if (rawIdx >= 0) {
+    return truncate(reportDetail.slice(rawIdx), AI_PREVIEW_CHARS);
   }
   return null;
 }
@@ -268,6 +294,13 @@ export function classifyRunFailureReason(input: {
     return "write_failed";
   }
 
+  if (
+    stage === "apply_plan" ||
+    /zero valid patch proposals|no proposals generated|patch format error/i.test(text)
+  ) {
+    return "patch_proposal_failed";
+  }
+
   if (stage === "verification" || report?.rootStage === "verification") {
     return "verification_failed";
   }
@@ -359,6 +392,12 @@ export function suggestRunFailureNextSteps(
       return [
         "Review verification output and fix TypeScript or build errors first.",
       ];
+    case "patch_proposal_failed":
+      return [
+        "The model returned no parseable file patches. Retry with Gemini Pro or a shorter prompt.",
+        "Open the run inspector for raw model output.",
+        "If the change spans multiple files, try one file at a time.",
+      ];
     case "provider_error":
       return [
         "Check provider status and retry. Switch provider if errors persist.",
@@ -449,7 +488,7 @@ export function deriveRunFailureDetails(input: {
     filesParsed: filesParsed > 0 ? filesParsed : filesParsed === 0 ? 0 : null,
     filesExpected: GREENFIELD_FILE_PATHS.length,
     missingFiles,
-    aiResponsePreview: aiResponsePreview(run),
+    aiResponsePreview: aiResponsePreview(run, report),
     lastCommand: cmd?.command ?? run.setupResult?.install?.command ?? null,
     commandStdout: truncate(cmd?.stdout ?? run.setupResult?.build?.stdout, CMD_OUTPUT_CHARS),
     commandStderr: truncate(cmd?.stderr ?? run.setupResult?.build?.stderr, CMD_OUTPUT_CHARS),

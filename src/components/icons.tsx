@@ -78,6 +78,17 @@ export function SearchIcon({ className }: IconProps) {
   return railIcon("M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z M16.5 16.5 21 21", className);
 }
 
+export function GitBranchIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className} aria-hidden="true">
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="18" cy="6" r="2.5" />
+      <circle cx="6" cy="18" r="2.5" />
+      <path d="M6 8.5v7M18 8.5v4a2 2 0 0 1-2 2H8" />
+    </svg>
+  );
+}
+
 export function ListIcon({ className }: IconProps) {
   return (
     <svg {...base} className={className} aria-hidden="true">

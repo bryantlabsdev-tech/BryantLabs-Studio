@@ -9,7 +9,7 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +26,9 @@ jobs:
 
       - name: Unit tests (renderer)
         run: npm run test:unit
+
+      - name: Brownfield edit stress (dry + mock pipeline + verify)
+        run: npm run edit:stress && npm run edit:stress:live && npm run edit:stress:provider:fast
 
       - name: Unit tests (electron main)
         run: npm run test:electron

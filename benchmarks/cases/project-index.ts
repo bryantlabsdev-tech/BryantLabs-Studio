@@ -80,7 +80,7 @@ export const PROJECT_INDEX_CASES = [
     id: "project_index.explore_file_budget",
     category: "project_index" as const,
     name: "Agent pre-explore file budget",
-    description: "Pre-edit exploration reads up to 10 ranked files.",
+    description: "Pre-edit exploration reads up to 25 ranked files.",
     weight: 1,
   },
 ];
@@ -300,7 +300,7 @@ export async function runProjectIndexCase(
 
     case "project_index.explore_file_budget":
       return runCase(def, async () => {
-        const paths = Array.from({ length: 14 }, (_, i) => `src/mod-${i}.ts`);
+        const paths = Array.from({ length: 40 }, (_, i) => `src/mod-${i}.ts`);
         const scan = mockProjectScan(paths, { root: "/tmp/explore" });
         const repository = buildRepositoryIndex(scan);
         const explored = await exploreRepositoryBeforeEdit({
@@ -320,16 +320,16 @@ export async function runProjectIndexCase(
         return [
           check(
             "budget",
-            "Reads 10 files",
+            "Reads explore budget files",
             explored.length === DEFAULT_MAX_EXPLORE_FILES,
             String(DEFAULT_MAX_EXPLORE_FILES),
             String(explored.length),
           ),
           check(
             "constant",
-            "Budget is 10",
-            DEFAULT_MAX_EXPLORE_FILES === 10,
-            "10",
+            "Budget is 30",
+            DEFAULT_MAX_EXPLORE_FILES === 30,
+            "30",
             String(DEFAULT_MAX_EXPLORE_FILES),
           ),
         ];

@@ -115,3 +115,28 @@ export function auditPreviewAncestors(
 
   return { rows, collapseAt, collapseParent, collapseReason };
 }
+
+function roundCssPx(value: string): string {
+  const n = Number.parseFloat(value);
+  return Number.isFinite(n) ? String(Math.round(n)) : value;
+}
+
+/** True when two audits describe the same layout (ignore sub-pixel churn). */
+export function previewAncestorAuditsEqual(
+  prev: PreviewAncestorAudit | null,
+  next: PreviewAncestorAudit,
+): boolean {
+  if (!prev) return false;
+  if (prev.collapseReason !== next.collapseReason) return false;
+  if (prev.rows.length !== next.rows.length) return false;
+  return prev.rows.every((row, i) => {
+    const other = next.rows[i];
+    if (!other) return false;
+    return (
+      row.selector === other.selector &&
+      Math.round(row.clientHeight) === Math.round(other.clientHeight) &&
+      Math.round(row.offsetHeight) === Math.round(other.offsetHeight) &&
+      roundCssPx(row.computedHeight) === roundCssPx(other.computedHeight)
+    );
+  });
+}

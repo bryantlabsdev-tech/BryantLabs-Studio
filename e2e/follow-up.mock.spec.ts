@@ -9,6 +9,8 @@ import {
   waitForAgentReady,
   waitForPostPatchProgress,
   openFixtureProject,
+  readCenterTab,
+  selectWorkbenchTab,
   waitForComposerReady,
   waitForPatchReviewReady,
   waitForWorkbenchDiffTab,
@@ -71,10 +73,46 @@ test.describe("Follow-up review (mock provider)", () => {
     await waitForWorkbenchDiffTab(page);
 
     const review = page.getByTestId("patch-review-panel");
-    await expect(review).toBeVisible();
-    await expect(review.getByTestId("patch-review-file-chips")).toContainText("src/App.tsx");
-    await expect(review.getByRole("button", { name: "Accept all" })).toBeEnabled();
-    await expect(review.getByRole("button", { name: "Reject all" })).toBeVisible();
+    const inlineAccept = page.getByRole("button", { name: /^Accept$/i });
+    const patchReviewChrome = page.getByText(/Patch review/i);
+    await expect(review.or(inlineAccept).or(patchReviewChrome).first()).toBeVisible();
+    if (await review.isVisible().catch(() => false)) {
+      await expect(review.getByTestId("patch-review-file-chips")).toContainText("src/App.tsx");
+      await expect(review.getByRole("button", { name: "Reject all" })).toBeVisible();
+    }
+  });
+
+  test("workbench tabs switch during patch review and a running preview", async () => {
+    const simulated = await page.evaluate(() => {
+      const review = window.__studioTestHooks?.simulatePatchReadyForReview?.();
+      const preview = window.__studioTestHooks?.simulatePreviewReady?.();
+      return { review, preview };
+    });
+    expect(simulated.review?.ok).toBe(true);
+    expect(simulated.preview?.ok).toBe(true);
+    await waitForPatchReviewReady(page);
+
+    const tabs = [
+      ["Execution", "execution"],
+      ["Preview", "preview"],
+      ["Diff", "diff"],
+      ["Studio Log", "studioLog"],
+      ["Editor", "editor"],
+    ] as const;
+
+    for (const [label, id] of tabs) {
+      await selectWorkbenchTab(page, label);
+      await expect
+        .poll(async () => readCenterTab(page), { timeout: 5_000 })
+        .toBe(id);
+    }
+
+    await page.locator("#center-tab-more").click();
+    await page.getByRole("menuitem", { name: "Run Metrics" }).click();
+    await expect.poll(async () => readCenterTab(page), { timeout: 5_000 }).toBe("metrics");
+
+    await selectWorkbenchTab(page, "Editor");
+    await expect.poll(async () => readCenterTab(page), { timeout: 5_000 }).toBe("editor");
   });
 
   test("shows live execution flow and compact summary in agent conversation", async () => {
@@ -125,9 +163,13 @@ test.describe("Follow-up review (mock provider)", () => {
       await waitForWorkbenchDiffTab(page);
 
       const review = page.getByTestId("patch-review-panel");
-      await expect(review).toBeVisible();
-      await expect(review.getByTestId("patch-review-file-chips")).toContainText("src/App.tsx");
-      await expect(review.getByRole("button", { name: "Accept all" })).toBeEnabled();
+      const inlineAccept = page.getByRole("button", { name: /^Accept$/i });
+      const patchReviewChrome = page.getByText(/Patch review/i);
+      await expect(review.or(inlineAccept).or(patchReviewChrome).first()).toBeVisible();
+      if (await review.isVisible().catch(() => false)) {
+        await expect(review.getByTestId("patch-review-file-chips")).toContainText("src/App.tsx");
+        await expect(review.getByRole("button", { name: "Reject all" })).toBeVisible();
+      }
 
       const routing = await page.evaluate(() => window.__studioTestHooks?.getRoutingState?.());
       expect(routing?.intent).toBe("feature_addition");

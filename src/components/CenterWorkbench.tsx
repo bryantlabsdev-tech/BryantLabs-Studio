@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useWorkspace } from "@/app/WorkspaceProvider";
 import { useAgentRunViewModel } from "@/app/workspace/useAgentRunViewModel";
 import { useExecutionDashboardTab } from "@/app/workspace/useExecutionDashboardTab";
+import {
+  evaluateWorkbenchAutoTab,
+  INITIAL_WORKBENCH_AUTO_TAB_STATE,
+} from "@/app/workspace/workbenchAutoTabPolicy";
 import type { CenterTab } from "@/core/layout/types";
 import { EditorPanel } from "@/components/EditorPanel";
 import { DiffView } from "@/components/editor/DiffView";
@@ -18,6 +22,7 @@ import {
   LazyGreenfieldLogsView,
   LazyGreenfieldInspectorView,
   LazyGreenfieldSummaryView,
+  LazyPipelineInspectorView,
   LazyPreviewView,
 } from "@/components/lazyViews";
 import { ArtifactDiffView } from "@/components/views/ArtifactDiffView";
@@ -35,14 +40,23 @@ const PRIMARY_TABS: ReadonlyArray<{ id: CenterTab; label: string }> = [
 ];
 
 const OVERFLOW_TABS: ReadonlyArray<{ id: CenterTab; label: string }> = [
-  { id: "metrics", label: "Metrics" },
-  { id: "memory", label: "Memory" },
+  { id: "metrics", label: "Run Metrics" },
+  { id: "memory", label: "Project Intelligence" },
   { id: "generated", label: "Generated Files" },
   { id: "summary", label: "Summary" },
-  { id: "inspector", label: "Inspector" },
+  { id: "inspector", label: "Run Trace" },
+  { id: "pipelineInspector", label: "Pipeline Diagnostics" },
 ];
 
 const OVERFLOW_TAB_IDS = new Set<CenterTab>(OVERFLOW_TABS.map((tab) => tab.id));
+
+function tabPanelId(tab: CenterTab): string {
+  return `center-tabpanel-${tab}`;
+}
+
+function tabButtonId(tab: CenterTab): string {
+  return `center-tab-${tab}`;
+}
 
 /**
  * Center workbench — editor, execution dashboard, preview, and run observability tabs.
@@ -79,6 +93,7 @@ export function CenterWorkbench() {
     pipelineRunning,
     lockInspectorRun,
     setCenterInspectorActive,
+    inspectorSession,
     projectIntelligence,
     startPreferredMemoryFix,
     continueBuildAfterReview,
@@ -86,7 +101,7 @@ export function CenterWorkbench() {
     retryApplyPlanReview,
     selectPlanApplyFile,
     setPlanApplyFileDecision,
-    approveAllPlanApplyFiles,
+    setPlanApplyFilePartialContent,
     applyApprovedPlanFiles,
   } = useWorkspace();
 
@@ -99,6 +114,7 @@ export function CenterWorkbench() {
   const liveDiffs = useLiveRunDiffs();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
+  const tablistId = useId();
 
   useExecutionDashboardTab({
     centerTab,
@@ -112,36 +128,26 @@ export function CenterWorkbench() {
   useEffect(() => {
     if (centerTab === "inspector") {
       const runId = activeAgentRunId ?? greenfieldRun.runTimeline?.runId ?? null;
-      setCenterInspectorActive(runId);
-      if (runId) lockInspectorRun(runId);
+      if (!inspectorSession.centerInspectorActive) {
+        setCenterInspectorActive(runId);
+      }
+      if (runId && inspectorSession.lockedRunId !== runId) {
+        lockInspectorRun(runId);
+      }
       return;
     }
-    setCenterInspectorActive(null);
+    if (inspectorSession.centerInspectorActive) {
+      setCenterInspectorActive(null);
+    }
   }, [
     activeAgentRunId,
     centerTab,
     greenfieldRun.runTimeline?.runId,
+    inspectorSession.centerInspectorActive,
+    inspectorSession.lockedRunId,
     lockInspectorRun,
     setCenterInspectorActive,
   ]);
-
-  useEffect(() => {
-    if (runStatus.isActive) return;
-    if (previewTabNonce > 0) setCenterTab("preview");
-  }, [previewTabNonce, setCenterTab, runStatus.isActive]);
-
-  useEffect(() => {
-    if (runStatus.isActive) return;
-    if (reviewing && pendingPatch) setCenterTab("diff");
-  }, [reviewing, pendingPatch, setCenterTab, runStatus.isActive]);
-
-  useEffect(() => {
-    if (planApplySession?.phase !== "waiting_for_review") return;
-    const ready = planApplySession.files.some(
-      (f) => f.status === "ready" && f.diffStats?.changed,
-    );
-    if (ready) setCenterTab("diff");
-  }, [planApplySession, setCenterTab]);
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -184,72 +190,63 @@ export function CenterWorkbench() {
         })()
       : null;
 
+  const hasAiPatchForEditor = Boolean(aiPatchForEditor);
+  const reviewingPendingPatch = Boolean(reviewing && pendingPatch);
+  const autoTabStateRef = useRef(INITIAL_WORKBENCH_AUTO_TAB_STATE);
+  const centerTabRef = useRef(centerTab);
+  centerTabRef.current = centerTab;
   useEffect(() => {
-    if (runStatus.isActive) return;
-    if (aiPatchForEditor) setCenterTab("diff");
-  }, [aiPatchForEditor, runStatus.isActive, setCenterTab]);
-
-  useEffect(() => {
-    if (aiPatchApplyStatus !== "applied") return;
-    setCenterTab("editor");
-  }, [aiPatchApplyStatus, setCenterTab]);
+    const result = evaluateWorkbenchAutoTab(autoTabStateRef.current, {
+      previewTabNonce,
+      reviewingPendingPatch,
+      aiPatchForEditor: hasAiPatchForEditor,
+      aiPatchApplied: aiPatchApplyStatus === "applied",
+    });
+    autoTabStateRef.current = result.nextState;
+    if (result.tabToSet && result.tabToSet !== centerTabRef.current) {
+      setCenterTab(result.tabToSet);
+    }
+  }, [
+    aiPatchApplyStatus,
+    hasAiPatchForEditor,
+    reviewingPendingPatch,
+    previewTabNonce,
+    setCenterTab,
+  ]);
 
   const overflowActive = OVERFLOW_TAB_IDS.has(centerTab);
+  const activeOverflowLabel = OVERFLOW_TABS.find((tab) => tab.id === centerTab)?.label;
+  const tabPanelLabelledBy = overflowActive ? "center-tab-more" : tabButtonId(centerTab);
 
-  return (
-    <section className="panel panel--center" aria-label="Workbench">
-      <header className="center-tabs" role="tablist">
-        {PRIMARY_TABS.map(({ id, label }) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={centerTab === id}
-            className={`center-tabs__tab${centerTab === id ? " center-tabs__tab--on" : ""}${id === "execution" && runStatus.isActive ? " center-tabs__tab--live" : ""}`}
-            onClick={() => {
-              setMoreOpen(false);
-              setCenterTab(id);
-            }}
-          >
-            {label}
-          </button>
-        ))}
-        <div className="center-tabs__more" ref={moreRef}>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={overflowActive}
-            aria-expanded={moreOpen}
-            aria-haspopup="menu"
-            className={`center-tabs__tab center-tabs__tab--more${overflowActive ? " center-tabs__tab--on" : ""}`}
-            onClick={() => setMoreOpen((open) => !open)}
-          >
-            More ▾
-          </button>
-          {moreOpen ? (
-            <div className="center-tabs__menu" role="menu">
-              {OVERFLOW_TABS.map(({ id, label }) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="menuitem"
-                  className={`center-tabs__menu-item${centerTab === id ? " center-tabs__menu-item--on" : ""}`}
-                  onClick={() => {
-                    setCenterTab(id);
-                    setMoreOpen(false);
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </header>
-      <div className="panel__body center-panel__body">
-        {centerTab === "editor" ? (
-          <EditorPanel embedded />
-        ) : centerTab === "execution" ? (
+  const onTabKeyDown = useCallback(
+    (event: React.KeyboardEvent, currentId: CenterTab | "more") => {
+      const order = [...PRIMARY_TABS.map((t) => t.id), "more" as const];
+      const idx = order.indexOf(currentId);
+      if (idx < 0) return;
+      let nextIdx = idx;
+      if (event.key === "ArrowRight") nextIdx = (idx + 1) % order.length;
+      else if (event.key === "ArrowLeft") nextIdx = (idx - 1 + order.length) % order.length;
+      else if (event.key === "Home") nextIdx = 0;
+      else if (event.key === "End") nextIdx = order.length - 1;
+      else return;
+      event.preventDefault();
+      const next = order[nextIdx];
+      if (next === "more") {
+        setMoreOpen(true);
+        return;
+      }
+      setMoreOpen(false);
+      setCenterTab(next);
+    },
+    [setCenterTab],
+  );
+
+  const renderTabPanel = () => {
+    switch (centerTab) {
+      case "editor":
+        return <EditorPanel embedded />;
+      case "execution":
+        return (
           <ViewSuspense>
             <LazyExecutionDashboard
               viewModel={dashboard}
@@ -258,20 +255,29 @@ export function CenterWorkbench() {
               fixRunning={agentWorkflowBusy}
             />
           </ViewSuspense>
-        ) : centerTab === "preview" ? (
+        );
+      case "preview":
+        return (
           <ViewSuspense>
             <LazyPreviewView />
           </ViewSuspense>
-        ) : centerTab === "generated" ? (
+        );
+      case "generated":
+        return (
           <ViewSuspense>
             <LazyGeneratedFilesView />
           </ViewSuspense>
-        ) : centerTab === "diff" ? (
-          pendingPatch && reviewing ? (
+        );
+      case "diff":
+        if (pendingPatch && reviewing) {
+          return (
             <div className="center-diff">
               <DiffView patch={pendingPatch} />
             </div>
-          ) : aiPatchForEditor ? (
+          );
+        }
+        if (aiPatchForEditor) {
+          return (
             <div className="center-diff center-diff--ai-patch">
               <DiffRowsView
                 before={aiPatchForEditor.basisContent}
@@ -297,12 +303,13 @@ export function CenterWorkbench() {
                 />
               ) : null}
             </div>
-          ) : patchStatus === "error" && patchError ? (
-            <EmptyState
-              title="AI patch failed"
-              description={patchError}
-            />
-          ) : showPlanApplyCenterReview && planApplySession ? (
+          );
+        }
+        if (patchStatus === "error" && patchError) {
+          return <EmptyState title="AI patch failed" description={patchError} />;
+        }
+        if (showPlanApplyCenterReview && planApplySession) {
+          return (
             <div className="center-diff center-diff--plan-apply">
               <PatchReviewPanel
                 kind="plan_apply"
@@ -317,7 +324,6 @@ export function CenterWorkbench() {
                 }
                 error={null}
                 onAcceptAll={() => {
-                  approveAllPlanApplyFiles();
                   void continueBuildAfterReview();
                 }}
                 onRejectAll={() => cancelBuildLoop()}
@@ -330,10 +336,17 @@ export function CenterWorkbench() {
                 onRejectFile={(relPath) =>
                   setPlanApplyFileDecision(relPath, "rejected")
                 }
+                onPartialContentChange={setPlanApplyFilePartialContent}
+                hunkReview
               />
             </div>
-          ) : planApplySelected?.basisContent !== undefined &&
-            planApplySelected.proposal ? (
+          );
+        }
+        if (
+          planApplySelected?.basisContent !== undefined &&
+          planApplySelected.proposal
+        ) {
+          return (
             <div className="center-diff">
               <DiffRowsView
                 before={planApplySelected.basisContent}
@@ -341,47 +354,154 @@ export function CenterWorkbench() {
                 description={`Plan apply: ${planApplySelected.relPath}`}
               />
             </div>
-          ) : selectedArtifact && artifactHasDiffContent(selectedArtifact) ? (
+          );
+        }
+        if (selectedArtifact && artifactHasDiffContent(selectedArtifact)) {
+          return (
             <div className="center-diff">
               <ArtifactDiffView artifact={selectedArtifact} />
             </div>
-          ) : liveDiffs.length > 0 ? (
+          );
+        }
+        if (liveDiffs.length > 0) {
+          return (
             <div className="center-diff">
               <LiveRunDiffView diffs={liveDiffs} />
             </div>
-          ) : planApplyReviewing ? (
+          );
+        }
+        if (planApplyReviewing) {
+          return (
             <EmptyState
               title="No diff selected"
               description="Select a file in Apply Plan to review its diff here."
             />
-          ) : (
-            <EmptyState
-              title="No patch to review"
-              description="Select a run in chat or start a patch review to see diffs here."
-            />
-          )
-        ) : centerTab === "summary" ? (
+          );
+        }
+        return (
+          <EmptyState
+            title="No patch to review"
+            description="Select a run in chat or start a patch review to see diffs here."
+          />
+        );
+      case "summary":
+        return (
           <ViewSuspense>
             <LazyGreenfieldSummaryView />
           </ViewSuspense>
-        ) : centerTab === "studioLog" ? (
+        );
+      case "studioLog":
+        return (
           <ViewSuspense>
             <LazyGreenfieldLogsView />
           </ViewSuspense>
-        ) : centerTab === "inspector" ? (
+        );
+      case "inspector":
+        return (
           <ViewSuspense>
             <LazyGreenfieldInspectorView />
           </ViewSuspense>
-        ) : centerTab === "metrics" ? (
-          <AgentRunMetricsView />
-        ) : centerTab === "memory" ? (
+        );
+      case "pipelineInspector":
+        return (
+          <ViewSuspense>
+            <LazyPipelineInspectorView />
+          </ViewSuspense>
+        );
+      case "metrics":
+        return <AgentRunMetricsView />;
+      case "memory":
+        return (
           <ProjectIntelligenceMemoryView
             intelligence={projectIntelligence}
             {...(project?.name ? { projectName: project.name } : {})}
             onApplyPreferredFix={(rec) => void startPreferredMemoryFix(rec)}
             applyRunning={agentWorkflowBusy}
           />
-        ) : null}
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <section className="panel panel--center" aria-label="Workbench">
+      <header className="center-tabs">
+        <div
+          className="center-tabs__list"
+          role="tablist"
+          id={tablistId}
+          aria-label="Workbench tabs"
+        >
+          {PRIMARY_TABS.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              id={tabButtonId(id)}
+              aria-selected={centerTab === id}
+              aria-controls={tabPanelId(id)}
+              tabIndex={centerTab === id ? 0 : -1}
+              className={`center-tabs__tab${centerTab === id ? " center-tabs__tab--on" : ""}${id === "execution" && runStatus.isActive ? " center-tabs__tab--live" : ""}`}
+              onClick={() => {
+                setMoreOpen(false);
+                setCenterTab(id);
+              }}
+              onKeyDown={(e) => onTabKeyDown(e, id)}
+            >
+              {label}
+            </button>
+          ))}
+          <div className="center-tabs__more" ref={moreRef}>
+            <button
+              type="button"
+              role="tab"
+              id="center-tab-more"
+              aria-selected={overflowActive}
+              aria-expanded={moreOpen}
+              aria-haspopup="menu"
+              aria-controls={moreOpen ? "center-tabs-overflow-menu" : undefined}
+              tabIndex={overflowActive ? 0 : -1}
+              className={`center-tabs__tab center-tabs__tab--more${overflowActive ? " center-tabs__tab--on" : ""}`}
+              onClick={() => setMoreOpen((open) => !open)}
+              onKeyDown={(e) => onTabKeyDown(e, "more")}
+            >
+              {overflowActive && activeOverflowLabel
+                ? `${activeOverflowLabel} ▾`
+                : "More ▾"}
+            </button>
+            {moreOpen ? (
+              <div
+                id="center-tabs-overflow-menu"
+                className="center-tabs__menu"
+                role="menu"
+              >
+                {OVERFLOW_TABS.map(({ id, label }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="menuitem"
+                    className={`center-tabs__menu-item${centerTab === id ? " center-tabs__menu-item--on" : ""}`}
+                    onClick={() => {
+                      setCenterTab(id);
+                      setMoreOpen(false);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </header>
+      <div
+        className="panel__body center-panel__body"
+        role="tabpanel"
+        id={tabPanelId(centerTab)}
+        aria-labelledby={tabPanelLabelledBy}
+      >
+        {renderTabPanel()}
       </div>
     </section>
   );

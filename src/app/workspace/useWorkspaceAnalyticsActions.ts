@@ -44,12 +44,16 @@ export function useWorkspaceAnalyticsActions(input: {
       input.lastRecordedAnalyticsKeyRef.current = key;
       input.setAnalyticsHistory(appendAnalyticsRecord(record));
     },
-    [input],
+    [
+      input.currentRunAnalyticsRef,
+      input.lastRecordedAnalyticsKeyRef,
+      input.setAnalyticsHistory,
+    ],
   );
 
   const selectAnalyticsRecord = useCallback((id: string | null) => {
     input.setSelectedAnalyticsId(id);
-  }, [input]);
+  }, [input.setSelectedAnalyticsId]);
 
   const openAnalyticsFromDashboard = useCallback(
     (recordId: string) => {
@@ -58,7 +62,7 @@ export function useWorkspaceAnalyticsActions(input: {
       input.setSelectedContextId(record.contextSnapshotId);
       input.setRailToolState("context");
     },
-    [input],
+    [input.projectPath, input.setSelectedContextId, input.setRailToolState],
   );
 
   return {

@@ -9,6 +9,7 @@ import type { WorkspacePlanState } from "@/app/workspace/useWorkspacePlanState";
 import type { AgentLoopWorkspaceState } from "@/app/workspace/useAgentLoopWorkspaceState";
 import type { WorkspaceProjectState } from "@/app/workspace/useWorkspaceProjectState";
 import type { ProjectMemoryWorkspaceState } from "@/app/workspace/useProjectMemoryState";
+import { cancelAllPostApplyUiAudits } from "@/app/orchestration/postApplyUiAudit";
 
 export function useWorkspaceProjectOpen(input: {
   readonly api: BryantLabsApi | null | undefined;
@@ -89,6 +90,7 @@ export function useWorkspaceProjectOpen(input: {
   readonly bindProjectSession: (path: string, name: string) => Promise<void>;
 }) {
   const resetWorkspaceForProject = useCallback(() => {
+    cancelAllPostApplyUiAudits("project closed");
     input.file.setActiveFile(null);
     input.file.setActivePath(null);
     input.file.setOpenFileTabs([]);

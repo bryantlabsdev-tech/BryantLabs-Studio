@@ -39,7 +39,13 @@
     "greenfield:stress:replay:legacy": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress-replay-legacy.mjs",
     "greenfield:stress:lock-replay": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress-lock-replay.mjs",
     "greenfield:stress:sync-fixtures": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress-sync-fixtures.mjs",
+    "edit:stress": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/edit-stress.mjs",
+    "edit:stress:live": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/edit-stress-live.mjs",
+    "edit:stress:provider": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/edit-stress-provider.mjs",
+    "edit:stress:provider:fast": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/edit-stress-provider.mjs --fast",
+    "edit:stress:provider:live": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/edit-stress-provider-live.mjs",
     "release:verify": "npm run typecheck && npm run test:all && npm run build && cross-env BRYANTLABS_MOCK_PROVIDER=1 PLAYWRIGHT_USE_DIST=1 npm run test:e2e",
+    "generate:branding": "node scripts/generate-branding.mjs",
     "rebuild:native": "electron-rebuild -f -w node-pty",
     "electron:dist": "npm run build && electron-builder --mac",
     "electron:release": "npm run build && electron-builder --mac dmg zip"
@@ -80,6 +86,13 @@
       "dist-electron/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "assets/branding",
+        "to": "assets/branding",
+        "filter": ["**/*"]
+      }
+    ],
     "asarUnpack": [
       "**/*.node"
     ],
@@ -88,9 +101,16 @@
         "dmg",
         "zip"
       ],
+      "icon": "assets/branding/icon.icns",
       "category": "public.app-category.developer-tools",
       "identity": null,
       "artifactName": "${productName}.${ext}"
+    },
+    "win": {
+      "icon": "assets/branding/icon.ico"
+    },
+    "linux": {
+      "icon": "assets/branding/icon-512.png"
     }
   }
 }

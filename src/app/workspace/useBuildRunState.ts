@@ -10,7 +10,11 @@ export interface BuildRunWorkspaceState {
     cancel: () => void;
     runRepair?: () => Promise<void>;
   } | null>;
-  readonly updateGreenfieldRun: (patch: Partial<GreenfieldRunSnapshot>) => void;
+  readonly updateGreenfieldRun: (
+    patch:
+      | Partial<GreenfieldRunSnapshot>
+      | ((prev: GreenfieldRunSnapshot) => Partial<GreenfieldRunSnapshot>),
+  ) => void;
   readonly resetGreenfieldRun: () => void;
   readonly appendGreenfieldRunLog: (
     stage: GreenfieldRunLogEntry["stage"],
@@ -28,15 +32,31 @@ export function useBuildRunWorkspaceState(): BuildRunWorkspaceState {
     runRepair?: () => Promise<void>;
   } | null>(null);
 
-  const updateGreenfieldRun = useCallback((patch: Partial<GreenfieldRunSnapshot>) => {
-    setGreenfieldRun((prev) => {
-      const next = { ...prev, ...patch };
-      if (next.runResult === "failed" && prev.runResult !== "failed") {
-        logRunFailureFromSnapshot(next);
-      }
-      return next;
-    });
-  }, []);
+  const updateGreenfieldRun = useCallback(
+    (
+      patch:
+        | Partial<GreenfieldRunSnapshot>
+        | ((prev: GreenfieldRunSnapshot) => Partial<GreenfieldRunSnapshot>),
+    ) => {
+      setGreenfieldRun((prev) => {
+        const resolved = typeof patch === "function" ? patch(prev) : patch;
+        let changed = false;
+        for (const key of Object.keys(resolved) as (keyof GreenfieldRunSnapshot)[]) {
+          if (prev[key] !== resolved[key]) {
+            changed = true;
+            break;
+          }
+        }
+        if (!changed) return prev;
+        const next = { ...prev, ...resolved };
+        if (next.runResult === "failed" && prev.runResult !== "failed") {
+          logRunFailureFromSnapshot(next);
+        }
+        return next;
+      });
+    },
+    [],
+  );
 
   const resetGreenfieldRun = useCallback(() => {
     resetRunFailureLogDedupe();

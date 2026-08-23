@@ -126,11 +126,38 @@ export function buildStudioRunSummary(
   });
 
   const wf = snapshot.workflow;
-  const filesAffected = [
-    ...(wf?.filesWritten ?? []),
-    ...(wf?.patchTarget ? [wf.patchTarget] : []),
-    ...(wf?.editTarget ? [wf.editTarget] : []),
-  ];
+  const runResult =
+    isGreenfieldAction(actionType)
+      ? base.runResult
+      : snapshot.runResult !== "idle"
+        ? snapshot.runResult
+        : base.runResult;
+
+  const workflowFilesWritten =
+    wf?.routingIntent?.files_written ?? wf?.filesWritten ?? null;
+  const filesWrittenForSummary =
+    !isGreenfieldAction(actionType) && workflowFilesWritten !== null
+      ? [...workflowFilesWritten]
+      : !isGreenfieldAction(actionType) && runResult === "failed"
+        ? []
+        : base.filesWritten;
+
+  const filesAffected = (() => {
+    const fromWorkflow = [
+      ...(wf?.filesWritten ?? []),
+      ...(wf?.patchTarget ? [wf.patchTarget] : []),
+      ...(wf?.editTarget ? [wf.editTarget] : []),
+    ];
+    if (fromWorkflow.length > 0) return fromWorkflow;
+    if (
+      isApplyPlanAction(actionType) &&
+      runResult === "failed" &&
+      wf?.routingIntent?.files_allowed?.length
+    ) {
+      return [...wf.routingIntent.files_allowed];
+    }
+    return fromWorkflow;
+  })();
 
   let typescriptResult = base.typescriptResult;
   let buildResult = base.buildResult;
@@ -163,11 +190,6 @@ export function buildStudioRunSummary(
     ...base.errors,
     ...(wf?.errors?.filter((e) => !base.errors.includes(e)) ?? []),
   ];
-  const runResult = isGreenfieldAction(actionType)
-    ? base.runResult
-    : snapshot.runResult !== "idle"
-      ? snapshot.runResult
-      : base.runResult;
   const { errors, previousAttemptErrors } = partitionSummaryErrors({
     latestAction: snapshot.latestAction,
     runResult,
@@ -201,6 +223,7 @@ export function buildStudioRunSummary(
 
   return {
     ...base,
+    filesWritten: filesWrittenForSummary,
     commandsRun,
     actionType,
     actionLabel: STUDIO_ACTION_LABELS[actionType],

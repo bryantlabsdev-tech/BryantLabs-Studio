@@ -6,6 +6,7 @@ import { WelcomeScreen } from "@/components/WelcomeScreen";
 import { DiagnosticReportModalHost } from "@/components/views/DiagnosticReportModalHost";
 import { RunInspectorModalHost } from "@/components/views/RunInspectorModalHost";
 import { RunCompareModalHost } from "@/components/views/RunCompareModalHost";
+import { WorkspaceKeybindings } from "@/components/WorkspaceKeybindings";
 import "./App.css";
 import "@/styles/workspace-shell.css";
 import "@/styles/welcome-screen.css";
@@ -18,6 +19,7 @@ import "@/styles/workflow-panels.css";
 import "@/styles/agent-conversation.css";
 import "@/styles/agent-workspace.css";
 import "@/styles/run-inspector.css";
+import "@/styles/pipeline-inspector.css";
 import "@/styles/studio-run-log.css";
 import "@/styles/workbench.css";
 import "@/styles/exec-dashboard.css";
@@ -36,6 +38,7 @@ export function App() {
         <RunInspectorModalHost />
         <DiagnosticReportModalHost />
         <RunCompareModalHost />
+        <WorkspaceKeybindings />
       </div>
     </WorkspaceProvider>
   );

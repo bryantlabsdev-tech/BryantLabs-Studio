@@ -1,4 +1,9 @@
 import { spawn } from "node:child_process";
+import {
+  resolveShellCommand,
+  resolveSpawnCwdSync,
+  spawnProcessEnv,
+} from "./processSpawn.cjs";
 
 /**
  * Build & verification runner (Phase 6).
@@ -61,17 +66,16 @@ function runCommand(
       }
     };
 
-    const env = {
-      ...process.env,
-      // Mitigate the minimal PATH a GUI-launched app may inherit on macOS.
-      PATH: `${process.env.PATH ?? ""}:/usr/local/bin:/opt/homebrew/bin`,
-      // Keep output stable and non-interactive.
+    const resolvedCommand = resolveShellCommand(command);
+    const { cwd, exists } = resolveSpawnCwdSync(root);
+
+    const env = spawnProcessEnv({
       CI: "1",
       FORCE_COLOR: "0",
-    };
+    });
 
-    const child = spawn(command, {
-      cwd: root,
+    const child = spawn(resolvedCommand, {
+      cwd: exists ? cwd : root,
       shell: true,
       env,
       windowsHide: true,
@@ -88,7 +92,7 @@ function runCommand(
       clearTimeout(timer);
       const combined = `${stdout}\n${stderr}`;
       resolve({
-        command,
+        command: resolvedCommand,
         ok: exitCode === 0 && !timedOut,
         exitCode,
         stdout,

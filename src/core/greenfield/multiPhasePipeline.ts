@@ -35,7 +35,10 @@ import { fillMissingPageStubs } from "@/core/greenfield/pageStubs";
 import { buildDeterministicAppFromManifest } from "@/core/greenfield/appStub";
 import { sanitizeAppIntegration } from "@/core/greenfield/appIntegrationSanitizer";
 import { hardenGreenfieldProjectFiles } from "@/core/greenfield/generatedSourceHardening";
-import { isFallbackSkeletonAppContent } from "@/core/greenfield/fallbackSkeleton";
+import {
+  isFallbackSkeletonAppContent,
+  isIncompleteStubAppContent,
+} from "@/core/greenfield/fallbackSkeleton";
 import { validateDomainConsistency } from "@/core/greenfield/domainConsistency";
 import { repairLegacyFieldFlowTypesInProject, repairMissingTypeExports } from "@/core/greenfield/typesExportRepair";
 import { reconcileIntegrationFromManifest } from "@/core/greenfield/integrationReconcile";
@@ -402,6 +405,7 @@ export async function runMultiPhaseGreenfieldGenerate(
   const appIsScaffold =
     !appFile?.content.trim() ||
     isFallbackSkeletonAppContent(appFile.content) ||
+    isIncompleteStubAppContent(appFile.content) ||
     !/Routes|Route|Layout/i.test(appFile.content);
 
   const missingPagePaths = manifest.pagePaths.filter(

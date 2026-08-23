@@ -52,6 +52,20 @@ export function problemKey(problem: ProjectProblem): string {
   return `${problem.absFile}:${problem.line}:${problem.column}:${problem.code}:${problem.severity}:${problem.source}`;
 }
 
+export function sameProjectProblems(
+  left: readonly ProjectProblem[],
+  right: readonly ProjectProblem[],
+): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  const leftKeys = left.map(problemKey).sort();
+  const rightKeys = right.map(problemKey).sort();
+  for (let i = 0; i < leftKeys.length; i += 1) {
+    if (leftKeys[i] !== rightKeys[i]) return false;
+  }
+  return true;
+}
+
 export function problemLocationKey(problem: ProjectProblem): string {
   return `${problem.absFile}:${problem.line}:${problem.column}:${problem.code}:${problem.severity}`;
 }
@@ -141,7 +155,7 @@ export function monacoMarkersToProblems(
     });
   }
 
-  return problems;
+  return problems.sort((a, b) => problemKey(a).localeCompare(problemKey(b)));
 }
 
 export function mergeProblemsStatus(

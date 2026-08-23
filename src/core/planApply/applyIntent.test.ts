@@ -57,6 +57,15 @@ describe("apply intent routing", () => {
     assert.equal(c.reason, "gameplay_keywords");
   });
 
+  it("hint-under-field follow-up routes to feature_addition, not small_ui", () => {
+    const prompt =
+      "Add a small hint under the add-task field that says Press Enter to add a task.";
+    const c = classifyApplyIntent(prompt);
+    assert.equal(c.intent, "feature_addition");
+    assert.equal(isSmallUiApplyPrompt(prompt), false);
+    assert.equal(isUiOnlyApplyPrompt(prompt), false);
+  });
+
   it('"make buttons blue" routes to small_ui', () => {
     const c = classifyApplyIntent("make buttons blue");
     assert.equal(c.intent, "small_ui");

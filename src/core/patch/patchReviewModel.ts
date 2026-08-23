@@ -88,7 +88,7 @@ export function toPlanApplyFileReview(file: PlanApplyFileEntry): PlanApplyFileRe
     status: file.status,
     decision: file.decision,
     basisContent: file.basisContent,
-    newContent: file.proposal?.newContent,
+    newContent: file.appliedNewContent ?? file.proposal?.newContent,
     summary: file.proposal?.summary?.trim() || null,
   };
 }

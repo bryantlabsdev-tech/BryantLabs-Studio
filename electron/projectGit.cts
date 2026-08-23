@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
+import { spawnProcessEnv } from "./processSpawn.cjs";
 
 interface GitFileEntry {
   path: string;
@@ -98,6 +99,7 @@ async function runGit(
     timeout: GIT_TIMEOUT_MS,
     maxBuffer: 8 * 1024 * 1024,
     encoding: "utf8",
+    env: spawnProcessEnv(),
   });
   return {
     stdout: stdout ?? "",

@@ -10,10 +10,12 @@ import {
 } from "@/core/providers/reliabilityStore";
 import { getActiveCooldowns } from "@/core/providers/reliability";
 import { getProviderInfo, PROVIDERS } from "@/core/providers/registry";
-import type { ProviderId, ProviderSettings } from "@/core/providers/types";
+import { isProviderEnabled } from "@/core/providers/providerEnablement";
+import type { HealthResult, ProviderId, ProviderSettings } from "@/core/providers/types";
 
 interface ProviderReliabilityDiagnosticsProps {
   readonly settings: ProviderSettings;
+  readonly healthByProvider?: Partial<Record<ProviderId, HealthResult>>;
 }
 
 function formatTime(iso: string | null | undefined): string {
@@ -41,7 +43,8 @@ export function ProviderReliabilityDiagnostics({
     const isBackup = settings.backupProvider === id;
 
     let status = "Ready";
-    if (degraded) status = "Degraded";
+    if (!isProviderEnabled(settings, id)) status = "Disabled";
+    else if (degraded) status = "Degraded";
     else if (inCooldown) status = "Cooldown";
     else if (!providerApiKeyPresent(settings, id) && id !== "ollama") {
       status = "No key";

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useWorkspace } from "@/app/WorkspaceProvider";
 import {
   formatExecutionVerificationLabel,
   type ExecutionDashboardFileStatus,
@@ -95,6 +96,7 @@ export function ExecutionDashboard({
   runActive = false,
   fixRunning = false,
 }: ExecutionDashboardProps) {
+  const { setCenterTab } = useWorkspace();
   const thoughtsRef = useRef<HTMLDivElement>(null);
   const [userPausedAutoScroll, setUserPausedAutoScroll] = useState(false);
   const isRunning = viewModel.overallStatus === "running";
@@ -154,6 +156,30 @@ export function ExecutionDashboard({
         isRunning={isRunning}
       />
 
+      <div className="exec-dash__diagnostics-links">
+        <button
+          type="button"
+          className="exec-dash__diag-link"
+          onClick={() => setCenterTab("pipelineInspector")}
+        >
+          Pipeline Diagnostics
+        </button>
+        <button
+          type="button"
+          className="exec-dash__diag-link"
+          onClick={() => setCenterTab("studioLog")}
+        >
+          Studio Log
+        </button>
+        <button
+          type="button"
+          className="exec-dash__diag-link"
+          onClick={() => setCenterTab("inspector")}
+        >
+          Run Trace
+        </button>
+      </div>
+
       <div className="exec-dash__grid">
         <section className="exec-dash__panel exec-dash__panel--thoughts">
           <h3 className="exec-dash__panel-title">Agent Thoughts</h3>
@@ -174,8 +200,11 @@ export function ExecutionDashboard({
           >
             {viewModel.thoughts.length > 0 ? (
               <ul className="exec-dash__thoughts" data-testid="exec-dash-thoughts">
-                {viewModel.thoughts.map((thought) => (
-                  <ThoughtItem key={`${thought.kind}-${thought.text}`} thought={thought} />
+                {viewModel.thoughts.map((thought, index) => (
+                  <ThoughtItem
+                    key={`${thought.kind}-${index}-${thought.text.slice(0, 48)}`}
+                    thought={thought}
+                  />
                 ))}
               </ul>
             ) : (

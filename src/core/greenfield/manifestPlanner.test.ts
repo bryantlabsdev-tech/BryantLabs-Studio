@@ -85,6 +85,45 @@ After building, run a self-audit:
     assert.equal(manifest.pages.length, 3);
     assert.equal(manifest.pages[0]?.title, "Dashboard");
   });
+
+  it("does not turn Northstar Include feature bullets into routes", () => {
+    const prompt = `Build a polished project-management application called Northstar.
+
+Use React and TypeScript. Organize it into maintainable components, hooks, utilities, and typed models rather than placing everything in App.tsx.
+
+Include:
+- Dashboard with project, task, completion, workload, and overdue summaries
+- Projects page with create, edit, archive, search, and status filtering
+- Task list with create, edit, delete, complete, priority, due date, assignee, tags, project, search, sorting, and filters
+- Team page with member profiles and workload summaries
+- Calendar-style due-date view
+- Activity timeline
+- Responsive sidebar navigation
+- Light and dark themes
+- Form validation and accessible controls
+- Empty, loading, and error states
+- Seed/demo data
+- Local persistence with a versioned storage schema
+- Reusable confirmation dialog and toast notifications
+- No external backend or authentication service
+
+The project must typecheck, build, run in Preview, and persist user changes after reload.`;
+    const manifest = planManifestFromPrompt(prompt);
+    assert.equal(manifest.appName, "Northstar");
+    const titles = manifest.pages.map((p) => p.title);
+    assert.deepEqual(titles, [
+      "Dashboard",
+      "Projects",
+      "Tasks",
+      "Team",
+      "Calendar",
+      "Activity",
+    ]);
+    assert.ok(!titles.some((t) => /theme|responsive|validation|seed|form/i.test(t)));
+    assert.ok(manifest.pagePaths.includes("src/pages/Projects.tsx"));
+    assert.ok(manifest.pagePaths.includes("src/pages/Tasks.tsx"));
+    assert.ok(!manifest.pagePaths.some((p) => /Lightanddark|Calendar-style/i.test(p)));
+  });
 });
 
 describe("domainConsistency", () => {

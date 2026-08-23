@@ -1,4 +1,5 @@
 import { buildApplyPlanBatchPatchPrompt } from "@/core/planApply/applyPlanPrompt";
+import { formatAgentFilePreview } from "@/core/agent/formatAgentFilePreview";
 import { isGameplayPatchTarget } from "@/core/planApply/targetPolicy";
 import { normalizeApplyPlanPath } from "@/core/planApply/markedFileParse";
 import { buildApplyPlanPatchContext } from "@/core/planner/context";
@@ -69,9 +70,12 @@ function buildUiEditPlanContext(scan: import("@/types").ProjectScan): PlanContex
   };
 }
 
+const GAMEPLAY_APP_PREVIEW_CHARS = 10_000;
+
 function patchFilesForPrompt(
   files: readonly ContextPatchFile[],
   uiEditMode: boolean,
+  gameplayMode: boolean,
   appClassNames: readonly string[],
   summarizeApp: boolean,
 ): ContextPatchFile[] {
@@ -81,6 +85,16 @@ function patchFilesForPrompt(
       return {
         path: f.path,
         content: summarizeAppTsxForContext(f.content, appClassNames),
+      };
+    }
+    if (
+      gameplayMode &&
+      path === "src/App.tsx" &&
+      f.content.length > GAMEPLAY_APP_PREVIEW_CHARS
+    ) {
+      return {
+        path: f.path,
+        content: formatAgentFilePreview(f.content, GAMEPLAY_APP_PREVIEW_CHARS),
       };
     }
     if (path === "src/index.css" && f.content.length > 6000) {
@@ -168,6 +182,7 @@ export function buildApplyPlanContextPackage(
   const promptFiles = patchFilesForPrompt(
     patchFiles,
     uiEditMode,
+    gameplayMode,
     appClassNames,
     uiEditMode && Boolean(input.compressed),
   );
@@ -222,6 +237,7 @@ export function compressContextPackage(
   const summarizedFiles = patchFilesForPrompt(
     pkg.patchFiles,
     pkg.uiEditMode,
+    pkg.taskType === "gameplay_edit",
     pkg.appClassNames,
     true,
   );

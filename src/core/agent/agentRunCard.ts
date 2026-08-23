@@ -592,6 +592,10 @@ function collectFileActivity(
   }
 
   for (const f of planApplySession?.files ?? []) {
+    if (f.status === "error" || f.status === "skipped") {
+      activity.delete(f.relPath);
+      continue;
+    }
     if (f.status === "proposing" || f.status === "pending" || f.status === "ready") {
       activity.set(f.relPath, "editing");
     }

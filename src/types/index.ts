@@ -307,6 +307,16 @@ export interface BryantLabsApi {
   writeFeatureInventory(
     inventory: import("@/core/intelligence/types").FeatureInventorySnapshot,
   ): Promise<{ ok: boolean; reason?: string }>;
+  /** Project-scoped agent conversation (survives quit/reopen). */
+  readFollowUpChat(): Promise<{
+    version: 1;
+    projectPath: string;
+    updatedAt: number;
+    messages: import("@/core/build/followUpChat").FollowUpChatMessage[];
+  } | null>;
+  writeFollowUpChat(
+    messages: readonly import("@/core/build/followUpChat").FollowUpChatMessage[],
+  ): Promise<{ ok: boolean; reason?: string }>;
   /** Persisted run checkpoint for resume-after-restart (Electron userData). */
   loadRunCheckpoint(
     projectPath: string,
@@ -339,6 +349,13 @@ export interface BryantLabsApi {
   deleteProjectFile(filePath: string): Promise<EditResult>;
   /** Undo the last applied edit (single level). */
   undoLastEdit(): Promise<EditResult>;
+  /** Stage proposed edits under `.bryantlabs/shadow-runs/<runId>/` before promote. */
+  stageShadowRun(
+    runId: string,
+    files: readonly { relPath: string; content: string }[],
+  ): Promise<{ ok: boolean; reason?: string; staged?: number }>;
+  /** Remove a shadow run directory after apply or discard. */
+  discardShadowRun(runId: string): Promise<{ ok: boolean; reason?: string }>;
   /** Run build + typecheck verification in the project (Phase 6). */
   verify(): Promise<VerificationResult | { error: string }>;
   /** ---- Platform: MCP tool host ---- */
@@ -381,6 +398,18 @@ export interface BryantLabsApi {
     prompt: string,
     context: PlanContext,
   ): Promise<AIPlanResult>;
+  /** Abort in-flight main-process provider HTTP requests (explicit user cancel). */
+  cancelActiveProviderRequests(): Promise<{ cancelled: number }>;
+  /** Safe HTTP transport metrics ring (no prompts/keys/bodies). */
+  getProviderTransportDiagnostics(): Promise<
+    readonly import("@/core/diagnostics/providerTransport").ProviderTransportEvent[]
+  >;
+  clearProviderTransportDiagnostics(): Promise<{ ok: boolean }>;
+  onProviderTransportEvent(
+    handler: (
+      event: import("@/core/diagnostics/providerTransport").ProviderTransportEvent,
+    ) => void,
+  ): () => void;
   /** ---- AI patch planning (Phase 8) — proposal only, never applied ---- */
   proposePatch(
     provider: ProviderId,
@@ -390,6 +419,8 @@ export interface BryantLabsApi {
     symbols: PatchSymbol[],
     planMeta?: PlanPatchMeta,
   ): Promise<AIPatchResult>;
+  /** Apply Plan — batch patches via a JSON string (avoids contextBridge clone hangs). */
+  proposeApplyPlanPatchesJson(payloadJson: string): Promise<ApplyPlanBatchPatchResult>;
   /** Apply Plan — batch @@FILE marker patches for multiple targets. */
   proposeApplyPlanPatches(
     provider: ProviderId,

@@ -1,3 +1,4 @@
+import { BrandLogo } from "@/components/BrandLogo";
 import { APP_INFO } from "@/core/appInfo";
 import { useWorkspace } from "@/app/WorkspaceProvider";
 import { OpenProjectButton } from "@/components/OpenProjectButton";
@@ -12,7 +13,7 @@ export function TitleBar() {
   return (
     <header className="titlebar titlebar--compact">
       <div className="titlebar__brand">
-        <span className="titlebar__mark" aria-hidden="true" />
+        <BrandLogo size={18} className="titlebar__mark" title={APP_INFO.name} />
         <span className="titlebar__name">{APP_INFO.name}</span>
         {project ? (
           <span className="titlebar__project">

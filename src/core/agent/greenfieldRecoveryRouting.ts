@@ -68,6 +68,36 @@ export function resolveGreenfieldFailedStage(run: GreenfieldRunSnapshot): string
   return null;
 }
 
+/**
+ * Positive evidence that this run's greenfield setup actually reached a
+ * successful build/preview. The block message claims generation "failed before
+ * build completed", so any of these signals refute it — regardless of whether a
+ * later follow-up action left `runResult`/`setupResult` in a transient state.
+ */
+export function greenfieldSetupReachedSuccess(run: GreenfieldRunSnapshot): boolean {
+  if (run.setupResult?.ok === true) return true;
+  if (run.lastSuccessfulRunAt != null) return true;
+  if (run.setupStatus === "done") return true;
+  return run.entries.some(
+    (entry) =>
+      (entry.stage === "build" ||
+        entry.stage === "preview" ||
+        entry.stage === "typescript") &&
+      entry.status === "success",
+  );
+}
+
+const FOLLOW_UP_ACTION_TYPES = new Set<GreenfieldRunSnapshot["actionType"]>([
+  "apply_plan",
+  "ai_plan",
+  "ai_patch_propose",
+  "ai_patch_apply",
+  "multi_file_execution",
+  "autonomous_builder",
+  "studio_agent",
+  "multi_agent_pipeline",
+]);
+
 export function isIncompleteGreenfieldRun(run: GreenfieldRunSnapshot): boolean {
   const hasScaffold =
     hasProjectScaffoldMarkers(null, run.filesWritten) ||
@@ -75,7 +105,16 @@ export function isIncompleteGreenfieldRun(run: GreenfieldRunSnapshot): boolean {
 
   if (!hasScaffold) return false;
 
-  if (run.runResult === "success" && run.setupResult?.ok === true) {
+  // npm install + typecheck + build succeeded — setup is complete even when a
+  // follow-up action (apply_plan) temporarily sets runResult to "running" or a
+  // later edit fails. Trust the recorded build/preview success, not just the
+  // (sometimes unpersisted) setupResult flag.
+  if (greenfieldSetupReachedSuccess(run)) {
+    return false;
+  }
+
+  // A failed follow-up edit is not an incomplete greenfield setup.
+  if (FOLLOW_UP_ACTION_TYPES.has(run.actionType)) {
     return false;
   }
 
@@ -90,11 +129,14 @@ export function isIncompleteGreenfieldRun(run: GreenfieldRunSnapshot): boolean {
   }
 
   if (
-    run.runResult === "failed" ||
     run.setupStatus === "error" ||
     run.setupStatus === "repair_needed" ||
     (run.setupResult != null && !run.setupResult.ok)
   ) {
+    return true;
+  }
+
+  if (run.runResult === "failed" && wasGreenfield) {
     return true;
   }
 

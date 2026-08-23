@@ -193,26 +193,23 @@ export function TerminalView() {
 
   return (
     <div className="terminal-view">
-      {!connected ? (
+      {!connected && !connecting ? (
         <div className="terminal-view__connect">
           <button
             type="button"
             className="terminal-view__connect-btn"
-            disabled={connecting}
             onClick={() => void connectShell()}
           >
-            {connecting ? "Connecting…" : "Connect shell"}
+            Connect shell
           </button>
           {connectError ? (
             <p className="terminal-view__connect-error" role="alert">
               {connectError}
             </p>
-          ) : (
-            <p className="terminal-view__connect-hint">
-              Starts an interactive shell in the project root when you are ready.
-            </p>
-          )}
+          ) : null}
         </div>
+      ) : connecting ? (
+        <p className="terminal-view__connect-hint">Connecting shell…</p>
       ) : null}
       <div
         className="terminal-view__surface"

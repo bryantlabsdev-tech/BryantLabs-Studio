@@ -224,7 +224,7 @@ export function AgentExecutionFlow({
 
   useEffect(() => {
     mergedToolsRef.current = [];
-    setRevealedActionIds([]);
+    setRevealedActionIds((prev) => (prev.length === 0 ? prev : []));
   }, [runId, card.streamRevision]);
 
   const providerWaiting = useMemo(
@@ -298,6 +298,19 @@ export function AgentExecutionFlow({
         })
       : null);
 
+  const patchReviewPending = useMemo(() => {
+    if (!planApplySession) return false;
+    if (
+      planApplySession.phase !== "review" &&
+      planApplySession.phase !== "waiting_for_review"
+    ) {
+      return false;
+    }
+    return planApplySession.files.some(
+      (file) => file.status === "ready" && file.proposal != null,
+    );
+  }, [planApplySession]);
+
   const projection = useMemo(
     () =>
       buildAgentConversationProjection({
@@ -306,8 +319,11 @@ export function AgentExecutionFlow({
         previewReady,
         isRunning,
         waitElapsedMs,
+        patchReviewPending,
+        runMode:
+          greenfieldRun?.actionType === "consultation" ? "consultation" : "edit",
       }),
-    [tools, summary, previewReady, isRunning, waitElapsedMs],
+    [tools, summary, previewReady, isRunning, waitElapsedMs, patchReviewPending, greenfieldRun?.actionType],
   );
 
   const targetText = useMemo(
@@ -336,7 +352,7 @@ export function AgentExecutionFlow({
     return () => {
       for (const timer of timers) window.clearTimeout(timer);
     };
-  }, [projection.actions, revealedActionIds]);
+  }, [projection.actions]);
 
   const finished = Boolean(summary && !isRunning);
   const failed = summary?.outcome === "failed" || summary?.outcome === "cancelled";

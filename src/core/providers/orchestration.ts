@@ -1,5 +1,17 @@
 import { getProviderInfo } from "@/core/providers/registry";
+import {
+  COST_MODE_DEFAULT,
+  economyModelForStage,
+  formatEconomyRoutingHint,
+  isEconomyMode,
+} from "@/core/providers/economyModels";
 import { modelForProvider } from "@/core/providers/AnthropicProvider";
+import {
+  effectiveProviderId,
+  formatProviderEnablementRoutingLog,
+  normalizeProviderEnabled,
+  coerceSettingsToEnabledProviders,
+} from "@/core/providers/providerEnablement";
 import type {
   AgentMode,
   FileWriteMode,
@@ -41,17 +53,20 @@ export function isPipelineMode(settings: ProviderSettings): boolean {
 }
 
 function stageProvider(settings: ProviderSettings, stage: AgentStage): ProviderId {
-  if (stage === "verifier") return settings.provider;
-  if (stage === "greenfield") return settings.provider;
+  if (stage === "verifier") return effectiveProviderId(settings, settings.provider);
+  if (stage === "greenfield") return effectiveProviderId(settings, settings.provider);
   switch (stage) {
     case "planner":
-      return settings.plannerProvider ?? settings.provider;
+      return effectiveProviderId(
+        settings,
+        settings.plannerProvider ?? settings.provider,
+      );
     case "coder":
-      return settings.coderProvider ?? settings.provider;
+      return effectiveProviderId(settings, settings.coderProvider ?? settings.provider);
     case "repair":
-      return settings.repairProvider ?? settings.provider;
+      return effectiveProviderId(settings, settings.repairProvider ?? settings.provider);
     default:
-      return settings.provider;
+      return effectiveProviderId(settings, settings.provider);
   }
 }
 
@@ -82,24 +97,35 @@ export function resolveStageRouting(
   stage: AgentStage,
 ): StageRouting | null {
   if (stage === "verifier") {
-    return { stage, provider: settings.provider, model: "local" };
+    return { stage, provider: effectiveProviderId(settings, settings.provider), model: "local" };
   }
   if (stage === "greenfield") {
+    const provider = effectiveProviderId(settings, settings.provider);
     return {
       stage,
-      provider: settings.provider,
-      model: modelForProvider(settings, settings.provider),
+      provider,
+      model: modelForProvider(settings, provider),
     };
   }
   if (!isPipelineMode(settings)) {
+    const provider = effectiveProviderId(settings, settings.provider);
+    const economyModel = economyModelForStage(settings, stage, provider);
+    if (economyModel) {
+      return { stage, provider, model: economyModel };
+    }
     return {
       stage,
-      provider: settings.provider,
-      model: modelForProvider(settings, settings.provider),
+      provider,
+      model: modelForProvider(settings, provider),
     };
   }
   const provider = stageProvider(settings, stage);
-  return { stage, provider, model: stageModel(settings, stage) };
+  const economyModel = economyModelForStage(settings, stage, provider);
+  return {
+    stage,
+    provider,
+    model: economyModel ?? stageModel(settings, stage),
+  };
 }
 
 export function operationToStage(
@@ -158,17 +184,26 @@ export function formatSingleAgentPillText(settings: ProviderSettings): string {
 }
 
 export function formatProviderRoutingSummary(settings: ProviderSettings): string {
+  const enablement = formatProviderEnablementRoutingLog(settings);
+  const economyHint = formatEconomyRoutingHint(settings);
   if (!isPipelineMode(settings)) {
-    const routing = resolveStageRouting(settings, "planner");
-    return routing
-      ? `Single agent · ${providerShortLabel(routing.provider)} · ${routing.model}`
+    const planner = resolveStageRouting(settings, "planner");
+    const coder = isEconomyMode(settings) ? resolveStageRouting(settings, "coder") : null;
+    const route = planner
+      ? economyHint ??
+        `Single agent · ${providerShortLabel(planner.provider)} · ${planner.model}`
       : "Single agent";
+    if (economyHint && coder) {
+      return `${route}\nCoder/Repair: ${providerShortLabel(coder.provider)} · ${coder.model}\n${enablement}`;
+    }
+    return `${route}\n${enablement}`;
   }
   return [
     formatStageRoutingLine(resolveStageRouting(settings, "planner")!),
     formatStageRoutingLine(resolveStageRouting(settings, "coder")!),
     formatStageRoutingLine(resolveStageRouting(settings, "repair")!),
     "Verifier: Local",
+    enablement,
   ].join("\n");
 }
 
@@ -242,6 +277,7 @@ export function buildContextOrchestrationSection(
     ...(opts?.providerFailureSummary != null
       ? { providerFailureSummary: opts.providerFailureSummary }
       : {}),
+    providerEnablementSummary: formatProviderEnablementRoutingLog(settings),
   };
 }
 
@@ -291,7 +327,7 @@ export function stageModelValue(
 export function normalizeProviderSettings(
   settings: ProviderSettings,
 ): ProviderSettings {
-  return {
+  const normalized: ProviderSettings = {
     ...settings,
     groqModel: settings.groqModel ?? DEFAULT_GROQ_MODEL,
     openrouterModel: settings.openrouterModel ?? DEFAULT_OPENROUTER_MODEL,
@@ -311,7 +347,10 @@ export function normalizeProviderSettings(
     askBeforeFallback: settings.askBeforeFallback ?? true,
     fileWriteMode: (settings.fileWriteMode ?? "workspace") as FileWriteMode,
     plannerMaxOutputTokens: coercePlannerMaxOutputTokens(settings.plannerMaxOutputTokens),
+    providerEnabled: normalizeProviderEnabled(settings.providerEnabled),
+    costMode: settings.costMode ?? COST_MODE_DEFAULT,
   };
+  return coerceSettingsToEnabledProviders(normalized).settings;
 }
 
 function capitalize(s: string): string {

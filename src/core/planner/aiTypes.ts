@@ -18,6 +18,8 @@ export interface PlanContext {
   totalFiles: number;
   totalFolders: number;
   entryPoints: string[];
+  /** Injected from `.bryantlabs/rules.md` or `.cursorrules` when present. */
+  projectRules?: string;
   /** Phase 19 — compact repository intelligence summary. */
   repositorySummary?: string;
   /** Phase 19 — capped package.json dependencies. */

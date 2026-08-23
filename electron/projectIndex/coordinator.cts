@@ -1,3 +1,5 @@
+import { promises as fs } from "node:fs";
+import * as path from "node:path";
 import type { BrowserWindow } from "electron";
 import { scanProject, type ProjectScan } from "../projectScanner.cjs";
 import { startProjectWatcher } from "../projectWatcher.cjs";
@@ -45,6 +47,39 @@ let stopWatcher: (() => void) | null = null;
 let getWindow: (() => BrowserWindow | null) | null = null;
 let deltaChain: Promise<void> = Promise.resolve();
 let validating = false;
+let scanReady = Promise.resolve();
+let resolveScanReady: (() => void) | null = null;
+
+function beginScanWait(): void {
+  scanReady = new Promise((resolve) => {
+    resolveScanReady = resolve;
+  });
+}
+
+function completeScanWait(): void {
+  resolveScanReady?.();
+  resolveScanReady = null;
+  scanReady = Promise.resolve();
+}
+
+const SOURCE_FILE_RE = /\.(tsx?|jsx?|vue|svelte|css|scss|less)$/i;
+
+function countIndexedSourceFiles(scan: ProjectScan): number {
+  return scan.files.filter(
+    (f) => typeof f.path === "string" && SOURCE_FILE_RE.test(f.path),
+  ).length;
+}
+
+async function projectRootHasAppScaffoldOnDisk(root: string): Promise<boolean> {
+  try {
+    await fs.access(path.join(root, "package.json"));
+    const srcDir = path.join(root, "src");
+    const entries = await fs.readdir(srcDir);
+    return entries.some((name) => /^App\.(tsx|jsx)$/i.test(name));
+  } catch {
+    return false;
+  }
+}
 
 function emitStatus(): void {
   const win = getWindow?.();
@@ -125,6 +160,7 @@ function resetCoordinatorState(): void {
   fromCache = false;
   deltaChain = Promise.resolve();
   validating = false;
+  completeScanWait();
 }
 
 export async function stopProjectIndex(): Promise<void> {
@@ -153,6 +189,7 @@ async function setScan(
   indexState = "ready";
   fromCache = opts?.cache ?? fromCache;
   pendingFiles = 0;
+  completeScanWait();
   await persistScan(root, scan);
 
   const changed = opts?.changedPaths ?? [];
@@ -189,10 +226,17 @@ async function fullRescan(root: string): Promise<void> {
   indexState = "updating";
   pendingFiles = 0;
   emitStatus();
-  const scan = await scanProject(root);
-  if (activeRoot !== root) return;
-  fromCache = false;
-  await setScan(root, scan);
+  try {
+    const scan = await scanProject(root);
+    if (activeRoot !== root) return;
+    fromCache = false;
+    await setScan(root, scan);
+  } catch (err) {
+    console.warn(
+      `[project_index] full rescan failed — ${err instanceof Error ? err.message : String(err)}`,
+    );
+    if (activeRoot === root) completeScanWait();
+  }
 }
 
 async function backgroundValidate(root: string): Promise<void> {
@@ -305,23 +349,35 @@ export async function activateProjectIndex(
   indexState = "updating";
   fromCache = false;
   emitStatus();
+  beginScanWait();
 
   const manifest = await loadManifest(root);
   if (manifest?.scan && activeRoot === root) {
-    currentScan = manifest.scan;
-    fromCache = true;
-    coverage = 1;
-    indexState = "ready";
-    emitStatus();
-    emitUpdated({
-      changedPaths: [],
-      deletedPaths: [],
-      builtAt: manifest.scan.scannedAt,
-    });
-    scheduleProjectProblemsRefresh(root);
-    void backgroundValidate(root);
+    const staleEmptyIndex =
+      countIndexedSourceFiles(manifest.scan) === 0 &&
+      (await projectRootHasAppScaffoldOnDisk(root));
+    if (staleEmptyIndex) {
+      // Manifest predates greenfield writes (e.g. user quit before rescan finished).
+      void fullRescan(root);
+    } else {
+      currentScan = manifest.scan;
+      fromCache = true;
+      coverage = 1;
+      indexState = "ready";
+      completeScanWait();
+      emitStatus();
+      emitUpdated({
+        changedPaths: [],
+        deletedPaths: [],
+        builtAt: manifest.scan.scannedAt,
+      });
+      scheduleProjectProblemsRefresh(root);
+      void backgroundValidate(root);
+    }
   } else if (activeRoot === root) {
     void fullRescan(root);
+  } else {
+    completeScanWait();
   }
 
   if (activeRoot !== root) return;
@@ -335,12 +391,24 @@ export async function activateProjectIndex(
 }
 
 export async function ensureProjectScan(root: string): Promise<ProjectScan | null> {
-  if (activeRoot === root && currentScan) return currentScan;
-  if (activeRoot === root && indexState === "updating") {
-    await deltaChain;
-    return currentScan;
+  if (activeRoot !== root) return null;
+  if (currentScan) return currentScan;
+  const timedOut = await Promise.race([
+    scanReady.then(() => false),
+    new Promise<boolean>((resolve) => {
+      setTimeout(() => resolve(true), 60_000);
+    }),
+  ]);
+  if (timedOut && activeRoot === root && !currentScan) {
+    completeScanWait();
+    console.warn("[project_index] scan wait exceeded 60s");
   }
-  return null;
+  if (activeRoot !== root) return null;
+  if (currentScan) return currentScan;
+  if (indexState === "updating") {
+    await deltaChain;
+  }
+  return activeRoot === root ? currentScan : null;
 }
 
 export async function forceProjectRescan(root: string): Promise<ProjectScan | null> {

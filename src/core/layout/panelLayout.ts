@@ -18,7 +18,7 @@ export const PANEL_LAYOUT_DEFAULTS: PanelLayout = {
   rightWidth: 260,
   dockHeight: 190,
   dockOpen: true,
-  agentFocusMode: true,
+  agentFocusMode: false,
 };
 
 export const PANEL_LAYOUT_LIMITS = {
@@ -147,6 +147,9 @@ export function layoutForAgentFocus(
   layout: PanelLayout,
   columnsWidth: number,
 ): PanelLayout {
+  if (columnsWidth <= 0) {
+    return clampPanelLayout({ ...layout, agentFocusMode: true });
+  }
   const { iconRailWidth, resizeHandleBreadth, centerMin, rightMin, leftMin, leftMaxFocus } =
     PANEL_LAYOUT_LIMITS;
   const handles = resizeHandleBreadth * 2;
@@ -161,5 +164,14 @@ export function layoutForAgentFocus(
     rightWidth: targetRight,
     dockOpen: false,
     dockHeight: 0,
+  });
+}
+
+/** Show the right workflow/details column (used when opening Settings, Git, etc.). */
+export function ensureDetailsPanelVisible(layout: PanelLayout): PanelLayout {
+  return clampPanelLayout({
+    ...layout,
+    agentFocusMode: false,
+    rightWidth: Math.max(layout.rightWidth, PANEL_LAYOUT_DEFAULTS.rightWidth),
   });
 }

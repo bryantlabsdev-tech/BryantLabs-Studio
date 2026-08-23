@@ -12,7 +12,7 @@ export function PlanApplyReview() {
     cancelApplyPlan,
     selectPlanApplyFile,
     setPlanApplyFileDecision,
-    approveAllPlanApplyFiles,
+    setPlanApplyFilePartialContent,
     applyApprovedPlanFiles,
   } = useWorkspace();
 
@@ -35,8 +35,7 @@ export function PlanApplyReview() {
       }
       error={planApplyError}
       onAcceptAll={() => {
-        approveAllPlanApplyFiles();
-        void applyApprovedPlanFiles();
+        void applyApprovedPlanFiles({ approveReadyFiles: true });
       }}
       onRejectAll={() => cancelApplyPlan()}
       onRegenerate={() => void startApplyPlan()}
@@ -44,6 +43,8 @@ export function PlanApplyReview() {
       onSelectFile={selectPlanApplyFile}
       onAcceptFile={(relPath) => setPlanApplyFileDecision(relPath, "approved")}
       onRejectFile={(relPath) => setPlanApplyFileDecision(relPath, "rejected")}
+      onPartialContentChange={setPlanApplyFilePartialContent}
+      hunkReview
     />
   );
 }

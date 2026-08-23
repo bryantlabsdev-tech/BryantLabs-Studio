@@ -7,8 +7,8 @@ export function formatApplyContinuationFailure(input: {
 }): string | null {
   const { applyResult, planFileCount, autoContinue } = input;
   if (applyResult.waitingForReview) return null;
-  if (applyResult.validReady > 0) return null;
   if (applyResult.error?.trim()) return applyResult.error.trim();
+  if (applyResult.validReady > 0) return null;
   if (planFileCount === 0) return "No editable files in plan to apply.";
   if (autoContinue && applyResult.autoContinued && applyResult.applyOk === false) {
     return "Apply continued after planning but failed before writing files.";

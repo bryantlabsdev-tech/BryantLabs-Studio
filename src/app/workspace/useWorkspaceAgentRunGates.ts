@@ -10,6 +10,7 @@ import { buildUiAuditAdvisoryFixPrompt } from "@/core/agent/uiAuditAdvisoryUx";
 import { buildPreferredFixPrompt } from "@/core/projectIntelligence/recommendations";
 import type { MemoryRecommendation } from "@/core/projectIntelligence/types";
 import type { RailTool } from "@/core/layout/types";
+import { dispatchOpenDetailsPanel } from "@/core/layout/settingsNavigation";
 import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
 import type { Plan } from "@/core/planner";
 import type { AIPlanResult } from "@/core/planner/aiTypes";
@@ -25,6 +26,7 @@ import {
 } from "@/core/greenfield/runState";
 
 export function useWorkspaceAgentRunGates(input: {
+  readonly api?: import("@/types").BryantLabsApi | null | undefined;
   readonly greenfieldRun: GreenfieldRunSnapshot;
   readonly agentGreenfieldPanelActive: boolean;
   readonly buildRunning: boolean;
@@ -122,6 +124,7 @@ export function useWorkspaceAgentRunGates(input: {
   const setRailTool = useCallback(
     (tool: RailTool) => {
       if (tool === "newapp" && agentWorkflowBusy) return;
+      dispatchOpenDetailsPanel();
       input.setRailToolState(tool);
     },
     [agentWorkflowBusy, input.setRailToolState],
@@ -173,6 +176,7 @@ export function useWorkspaceAgentRunGates(input: {
   );
 
   const resetAgentRunState = useCallback(() => {
+    void input.api?.cancelActiveProviderRequests?.();
     input.greenfieldRunControlRef.current?.cancel();
     input.setGreenfieldRun((prev) => ({
       ...emptyGreenfieldRun(),

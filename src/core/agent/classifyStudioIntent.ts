@@ -45,6 +45,7 @@ export interface ClassifyStudioIntentInput {
 
 export interface ClassifyStudioIntentResult {
   readonly intent: StudioIntentKind;
+  readonly promptIntent: import("@/core/agent/agentIntentRouter").AgentPromptIntent;
   readonly reason: string | null;
   /** Shown when a greenfield-style prompt is treated as follow-up on an existing project. */
   readonly rerouteNote: string | null;
@@ -97,13 +98,18 @@ export function classifyStudioIntent(
       ? "blocked"
       : route.intent === "greenfield"
         ? "greenfield"
-        : route.intent;
+        : route.execution === "consultation" ||
+            route.execution === "mixed_confirm" ||
+            route.execution === "run_command"
+          ? "consultation"
+          : route.intent;
 
   const routeMode: IntentRouteMode =
     route.execution === "greenfield" ? "greenfield" : "edit";
 
   return {
     intent,
+    promptIntent: route.promptIntent,
     reason: route.blockedReason,
     rerouteNote: route.activityNote,
     routeMode,

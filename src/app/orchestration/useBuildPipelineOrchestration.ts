@@ -1,6 +1,9 @@
-import { useCallback, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { PipelineSession } from "@/core/pipeline/types";
-import { readFollowUpReviewFirst } from "@/core/build/followUpPrefs";
+import {
+  AUTO_APPLY_FOLLOW_UP_PATCHES,
+  readFollowUpReviewFirst,
+} from "@/core/build/followUpPrefs";
 import type { BuildLoopMode, BuildLoopStatus } from "@/core/build";
 import { PipelineReviewGates } from "@/app/orchestration/pipelineGates";
 import {
@@ -14,7 +17,7 @@ import {
 } from "@/app/orchestration/pipelineRunner";
 import type { AIPlanStatus, BuildPipelineHost } from "@/app/orchestration/types";
 import type { AutoFixSession } from "@/core/autoFix";
-import type { PlanApplySession } from "@/core/planApply";
+import { hasReviewablePlanApplyFiles, type PlanApplySession } from "@/core/planApply";
 
 export interface BuildPhaseInputs {
   readonly aiPlanStatus: AIPlanStatus;
@@ -139,15 +142,13 @@ export function useBuildPipelineOrchestration(
     const host = hostRef.current;
     if (!host) return;
     if (buildMode === "pipeline") {
-      host.approveAllPlanApplyFiles();
       continueMultiAgentPipeline();
       return;
     }
-    host.approveAllPlanApplyFiles();
     setBuildRunning(true);
     setBuildError(null);
     try {
-      const result = await host.applyApprovedPlanFiles();
+      const result = await host.applyApprovedPlanFiles({ approveReadyFiles: true });
       if (!result.ok) {
         setBuildError(result.error ?? "Apply failed.");
       }
@@ -155,6 +156,24 @@ export function useBuildPipelineOrchestration(
       setBuildRunning(false);
     }
   }, [hostRef, buildMode, continueMultiAgentPipeline]);
+
+  const autoAppliedReviewRunIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!AUTO_APPLY_FOLLOW_UP_PATCHES) return;
+    const session = phaseInputs.planApplySession;
+    if (!session) return;
+    if (session.phase !== "waiting_for_review" && session.phase !== "review") return;
+    if (!hasReviewablePlanApplyFiles(session)) return;
+    if (
+      session.files.length > 0 &&
+      session.files.every((file) => file.selectionReason === "e2e")
+    ) {
+      return;
+    }
+    if (autoAppliedReviewRunIdRef.current === session.applyRunId) return;
+    autoAppliedReviewRunIdRef.current = session.applyRunId;
+    void continueBuildAfterReview();
+  }, [phaseInputs.planApplySession, continueBuildAfterReview]);
 
   const cancelBuildLoop = useCallback(() => {
     if (pipelineRunning || pipelineSession) {
@@ -292,5 +311,6 @@ export function useBuildPipelineOrchestration(
     resumeBuildReview,
     setBuildError,
     releaseBuildRunForReview,
+    setBuildRunningForTest: setBuildRunning,
   };
 }

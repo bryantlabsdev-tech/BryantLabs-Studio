@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildAgentGreenfieldSuccessRunPatch,
   closeStaleGreenfieldRunningEntries,
   finalizeGreenfieldAgentRun,
   greenfieldSuccessWithStaleRunningEntries,
@@ -17,6 +18,21 @@ describe("greenfieldAgentCleanup", () => {
     const closed = closeStaleGreenfieldRunningEntries(run.entries);
     assert.equal(closed.every((e) => e.status !== "running"), true);
     assert.equal(closed.filter((e) => e.id === "gen-running")[0]?.status, "success");
+  });
+
+  it("buildAgentGreenfieldSuccessRunPatch persists filesWritten for follow-up edits", () => {
+    const patch = buildAgentGreenfieldSuccessRunPatch(
+      { ...emptyGreenfieldRun(), runResult: "running" },
+      {
+        filesWritten: ["package.json", "src/App.tsx"],
+        typecheckPassed: true,
+        buildPassed: true,
+      },
+    );
+    assert.deepEqual(patch.filesWritten, ["package.json", "src/App.tsx"]);
+    assert.equal(patch.setupStatus, "done");
+    assert.ok(patch.lastSuccessfulRunAt);
+    assert.equal(patch.runResult, "success");
   });
 
   it("finalizeGreenfieldAgentRun clears busy flags", () => {

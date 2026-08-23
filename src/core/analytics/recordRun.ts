@@ -221,6 +221,9 @@ export function buildAnalyticsRecord(opts: {
   };
 }
 
+/** Stable per completed run so remounts/re-renders do not append duplicate records. */
 export function analyticsRecordKey(record: StudioAnalyticsRecord): string {
-  return `${record.projectPath ?? "none"}-${record.actionType}-${record.at}-${record.status}`;
+  const startedAt =
+    record.durationMs != null ? record.at - record.durationMs : record.at;
+  return `${record.projectPath ?? "none"}-${record.actionType}-${startedAt}-${record.status}`;
 }

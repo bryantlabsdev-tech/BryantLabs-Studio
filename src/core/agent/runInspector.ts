@@ -1,4 +1,5 @@
 import type { AgentRunArtifact } from "@/core/agent/agentRunHistory";
+import { formatExecutionModeLogDetails } from "@/core/agent/executionModeConfirmation";
 import type { AgentRunCardViewModel } from "@/core/agent/agentRunCard";
 import type { RunFileDiff } from "@/core/agent/runFileDiffs";
 import type { RunTimelineSnapshot } from "@/core/agent/runTimeline";
@@ -154,6 +155,7 @@ export interface RunInspectorViewModel {
   readonly fileDiffs: readonly RunFileDiff[];
   readonly metrics: RunInspectorMetrics;
   readonly preflight: RunInspectorPreflight | null;
+  readonly executionMode: import("@/core/agent/executionModeConfirmation").ExecutionModeDiagnostics | null;
   readonly apply: RunInspectorApply | null;
   readonly health: RunHealthScore | null;
   readonly trace: AgentTraceViewModel;
@@ -965,6 +967,7 @@ export function buildRunInspectorViewModel(input: BuildRunInspectorInput): RunIn
     fileDiffs,
     metrics,
     preflight,
+    executionMode: input.greenfieldRun.executionMode,
     apply,
     health,
     trace,
@@ -1051,6 +1054,12 @@ export function formatRunInspectorText(model: RunInspectorViewModel): string {
         `Route: ${model.preflight.route ?? model.route ?? "—"}`,
         `Prompt classification: ${model.preflight.promptClassification}`,
       ]),
+    );
+  }
+
+  if (model.executionMode) {
+    lines.push(
+      section("Execution mode", formatExecutionModeLogDetails(model.executionMode).split("\n")),
     );
   }
 

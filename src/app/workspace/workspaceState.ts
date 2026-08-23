@@ -120,11 +120,12 @@ export interface WorkspaceState {
   readonly editorReveal: { readonly line: number; readonly column: number } | null;
   clearEditorReveal(): void;
   openProject(): Promise<void>;
-  openFile(node: FileNode): Promise<void>;
+  openFile(node: FileNode, opts?: { readonly revealEditor?: boolean }): Promise<void>;
   openPath(absPath: string): Promise<void>;
   activateFile(path: string): void;
   closeFile(path: string): void;
   readonly openFileTabs: readonly string[];
+  readonly openFilesByPath: Readonly<Record<string, OpenFile>>;
   editorContent(path: string): string | null;
   isEditorDirty(path: string): boolean;
   updateEditorDraft(path: string, content: string): void;
@@ -242,10 +243,14 @@ export interface WorkspaceState {
     relPath: string,
     decision: PlanApplyFileDecision,
   ): void;
+  setPlanApplyFilePartialContent(relPath: string, mergedAfter: string): void;
   approveAllPlanApplyFiles(): void;
   /** Write approved files, then run typecheck + build. */
   applyApprovedPlanFiles(opts?: {
     pipelineMode?: boolean;
+    session?: import("@/core/planApply").PlanApplySession;
+    approveReadyFiles?: boolean;
+    approveRelPaths?: readonly string[];
   }): Promise<{
     ok: boolean;
     verification: VerificationResult | null;
@@ -265,6 +270,14 @@ export interface WorkspaceState {
   readonly buildError: string | null;
   readonly buildStatus: import("@/core/build").BuildLoopStatus;
   runBuildLoop(prompt: string): Promise<void>;
+  runAgentConsultationFlow(opts: {
+    prompt: string;
+    promptIntent: import("@/core/agent/agentIntentRouter").AgentPromptIntent;
+    mixedEdit?: boolean;
+    command?: boolean;
+  }): Promise<void>;
+  consumePendingMixedEdit(): { readonly prompt: string } | null;
+  readonly consultationRunning: boolean;
   continueBuildAfterReview(): Promise<void>;
   cancelBuildLoop(): void;
   retryApplyPlanReview(): Promise<void>;

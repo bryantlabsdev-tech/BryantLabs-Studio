@@ -125,6 +125,9 @@ const api = {
   readFeatureInventory: () => ipcRenderer.invoke("project:features:read"),
   writeFeatureInventory: (inventory: unknown) =>
     ipcRenderer.invoke("project:features:write", inventory),
+  readFollowUpChat: () => ipcRenderer.invoke("project:followUpChat:read"),
+  writeFollowUpChat: (messages: unknown) =>
+    ipcRenderer.invoke("project:followUpChat:write", messages),
   loadRunCheckpoint: (projectPath: string) =>
     ipcRenderer.invoke("runCheckpoint:load", projectPath),
   saveRunCheckpoint: (checkpoint: unknown) =>
@@ -146,6 +149,11 @@ const api = {
   deleteProjectFile: (filePath: string) =>
     ipcRenderer.invoke("edit:deleteFile", filePath),
   undoLastEdit: () => ipcRenderer.invoke("edit:undoLast"),
+  stageShadowRun: (
+    runId: string,
+    files: readonly { relPath: string; content: string }[],
+  ) => ipcRenderer.invoke("shadow:stage", runId, files),
+  discardShadowRun: (runId: string) => ipcRenderer.invoke("shadow:discard", runId),
   verify: () => ipcRenderer.invoke("verify:run"),
 
   getMcpStatus: () => ipcRenderer.invoke("mcp:status"),
@@ -167,6 +175,98 @@ const api = {
     ipcRenderer.invoke("providers:revealApiKey", provider),
   checkProviderHealth: (provider: string) =>
     ipcRenderer.invoke("providers:health", provider),
+  cancelActiveProviderRequests: () =>
+    ipcRenderer.invoke("providers:cancelActive") as Promise<{ cancelled: number }>,
+  getProviderTransportDiagnostics: () =>
+    ipcRenderer.invoke("providers:getTransportDiagnostics") as Promise<
+      Array<{
+        requestId: string;
+        attempt: number;
+        urlHost: string;
+        method: string;
+        payloadByteLength: number;
+        payloadSha256: string;
+        contentLengthHeader: number;
+        transferEncoding: string | null;
+        contentEncoding: string | null;
+        bytesWritten: number;
+        bodyFullyFlushed: boolean;
+        socketEvents: string[];
+        aborted: boolean;
+        abortReason: string | null;
+        firstByteTimerArmed: boolean;
+        httpStatus: number | null;
+        responseByteLength: number;
+        responseSha256: string;
+        providerRequestId: string | null;
+        truncationSource: string;
+        parserStage: string | null;
+        completed: boolean;
+        durationMs: number;
+      }>
+    >,
+  clearProviderTransportDiagnostics: () =>
+    ipcRenderer.invoke("providers:clearTransportDiagnostics") as Promise<{ ok: boolean }>,
+  onProviderTransportEvent: (
+    handler: (event: {
+      requestId: string;
+      attempt: number;
+      urlHost: string;
+      method: string;
+      payloadByteLength: number;
+      payloadSha256: string;
+      contentLengthHeader: number;
+      transferEncoding: string | null;
+      contentEncoding: string | null;
+      bytesWritten: number;
+      bodyFullyFlushed: boolean;
+      socketEvents: string[];
+      aborted: boolean;
+      abortReason: string | null;
+      firstByteTimerArmed: boolean;
+      httpStatus: number | null;
+      responseByteLength: number;
+      responseSha256: string;
+      providerRequestId: string | null;
+      truncationSource: string;
+      parserStage: string | null;
+      completed: boolean;
+      durationMs: number;
+    }) => void,
+  ) => {
+    const listener = (
+      _event: IpcRendererEvent,
+      payload: {
+        requestId: string;
+        attempt: number;
+        urlHost: string;
+        method: string;
+        payloadByteLength: number;
+        payloadSha256: string;
+        contentLengthHeader: number;
+        transferEncoding: string | null;
+        contentEncoding: string | null;
+        bytesWritten: number;
+        bodyFullyFlushed: boolean;
+        socketEvents: string[];
+        aborted: boolean;
+        abortReason: string | null;
+        firstByteTimerArmed: boolean;
+        httpStatus: number | null;
+        responseByteLength: number;
+        responseSha256: string;
+        providerRequestId: string | null;
+        truncationSource: string;
+        parserStage: string | null;
+        completed: boolean;
+        durationMs: number;
+      },
+    ) => {
+      handler(payload);
+    };
+    ipcRenderer.on("providers:transport-event", listener);
+    return () => ipcRenderer.removeListener("providers:transport-event", listener);
+  },
   testProvider: (provider: string, prompt: string) =>
     ipcRenderer.invoke("providers:test", provider, prompt),
   agentStepWithProvider: (provider: string, prompt: string) =>
@@ -190,6 +290,23 @@ const api = {
       symbols,
       planMeta,
     ),
+  proposeApplyPlanPatchesJson: (payloadJson: string) => {
+    if (typeof payloadJson !== "string") {
+      return Promise.resolve({
+        ok: false,
+        provider: "anthropic",
+        model: "",
+        raw: null,
+        latencyMs: 0,
+        error: "proposeApplyPlanPatchesJson requires a JSON string.",
+        missingPaths: [],
+      });
+    }
+    console.error(
+      `[preload:applyPlanBatchJson] invoke bytes=${payloadJson.length}`,
+    );
+    return ipcRenderer.invoke("providers:applyPlanBatchJson", payloadJson);
+  },
   proposeApplyPlanPatches: (
     provider: string,
     prompt: string,
@@ -202,16 +319,35 @@ const api = {
       slimContext?: boolean;
       repairMissingPaths?: string[];
       directRewrite?: boolean;
+      intelligenceBlock?: string;
+      contextNotes?: string;
+      uiEditMode?: boolean;
     },
-  ) =>
-    ipcRenderer.invoke(
-      "providers:applyPlanBatch",
-      provider,
-      prompt,
-      context,
-      files,
-      meta,
-    ),
+  ) => {
+    // Serialize in the caller when possible. This path still stringifies here so
+    // only a string crosses contextBridge → main (object clone was hanging).
+    let payloadJson: string;
+    try {
+      payloadJson = JSON.stringify({
+        provider,
+        prompt,
+        context,
+        files,
+        meta: meta ?? { planSummary: "", targetPaths: [] },
+      });
+    } catch (err) {
+      return Promise.resolve({
+        ok: false,
+        provider,
+        model: "",
+        raw: null,
+        latencyMs: 0,
+        error: `Failed to serialize apply-plan payload: ${err instanceof Error ? err.message : String(err)}`,
+        missingPaths: [],
+      });
+    }
+    return ipcRenderer.invoke("providers:applyPlanBatchJson", payloadJson);
+  },
   proposeAutoFix: (provider: string, context: unknown, file: unknown) =>
     ipcRenderer.invoke("providers:autoFix", provider, context, file),
 

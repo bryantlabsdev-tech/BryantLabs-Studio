@@ -53,6 +53,14 @@ export function isGameplayApplyPrompt(prompt: string): boolean {
   return classifyApplyIntent(prompt).gameplay;
 }
 
+/** Gameplay logic edits often only need App.tsx unless the prompt mentions styling. */
+export function gameplayPromptNeedsStylesheet(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  return /\b(css|stylesheet|styles?|color|theme|layout|font|margin|padding|responsive|visual|ui polish|appearance)\b/.test(
+    lower,
+  );
+}
+
 export function isSmallUiApplyPrompt(prompt: string): boolean {
   return classifyApplyIntent(prompt).intent === "small_ui";
 }

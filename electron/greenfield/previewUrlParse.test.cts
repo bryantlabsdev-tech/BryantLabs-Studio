@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   extractPreviewUrl,
+  isAllowedPreviewUrl,
   normalizePreviewUrl,
   stripAnsi,
 } from "./previewUrlParse.cjs";
@@ -74,5 +75,19 @@ describe("extractPreviewUrl", () => {
 describe("normalizePreviewUrl", () => {
   it("adds trailing slash path", () => {
     assert.equal(normalizePreviewUrl("http://127.0.0.1:4173"), "http://127.0.0.1:4173/");
+  });
+});
+
+describe("isAllowedPreviewUrl", () => {
+  it("allows loopback http(s)", () => {
+    assert.equal(isAllowedPreviewUrl("http://127.0.0.1:4173/"), true);
+    assert.equal(isAllowedPreviewUrl("http://localhost:4173/"), true);
+    assert.equal(isAllowedPreviewUrl("https://127.0.0.1:4173/"), true);
+  });
+
+  it("rejects metadata, remote, and non-http URLs", () => {
+    assert.equal(isAllowedPreviewUrl("http://169.254.169.254/"), false);
+    assert.equal(isAllowedPreviewUrl("https://example.com/"), false);
+    assert.equal(isAllowedPreviewUrl("file:///tmp/index.html"), false);
   });
 });

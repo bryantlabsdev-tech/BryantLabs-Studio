@@ -82,7 +82,7 @@ export function inferAbortCauseAnalysis(
   return [
     "Likely source: AbortController in electron/providers/types.cts fetchJson()",
     "(setTimeout calls controller.abort() after provider timeout).",
-    "Health uses ~20s (Gemini) / ~30s (Ollama); greenfield generate uses 120s.",
+    "Health uses ~20s (Gemini) / ~30s (Ollama); greenfield generate uses 300s.",
     "Unlikely: renderer unmount, IPC cancellation, Electron dialog, folder validation, or write/setup",
     "(those run on different IPC channels / stages).",
   ].join(" ");

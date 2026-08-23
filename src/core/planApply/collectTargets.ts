@@ -18,9 +18,12 @@ import {
   buildGameplayAllowlist,
   buildUiOnlyAllowlist,
   CONFIG_UI_BLOCK_MESSAGE,
+  ENTRY_BOOTSTRAP_SKIP_MESSAGE,
   filterPlanApplyTargets,
   isBlockedNonUiTarget,
   isConfigPackageTarget,
+  isEntryBootstrapPath,
+  isGameplayPatchTarget,
   isUiCorePatchTarget,
   isUiOnlyApplyPrompt,
   SELECTION_REASON,
@@ -163,6 +166,60 @@ export function collectPlanApplyTargets(
     };
   }
 
+  if (isGameplayApplyPrompt(prompt)) {
+    const planFilesForDiagnostics =
+      aiPlan?.ok && aiPlan.plan?.files.length ? aiPlan.plan.files : plan.files;
+    recordBlockedPlanFiles(planFilesForDiagnostics, scan, skipped);
+
+    const allowlist = buildGameplayAllowlist(scan, promptLower);
+    const allowPaths = new Set(allowlist.map((t) => t.relPath));
+    const allowByPath = new Map(allowlist.map((t) => [t.relPath, t]));
+
+    const plannedPaths = new Set<string>();
+    const addPlannedPath = (path: string) => {
+      const resolved = resolvePlanFilePath(path, scan);
+      if (resolved) plannedPaths.add(resolved.relPath);
+    };
+    if (aiPlan?.ok && aiPlan.plan) {
+      for (const f of aiPlan.plan.files) addPlannedPath(f.path);
+    }
+    for (const f of plan.files) addPlannedPath(f.path);
+
+    const plannedAllowlisted =
+      plannedPaths.size > 0
+        ? [...plannedPaths].filter((relPath) => allowPaths.has(relPath))
+        : [];
+    const targetPaths =
+      plannedAllowlisted.length > 0
+        ? plannedAllowlisted
+        : [...allowPaths].filter((relPath) => isGameplayPatchTarget(relPath));
+
+    const targets: PlanApplyTarget[] = targetPaths
+      .map((relPath) => allowByPath.get(relPath))
+      .filter((candidate): candidate is PlanApplyTargetCandidate => Boolean(candidate))
+      .map((candidate) => targetFromCandidate(candidate, scan));
+
+    for (const f of planFilesForDiagnostics) {
+      const resolved = resolvePlanFilePath(f.path, scan);
+      if (!resolved || allowPaths.has(resolved.relPath)) continue;
+      if (isBlockedNonUiTarget(resolved.relPath)) {
+        skipped.push(`${resolved.relPath}: ${CONFIG_UI_BLOCK_MESSAGE}`);
+      } else if (isEntryBootstrapPath(resolved.relPath)) {
+        skipped.push(`${resolved.relPath}: ${ENTRY_BOOTSTRAP_SKIP_MESSAGE}`);
+      } else {
+        skipped.push(`${resolved.relPath}: Not in gameplay allowlist`);
+      }
+    }
+
+    return {
+      prompt,
+      summary: aiPlan?.ok && aiPlan.plan ? aiPlan.plan.summary : plan.summary,
+      source: aiPlan?.ok && aiPlan.plan?.files.length ? ("ai" as const) : ("deterministic" as const),
+      targets,
+      skipped,
+    };
+  }
+
   if (aiPlan?.ok && aiPlan.plan) {
     for (const f of aiPlan.plan.files) {
       const resolved = resolvePlanFilePath(f.path, scan);
@@ -273,15 +330,6 @@ export function collectPlanApplyTargets(
     )
     .slice(0, MAX_PLAN_APPLY_FILES);
 
-  if (isGameplayApplyPrompt(prompt)) {
-    const seenPaths = new Set(targets.map((t) => t.relPath));
-    for (const allowed of buildGameplayAllowlist(scan, promptLower)) {
-      if (seenPaths.has(allowed.relPath)) continue;
-      seenPaths.add(allowed.relPath);
-      targets.push(targetFromCandidate(allowed, scan));
-    }
-  }
-
   return { prompt, summary, source, targets, skipped };
 }
 
@@ -384,6 +432,12 @@ export function buildNarrowedRetryTargets(
     if (ui.length > 0) return ui;
   }
 
+  if (isGameplayApplyPrompt(userPrompt)) {
+    return buildGameplayAllowlist(scan, userPrompt.toLowerCase())
+      .filter((t) => t.relPath === "src/App.tsx" || t.relPath === "src/index.css")
+      .map((c) => targetFromCandidate(c, scan));
+  }
+
   const useAi = Boolean(aiPlan?.ok && aiPlan.plan && aiPlan.plan.files.length > 0);
 
   if (useAi) {
@@ -391,6 +445,7 @@ export function buildNarrowedRetryTargets(
     for (const f of aiPlan!.plan!.files.slice(0, NARROWED_RETRY_MAX)) {
       const resolved = resolvePlanFilePath(f.path, scan);
       if (!resolved) continue;
+      if (isEntryBootstrapPath(resolved.relPath)) continue;
       const selectionReason = "Retry: narrowed to top AI plan files";
       out.push({
         relPath: resolved.relPath,
@@ -412,19 +467,21 @@ export function buildNarrowedRetryTargets(
       sessionMemory: opts.sessionMemory,
       maxFiles: NARROWED_RETRY_MAX,
     });
-    return smart.files.map((f) => {
-      const selectionReason = `Retry: smart selection (score ${f.score})`;
-      return {
-        relPath: f.path,
-        absPath: f.absPath,
-        action: "modify" as const,
-        selectionReason,
-        planReason: f.primaryReason,
-        reason: formatApplyTargetReason(selectionReason, f.primaryReason),
-        relevanceScore: f.score,
-        symbolMatches: symbolMatchesForPath(scan, f.absPath),
-      };
-    });
+    return smart.files
+      .filter((f) => !isEntryBootstrapPath(f.path))
+      .map((f) => {
+        const selectionReason = `Retry: smart selection (score ${f.score})`;
+        return {
+          relPath: f.path,
+          absPath: f.absPath,
+          action: "modify" as const,
+          selectionReason,
+          planReason: f.primaryReason,
+          reason: formatApplyTargetReason(selectionReason, f.primaryReason),
+          relevanceScore: f.score,
+          symbolMatches: symbolMatchesForPath(scan, f.absPath),
+        };
+      });
   }
 
   const ranked = [...plan.files]

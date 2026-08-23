@@ -79,6 +79,8 @@ export interface GreenfieldRunSnapshot {
   projectMemoryInjection: ProjectMemoryInjectionMeta | null;
   /** Latest composer routing decision for agent trace. */
   routeDecision: AgentRouteDecisionTrace | null;
+  /** Latest execution mode decision (project-aware routing guard). */
+  executionMode: import("@/core/agent/executionModeConfirmation").ExecutionModeDiagnostics | null;
 }
 
 export function emptyGreenfieldRun(): GreenfieldRunSnapshot {
@@ -116,6 +118,7 @@ export function emptyGreenfieldRun(): GreenfieldRunSnapshot {
     appliedFileDiffs: [],
     projectMemoryInjection: null,
     routeDecision: null,
+    executionMode: null,
   };
 }
 
@@ -134,4 +137,57 @@ export function appendGreenfieldRunEntry(
     ],
     runStartedAt: snapshot.runStartedAt ?? Date.now(),
   };
+}
+
+/** Close stale running rows from a prior run so later failures do not bleed across runs. */
+export function sealSupersededRunningLogEntries(
+  entries: readonly GreenfieldRunLogEntry[],
+  newRunStartedAt: number,
+): GreenfieldRunLogEntry[] {
+  return entries.map((entry) => {
+    if (entry.status !== "running") return entry;
+    const at = Date.parse(entry.timestamp);
+    if (!Number.isFinite(at) || at >= newRunStartedAt) return entry;
+    const suffix = "[superseded by new run]";
+    return {
+      ...entry,
+      status: "success",
+      details: [entry.details, suffix].filter(Boolean).join("\n"),
+    };
+  });
+}
+
+/** Close in-flight log rows so diagnostics do not stop at a dangling stage. */
+export function completeDanglingRunningLogEntries(
+  entries: readonly GreenfieldRunLogEntry[],
+  status: "success" | "failed",
+  reason: string,
+  runStartedAt?: number | null,
+): GreenfieldRunLogEntry[] {
+  const detail = reason.trim();
+  return entries.map((entry) => {
+    if (entry.status !== "running") return entry;
+    if (runStartedAt != null) {
+      const at = Date.parse(entry.timestamp);
+      if (Number.isFinite(at) && at < runStartedAt) return entry;
+    }
+    return {
+      ...entry,
+      status,
+      ...(entry.details?.trim() || detail
+        ? { details: entry.details?.trim() || detail }
+        : {}),
+    };
+  });
+}
+
+/** Mark in-flight log rows as failed so diagnostics do not stop at a dangling stage. */
+export function finalizeDanglingRunningLogEntries(
+  entries: readonly GreenfieldRunLogEntry[],
+  reason: string,
+  runStartedAt?: number | null,
+): GreenfieldRunLogEntry[] {
+  const detail = reason.trim();
+  if (!detail) return [...entries];
+  return completeDanglingRunningLogEntries(entries, "failed", detail, runStartedAt);
 }

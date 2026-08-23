@@ -4,6 +4,9 @@ import {
 } from "@/core/diagnostics/failureReport";
 import { summarizePostApplyRequirements } from "@/core/agent/postApplyRequirementCheck";
 import {
+  evaluateIncompleteCoordinatedApply,
+} from "@/core/planApply/coordinatedEditCompletion";
+import {
   createFollowUpCheckpoint,
   rollbackPartialApply,
 } from "@/core/build/followUpCheckpoint";
@@ -11,8 +14,8 @@ import { commandResultLine } from "@/core/greenfield/runLog";
 import { finalizeOrchestrationAfterApplyPlan } from "@/app/orchestration/applyPlanFinalize";
 import {
   runFollowUpQuickRepairBeforeAutoFix,
-  runFollowUpUiAuditAfterPreview,
 } from "@/app/orchestration/followUpVerifyRepairOrchestration";
+import { schedulePostApplyUiAudit } from "@/app/orchestration/postApplyUiAudit";
 import {
   logPatchApplied,
   logPatchApplyFailed,
@@ -37,7 +40,13 @@ import {
 import { getIntelligenceHost } from "@/app/intelligence/intelligenceHost";
 import type { ApplyPlanOrchestrationHost } from "@/app/orchestration/applyPlanTypes";
 import { formatApplyPlanSuccessLatestAction } from "@/core/orchestration/applyPlanSuccess";
-import { computePlanApplyTotals, validateProposalQuality, validateCreateProposalQuality } from "@/core/planApply";
+import {
+  computePlanApplyTotals,
+  resolvePlanApplySessionForApply,
+  selectWritablePlanApplyFiles,
+  applyContentForWrite,
+  decideFreshApplyWrite,
+} from "@/core/planApply";
 import { freezePlanApplyFileDiffs } from "@/core/agent/runFileDiffs";
 import { previewDiagnosticsToFailureInfo } from "@/core/preview/diagnostics";
 import {
@@ -45,10 +54,20 @@ import {
   recordVerificationFailure,
 } from "@/core/sessionMemory";
 import { verificationSummaryLines } from "@/core/studioRun/types";
+import { discardPlanApplyShadowRun } from "@/app/orchestration/shadowStage";
 import type { BryantLabsApi, ProjectInfo, VerificationResult } from "@/types";
+import type { PlanApplySession } from "@/core/planApply/types";
+
+let applyApprovedInFlight: Promise<ApplyApprovedPlanResult> | null = null;
 
 export interface ApplyApprovedPlanOptions {
   readonly pipelineMode?: boolean;
+  /** Override host.planApplySession (avoids a stale React host snapshot). */
+  readonly session?: PlanApplySession;
+  /** Approve every ready changed file before writing (Accept all). */
+  readonly approveReadyFiles?: boolean;
+  /** Approve these paths before writing (single-file accept). */
+  readonly approveRelPaths?: readonly string[];
 }
 
 export interface ApplyApprovedPlanResult {
@@ -68,15 +87,31 @@ export async function applyApprovedPlanFilesOrchestration(
   host: ApplyPlanOrchestrationHost | null,
   opts?: ApplyApprovedPlanOptions,
 ): Promise<ApplyApprovedPlanResult> {
-  if (!host?.api || !host.planApplySession || !host.project) {
+  if (applyApprovedInFlight) return applyApprovedInFlight;
+  const run = applyApprovedPlanFilesOnce(host, opts);
+  applyApprovedInFlight = run.finally(() => {
+    applyApprovedInFlight = null;
+  });
+  return applyApprovedInFlight;
+}
+
+async function applyApprovedPlanFilesOnce(
+  host: ApplyPlanOrchestrationHost | null,
+  opts?: ApplyApprovedPlanOptions,
+): Promise<ApplyApprovedPlanResult> {
+  const incomingSession = opts?.session ?? host?.planApplySession;
+  if (!host?.api || !incomingSession || !host.project) {
     return { ok: false, verification: null, applied: [], error: "No apply session" };
   }
 
-  const resolved = host as ResolvedApplyHost;
+  const planApplySession = resolvePlanApplySessionForApply(incomingSession, opts);
+  const resolved = { ...host, planApplySession } as ResolvedApplyHost;
   const pipelineMode = opts?.pipelineMode ?? false;
   const api = resolved.api;
-  const planApplySession = resolved.planApplySession;
   const project = resolved.project;
+  if (planApplySession !== incomingSession) {
+    resolved.setPlanApplySession(planApplySession);
+  }
 
   const runId = planApplySession.applyRunId ?? resolved.beginApplyPlanRun();
   resolved.applyPlanActiveRunIdRef.current = runId;
@@ -86,13 +121,9 @@ export async function applyApprovedPlanFilesOrchestration(
     return true;
   };
 
-  const approved = planApplySession.files.filter(
-    (f) =>
-      f.decision === "approved" &&
-      f.status === "ready" &&
-      f.basisContent !== undefined &&
-      f.proposal,
-  );
+  const approved = selectWritablePlanApplyFiles(planApplySession, {
+    requireApproved: !opts?.approveReadyFiles,
+  });
 
   if (approved.length === 0) {
     const reason = "No approved files to apply.";
@@ -134,6 +165,8 @@ export async function applyApprovedPlanFilesOrchestration(
   }
 
   const applied: string[] = [];
+  const writtenThisPass: string[] = [];
+  const fileErrors: string[] = [];
   let applyError: string | null = null;
 
   if (!pipelineMode && resolved.saveFollowUpCheckpoint && resolved.project) {
@@ -150,20 +183,8 @@ export async function applyApprovedPlanFilesOrchestration(
     );
   }
 
+  const useFullProposal = Boolean(opts?.approveReadyFiles);
   for (const file of approved) {
-    const quality =
-      file.action === "create"
-        ? validateCreateProposalQuality(file.proposal!.newContent, file.relPath, resolved.scan)
-        : validateProposalQuality(
-            file.basisContent!,
-            file.proposal!.newContent,
-            file.relPath,
-            resolved.scan,
-          );
-    if (!quality.ok) {
-      applyError = `${file.relPath}: ${quality.reason}`;
-      break;
-    }
     try {
       const summary = file.proposal!.summary?.trim();
       const isCreate = file.action === "create";
@@ -173,15 +194,62 @@ export async function applyApprovedPlanFilesOrchestration(
         isCreate ? `Creating ${file.relPath}` : `Updating ${file.relPath}`,
         summary ?? undefined,
       );
-      const res = isCreate
-        ? await api.createProjectFile(file.absPath, file.proposal!.newContent)
-        : await api.applyEdit(
-            file.absPath,
-            file.basisContent!,
-            file.proposal!.newContent,
+      const applyContent = applyContentForWrite(file, { useFullProposal });
+      let applyBasis = file.basisContent!;
+      if (!isCreate) {
+        const freshRead = await api.readFile(file.absPath);
+        const freshDecision = decideFreshApplyWrite({
+          basisContent: applyBasis,
+          applyContent,
+          freshContent:
+            freshRead.readable && freshRead.content !== undefined
+              ? freshRead.content
+              : undefined,
+        });
+        if (freshDecision.kind === "already-applied") {
+          applied.push(file.relPath);
+          resolved.appendGreenfieldRunLog(
+            "write",
+            "success",
+            `Already on disk ${file.relPath}`,
+            summary ?? undefined,
           );
+          continue;
+        }
+        applyBasis = freshDecision.basis;
+      }
+      let res = isCreate
+        ? await api.createProjectFile(file.absPath, applyContent)
+        : await api.applyEdit(file.absPath, applyBasis, applyContent);
+      if (
+        !res.ok &&
+        !isCreate &&
+        /changed on disk/i.test(res.reason ?? "")
+      ) {
+        const retryRead = await api.readFile(file.absPath);
+        const retry = decideFreshApplyWrite({
+          basisContent: applyBasis,
+          applyContent,
+          freshContent:
+            retryRead.readable && retryRead.content !== undefined
+              ? retryRead.content
+              : undefined,
+        });
+        if (retry.kind === "already-applied") {
+          applied.push(file.relPath);
+          resolved.appendGreenfieldRunLog(
+            "write",
+            "success",
+            `Already on disk ${file.relPath}`,
+            summary ?? undefined,
+          );
+          continue;
+        }
+        res = await api.applyEdit(file.absPath, retry.basis, applyContent);
+      }
       if (res.ok) {
         applied.push(file.relPath);
+        writtenThisPass.push(file.relPath);
         resolved.appendGreenfieldRunLog(
           "write",
           "success",
@@ -189,13 +257,29 @@ export async function applyApprovedPlanFilesOrchestration(
           summary ?? undefined,
         );
       } else {
-        applyError = `${file.relPath}: ${res.reason ?? "Apply failed"}`;
-        break;
+        fileErrors.push(`${file.relPath}: ${res.reason ?? "Apply failed"}`);
+        resolved.appendGreenfieldRunLog(
+          "write",
+          "failed",
+          `Failed ${file.relPath}`,
+          res.reason ?? "Apply failed",
+        );
       }
     } catch {
-      applyError = `${file.relPath}: Apply failed`;
-      break;
+      fileErrors.push(`${file.relPath}: Apply failed`);
+      resolved.appendGreenfieldRunLog("write", "failed", `Failed ${file.relPath}`);
     }
+  }
+
+  if (applied.length === 0) {
+    applyError = fileErrors[0] ?? "No files were written.";
+  } else if (fileErrors.length > 0) {
+    resolved.appendGreenfieldRunLog(
+      "apply_plan",
+      "failed",
+      `Wrote ${applied.length} file(s); ${fileErrors.length} failed`,
+      fileErrors.join("; "),
+    );
   }
 
   if (applyError) {
@@ -205,10 +289,10 @@ export async function applyApprovedPlanFilesOrchestration(
     }
 
     let rollbackNote: string | null = null;
-    if (applied.length > 0) {
+    if (writtenThisPass.length > 0) {
       const rollback = await rollbackPartialApply(
         api,
-        applied,
+        writtenThisPass,
         approved
           .filter((f): f is typeof f & { action: "create" | "modify" } =>
             f.action === "create" || f.action === "modify",
@@ -291,6 +375,7 @@ export async function applyApprovedPlanFilesOrchestration(
   logPatchApplied(true, applied);
   logPatchApplySuccess(applied);
   recordRunTimelineStage("apply_complete", `${applied.length} file(s)`);
+  await discardPlanApplyShadowRun(api, planApplySession.applyRunId);
   clearPatchGeneratedWatchdog();
   resolved.updateGreenfieldRun({ filesWritten: applied });
   resolved.setSessionMemory((m) => recordModifiedFiles(m, applied));
@@ -529,14 +614,8 @@ export async function applyApprovedPlanFilesOrchestration(
       resolved.appendGreenfieldRunLog("preview", "failed", msg);
     }
 
-    if (previewUrl && verification) {
-      await runFollowUpUiAuditAfterPreview(resolved, {
-        folderPath: project.path,
-        previewUrl,
-        userPrompt: prompt,
-        verification,
-      });
-    }
+    // UI audit runs after apply finalization so a slow/failing audit cannot
+    // keep the run in "Editing…" or emit a false apply-failure narrative.
   }
 
   const failureReport = buildApplyPlanFailureReport({
@@ -566,16 +645,34 @@ export async function applyApprovedPlanFilesOrchestration(
       failureLine: failureReport.rootCauseLine,
     });
     if (autoResult.ok && autoResult.verification) {
-      finalOverallOk = true;
-      finalVerification = autoResult.verification;
-      finalVerLines = verificationSummaryLines(autoResult.verification);
-      finalFailureReport = buildApplyPlanFailureReport({
-        applyError: null,
-        verification: autoResult.verification,
-        verifyErr: null,
-      });
-      resolved.updateGreenfieldRun({ failureReport: null });
+      const repairedLines = verificationSummaryLines(autoResult.verification);
+      if (repairedLines.ok) {
+        finalOverallOk = true;
+        finalVerification = autoResult.verification;
+        finalVerLines = repairedLines;
+        finalFailureReport = buildApplyPlanFailureReport({
+          applyError: null,
+          verification: autoResult.verification,
+          verifyErr: null,
+        });
+        resolved.updateGreenfieldRun({ failureReport: null });
+      }
     }
+  }
+
+  const incompleteApply = evaluateIncompleteCoordinatedApply({
+    prompt,
+    targetPaths: planApplySession.files.map((f) => f.relPath),
+    files: planApplySession.files,
+  });
+  if (incompleteApply.incomplete) {
+    finalOverallOk = false;
+    finalFailureReport = buildApplyPlanFailureReport({
+      applyError: incompleteApply.message,
+      verification: finalVerification,
+      verifyErr,
+      ...(previewInfo ? { previewInfo } : {}),
+    });
   }
 
   if (staleResult("apply and verify")) {
@@ -719,7 +816,35 @@ export async function applyApprovedPlanFilesOrchestration(
   }
 
   if (finalOverallOk && !pipelineMode) {
+    resolved.setCenterTab("editor");
+  }
+
+  if (finalOverallOk && !pipelineMode) {
     resolved.archiveActiveRunContextAfterSuccess?.();
+  }
+
+  if (
+    finalOverallOk &&
+    previewUrl &&
+    finalVerification &&
+    !pipelineMode &&
+    !verifyErr &&
+    resolved.api
+  ) {
+    // Fire-and-forget: advisory-only; cannot reverse a verified apply.
+    schedulePostApplyUiAudit(
+      {
+        api: resolved.api,
+        appendGreenfieldRunLog: resolved.appendGreenfieldRunLog,
+        updateGreenfieldRun: resolved.updateGreenfieldRun,
+      },
+      {
+        folderPath: project.path,
+        previewUrl,
+        userPrompt: prompt,
+        verification: finalVerification,
+      },
+    );
   }
 
   return {

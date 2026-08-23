@@ -4,6 +4,10 @@ import {
   isUiLayoutPrompt,
 } from "@/core/planner/fallback";
 import { modelForProvider } from "@/core/providers/AnthropicProvider";
+import {
+  isProviderEnabled,
+  highestPriorityEnabledProvider,
+} from "@/core/providers/providerEnablement";
 import type { ProviderId, ProviderSettings } from "@/core/providers/types";
 import {
   promptRequiresAuthentication,
@@ -98,6 +102,14 @@ function tierFromScore(
   return "feature_addition";
 }
 
+function pickAdvisoryProvider(
+  settings: ProviderSettings,
+  candidate: ProviderId,
+): ProviderId {
+  if (isProviderEnabled(settings, candidate)) return candidate;
+  return highestPriorityEnabledProvider(settings) ?? settings.provider;
+}
+
 /** Advisory tier label — never overrides the model saved in Settings. */
 function advisoryProviderForTier(
   tier: ComplexityRoutingDecision["tier"],
@@ -106,7 +118,7 @@ function advisoryProviderForTier(
   switch (tier) {
     case "small_ui":
     case "feature_addition":
-      if (settings.hasGeminiKey) {
+      if (settings.hasGeminiKey && isProviderEnabled(settings, "gemini")) {
         return {
           provider: "gemini",
           reason: "Using your selected Gemini model from Settings",
@@ -114,7 +126,7 @@ function advisoryProviderForTier(
       }
       break;
     case "auth_database":
-      if (settings.hasAnthropicKey) {
+      if (settings.hasAnthropicKey && isProviderEnabled(settings, "anthropic")) {
         return {
           provider: "anthropic",
           reason: "Auth/database complexity — using your selected Anthropic model",
@@ -123,13 +135,13 @@ function advisoryProviderForTier(
       break;
     case "architecture":
     case "large_app":
-      if (settings.hasOpenRouterKey) {
+      if (settings.hasOpenRouterKey && isProviderEnabled(settings, "openrouter")) {
         return {
           provider: "openrouter",
           reason: "Large change — using your selected OpenRouter model",
         };
       }
-      if (settings.hasAnthropicKey) {
+      if (settings.hasAnthropicKey && isProviderEnabled(settings, "anthropic")) {
         return {
           provider: "anthropic",
           reason: "Large change — using your selected Anthropic model",
@@ -139,7 +151,7 @@ function advisoryProviderForTier(
   }
 
   return {
-    provider: settings.provider,
+    provider: pickAdvisoryProvider(settings, settings.provider),
     reason: "Using current provider settings",
   };
 }

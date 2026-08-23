@@ -1,13 +1,13 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   type PropsWithChildren,
 } from "react";
+import { WorkspaceContext } from "@/app/workspaceContext";
+import { useProviderTransportBridge } from "@/app/useProviderTransportBridge";
 import type { BryantLabsApi, VerificationResult } from "@/types";
 import {
   buildRepositoryIndex,
@@ -33,6 +33,7 @@ import {
 } from "@/core/runPersistence";
 import { resolveEffectiveProjectScan } from "@/core/agent/resolveEffectiveProjectScan";
 import { normalizeProjectMemory } from "@/core/projectMemory/store";
+import { clearProjectRulesCache } from "@/core/projectRules/readProjectRules";
 import {
   EMPTY_PROJECT_MEMORY,
 } from "@/core/projectMemory/types";
@@ -63,6 +64,10 @@ import {
   type ExecutionLogState,
 } from "@/core/console/executionLogService";
 import { loadPanelLayout } from "@/core/layout/panelLayout";
+import {
+  dispatchOpenDetailsPanel,
+  openSettingsNavigation,
+} from "@/core/layout/settingsNavigation";
 import {
   usePreviewWorkspaceState,
   useProjectMemoryWorkspaceState,
@@ -110,6 +115,8 @@ import {
   type FollowUpSnapshot,
 } from "@/core/build/followUpSnapshots";
 import { buildOrchestrationSyncInput } from "@/app/workspace/buildOrchestrationSyncInput";
+import { useActiveEditorContextRef } from "@/app/workspace/useActiveEditorContextRef";
+import { usePlanApplyEditorSync } from "@/app/workspace/usePlanApplyEditorSync";
 import { useAgentRunWorkspaceContext } from "@/app/workspace/useAgentRunWorkspaceContext";
 import { useRunInspectorController } from "@/app/workspace/useRunInspectorController";
 import { useDiagnosticReportController } from "@/app/workspace/useDiagnosticReportController";
@@ -118,10 +125,11 @@ import { useWorkspaceDirectEdit } from "@/app/workspace/useWorkspaceDirectEdit";
 import { useWorkspaceContextValue } from "@/app/workspace/useWorkspaceContextValue";
 import { useProjectProblems } from "@/hooks/useProjectProblems";
 import type { ProjectProblem } from "@/core/diagnostics/projectProblems";
-import type { WorkspaceState, EditStatus } from "@/app/workspace/workspaceState";
+import type { EditStatus } from "@/app/workspace/workspaceState";
 import type { EditTarget } from "@/app/workspace/workspaceState";
 import { useFollowUpChatState } from "@/app/workspace/useFollowUpChatState";
 import { useAgentChatRecording } from "@/app/workspace/useAgentChatRecording";
+import { useAgentConsultation } from "@/app/workspace/useAgentConsultation";
 import type { ProjectHealthSnapshot } from "@/core/build/projectHealth";
 import {
   buildCurrentAppContext,
@@ -148,14 +156,13 @@ import { setIntelligenceHost } from "@/app/intelligence/intelligenceHost";
 
 type VerifyStatus = "idle" | "running" | "done" | "error";
 
-const WorkspaceContext = createContext<WorkspaceState | null>(null);
-
 function getApi(): BryantLabsApi | undefined {
   return window.bryantlabs;
 }
 
 export function WorkspaceProvider({ children }: PropsWithChildren) {
   const api = getApi();
+  useProviderTransportBridge(api);
 
   const {
     providerStatus,
@@ -319,6 +326,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     applyPlanCompletedRunIdRef,
     lastContextSnapshotIdRef,
     editExplorationContentsRef,
+    activeEditorContextRef,
     pipelineCoderResultRef,
     executionNoChangeGuardRef,
     createPlanErrorRef,
@@ -328,7 +336,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     setFollowUpChat,
     setPendingAgentChat,
     agentChat,
-  } = useFollowUpChatState(project?.path);
+  } = useFollowUpChatState(project?.path, api);
   const [followUpCheckpoint, setFollowUpCheckpoint] = useState<FollowUpCheckpoint | null>(
     null,
   );
@@ -366,14 +374,26 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     agentLastExecRef,
   } = useAgentLoopWorkspaceState();
 
+  const [sessionMemory, setSessionMemory] = useState<SessionMemorySnapshot>(
+    emptySessionMemory(),
+  );
+  const sessionMemoryRef = useRef(sessionMemory);
+  sessionMemoryRef.current = sessionMemory;
+
+  const persistedModifiedKey = sessionMemory.modifiedFiles.join("\0");
+  const writtenFilesKey = greenfieldRun.filesWritten.join("\0");
   const effectiveScan = useMemo(
     () =>
       resolveEffectiveProjectScan({
         scan,
         projectPath: project?.path ?? null,
-        greenfieldRun,
+        greenfieldRun: {
+          filesWritten: writtenFilesKey.length > 0 ? writtenFilesKey.split("\0") : [],
+        },
+        persistedModifiedFiles:
+          persistedModifiedKey.length > 0 ? persistedModifiedKey.split("\0") : [],
       }),
-    [scan, project?.path, greenfieldRun],
+    [scan, project?.path, writtenFilesKey, persistedModifiedKey],
   );
 
   const repository = useMemo(
@@ -435,11 +455,6 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
   const followUpRunStartedAtRef = useRef<number | null>(null);
   const followUpActivityRunRef = useRef<FollowUpActivityRun | null>(null);
   const followUpEscalatedRef = useRef(false);
-  const [sessionMemory, setSessionMemory] = useState<SessionMemorySnapshot>(
-    emptySessionMemory(),
-  );
-  const sessionMemoryRef = useRef(sessionMemory);
-  sessionMemoryRef.current = sessionMemory;
   const [sessionMemoryDiagnostics, setSessionMemoryDiagnostics] =
     useState<SessionMemoryDiagnostics | null>(null);
   const {
@@ -535,6 +550,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     resumeBuildReview,
     setBuildError,
     releaseBuildRunForReview,
+    setBuildRunningForTest,
   } = orchestration;
   const {
     appPreview,
@@ -709,6 +725,14 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     [openPath, setCenterTab, setEditorReveal],
   );
 
+  useActiveEditorContextRef(activeEditorContextRef);
+  usePlanApplyEditorSync({
+    planApplySession,
+    projectPath: project?.path,
+    setCenterTab,
+    openFile,
+  });
+
   const { clearPlan, clearRunContextForNewSubmit, archiveActiveRunContextAfterSuccess } =
     useWorkspaceRunContextReset({
       plan: {
@@ -736,6 +760,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
         createPlanErrorRef,
         lastContextSnapshotIdRef,
         editExplorationContentsRef,
+        activeEditorContextRef,
         pipelineCoderResultRef,
         applyPlanSuccessRef,
         executionNoChangeGuardRef,
@@ -884,6 +909,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
 
   const bindProjectSession = useCallback(
     async (projectPath: string, projectName?: string) => {
+      clearProjectRulesCache();
       let branch: string | null = null;
       if (api?.getGitBranch) {
         try {
@@ -1143,12 +1169,12 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
   });
 
   const openProvidersView = useCallback(() => {
-    setRailToolState("providers");
+    openSettingsNavigation(setRailToolState);
   }, []);
 
   const openGitPanel = useCallback(() => {
-    setInsightsTab("git");
-    setRailToolState("insights");
+    dispatchOpenDetailsPanel();
+    setRailToolState("git");
   }, []);
 
   useEffect(() => {
@@ -1278,6 +1304,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     cancelGreenfieldRun,
     triggerGreenfieldRepair,
   } = useWorkspaceGreenfieldRunHelpers({
+    api,
     projectPath: project?.path,
     agentGreenfieldPanelActive,
     greenfieldRun,
@@ -1292,9 +1319,25 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
   });
 
   const {
+    consultationRunning,
+    runAgentConsultationFlow,
+    consumePendingMixedEdit,
+  } = useAgentConsultation({
+    api,
+    projectPath: project?.path ?? null,
+    scan,
+    activeEditorContextRef,
+    recordAgentActivityMessage,
+    recordAgentStudioMessage,
+    appendGreenfieldRunLog,
+    updateGreenfieldRun,
+  });
+
+  const {
     cancelApplyPlan,
     selectPlanApplyFile,
     setPlanApplyFileDecision,
+    setPlanApplyFilePartialContent,
     approveAllPlanApplyFiles,
     beginApplyPlanRun,
     completeApplyPlanRun,
@@ -1314,6 +1357,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
       setPlanApplyError,
       applyPlanActiveRunIdRef,
       applyPlanCompletedRunIdRef,
+      applyPlanSuccessRef,
     },
     greenfieldRun,
     appendGreenfieldRunLog,
@@ -1346,6 +1390,8 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     releaseBuildRunForReview,
     patchAppPreview,
     requestPreviewTab,
+    setGreenfieldRun,
+    setBuildRunningForTest,
   });
 
   const syncAppContextBeforeEdit = useCallback(() => {
@@ -1363,16 +1409,26 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     if (ctx) persistAppContextMemory(ctx);
   }, [scan, project?.path, project?.name, persistAppContextMemory]);
 
-  intelligenceServiceRef.current.update({
+  useEffect(() => {
+    intelligenceServiceRef.current.update({
+      scan,
+      sessionMemory,
+      projectMemory,
+      agentMemory: agentMemoryStoreRef.current,
+      featureInventory,
+      health: projectHealth,
+      followUpChat,
+      snapshots: followUpSnapshots,
+    });
+  }, [
     scan,
     sessionMemory,
     projectMemory,
-    agentMemory: agentMemoryStoreRef.current,
     featureInventory,
-    health: projectHealth,
+    projectHealth,
     followUpChat,
-    snapshots: followUpSnapshots,
-  });
+    followUpSnapshots,
+  ]);
 
   const refreshFeatureInventoryFn = useCallback(async () => {
     if (!scan || !project?.path || !api) return;
@@ -1427,6 +1483,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     startPreferredMemoryFix,
     resetAgentRunState,
   } = useWorkspaceAgentRunGates({
+    api,
     greenfieldRun,
     agentGreenfieldPanelActive,
     buildRunning,
@@ -1536,6 +1593,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
         pipelineCoderResultRef,
         lastContextSnapshotIdRef,
         editExplorationContentsRef,
+        activeEditorContextRef,
         createPlanErrorRef,
         projectMemoryRef,
         aiCallTrackerRef,
@@ -1788,12 +1846,16 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     cancelApplyPlan,
     selectPlanApplyFile,
     setPlanApplyFileDecision,
+    setPlanApplyFilePartialContent,
     approveAllPlanApplyFiles,
     applyApprovedPlanFiles,
     buildRunning,
     buildError,
     buildStatus,
     runBuildLoop,
+    runAgentConsultationFlow,
+    consumePendingMixedEdit,
+    consultationRunning,
     continueBuildAfterReview,
     cancelBuildLoop,
     retryApplyPlanReview,
@@ -1948,7 +2010,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
           onCancel={() => resolveProviderFallbackChoice("cancel")}
         />
       ) : null}
-      {pendingMemoryCandidates.length > 0 ? (
+      {pendingMemoryCandidates.length > 0 && !agentWorkflowBusy ? (
         <MemorySuggestionDialog
           candidates={pendingMemoryCandidates}
           onAccept={(index) => void acceptMemoryCandidateFn(index)}
@@ -1968,10 +2030,4 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
 }
 
 export type { WorkspaceState } from "@/app/workspace/workspaceState";
-export function useWorkspace(): WorkspaceState {
-  const ctx = useContext(WorkspaceContext);
-  if (!ctx) {
-    throw new Error("useWorkspace must be used within a WorkspaceProvider");
-  }
-  return ctx;
-}
+export { useWorkspace } from "@/app/workspaceContext";

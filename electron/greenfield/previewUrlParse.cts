@@ -94,3 +94,14 @@ export function extractPreviewUrl(text: string): string | null {
 export function previewUrlForPort(port: number): string {
   return `http://127.0.0.1:${port}/`;
 }
+
+/** Preview probe, UI audit, and open-external must stay on loopback. */
+export function isAllowedPreviewUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    return u.hostname === "127.0.0.1" || u.hostname === "localhost";
+  } catch {
+    return false;
+  }
+}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ProviderReliabilityDiagnostics } from "@/components/ProviderReliabilityDiagnostics";
+import { PROVIDER_ENABLEMENT_TEST_ID } from "@/core/layout/settingsNavigation";
 import {
   PROVIDERS,
   getProviderInfo,
@@ -39,6 +40,15 @@ import {
   DEFAULT_PLANNER_MAX_OUTPUT_TOKENS,
   MIN_PLANNER_MAX_OUTPUT_TOKENS,
   MAX_PLANNER_MAX_OUTPUT_TOKENS,
+  coerceSettingsToEnabledProviders,
+  countEnabledProviders,
+  formatProviderEnablementSwitchNotice,
+  buildProviderEnablementSavePayload,
+  isProviderEnabled,
+  patchProviderEnabled,
+  providerPanelStatusLabel,
+  resolveProviderPanelStatus,
+  selectableProviders,
 } from "@/core/providers";
 import {
   formatConnectionFailureMessage,
@@ -47,6 +57,10 @@ import {
 import { healthToReliabilityStatus } from "@/core/providers/reliability";
 import { useWorkspace } from "@/app/WorkspaceProvider";
 import { EmptyState } from "@/components/EmptyState";
+import { AboutBrandPanel } from "@/components/AboutBrandPanel";
+import {
+  useDeveloperDiagnosticsEnabled,
+} from "@/core/diagnostics/developerDiagnostics";
 import {
   ProviderApiKeyField,
   ProviderConnectionTest,
@@ -78,10 +92,14 @@ export function ProvidersView() {
   const [testPhase, setTestPhase] = useState<Phase>("idle");
   const [connectionTestNote, setConnectionTestNote] = useState<string | null>(null);
   const [connectionTestPhase, setConnectionTestPhase] = useState<Phase>("idle");
+  const [healthByProvider, setHealthByProvider] = useState<
+    Partial<Record<ProviderId, HealthResult>>
+  >({});
+  const [developerDiagnostics, setDeveloperDiagnostics] = useDeveloperDiagnosticsEnabled();
 
   useEffect(() => {
     if (!api) return;
-    void api.getProviderSettings().then((loaded) => {
+    void api.getProviderSettings().then(async (loaded) => {
       const prefs = readProviderLocalPreferences();
       const merged: ProviderSettings = normalizeProviderSettings({
         ...loaded,
@@ -92,7 +110,20 @@ export function ProvidersView() {
         groqModel: prefs.groqModel ?? loaded.groqModel,
         openrouterModel: prefs.openrouterModel ?? loaded.openrouterModel,
       });
-      setSettings(merged);
+      const { settings: coerced, switches } = coerceSettingsToEnabledProviders(merged);
+      if (switches.length > 0) {
+        try {
+          const saved = await api.saveProviderSettings(
+            buildProviderEnablementSavePayload(coerced),
+          );
+          setSettings(normalizeProviderSettings(saved));
+          setSavedNote(formatProviderEnablementSwitchNotice(switches));
+        } catch {
+          setSettings(coerced);
+        }
+      } else {
+        setSettings(merged);
+      }
       setApiKeyInput("");
     });
   }, [api]);
@@ -141,6 +172,7 @@ export function ProvidersView() {
       if (!opts?.modelsOnly) {
         setHealth(res);
         setHealthPhase("done");
+        setHealthByProvider((prev) => ({ ...prev, [targetProvider]: res }));
       }
       if (res.models?.length && targetProvider !== "gemini") {
         await applyDiscoveredModels(targetProvider, res.models, currentSettings);
@@ -164,6 +196,7 @@ export function ProvidersView() {
   useEffect(() => {
     if (!api || !settings) return;
     if (discoveredModels.length > 0) return;
+    if (!isProviderEnabled(settings, settings.provider)) return;
 
     if (settings.provider === "gemini" && settings.hasGeminiKey) {
       void runHealth("gemini", settings);
@@ -207,6 +240,7 @@ export function ProvidersView() {
     return (
       <div className="providers__empty">
         <EmptyState
+          branded
           title="Desktop only"
           description="Provider communication runs in the desktop app's main process. Launch BryantLabs Studio with Electron to configure and test providers."
         />
@@ -221,6 +255,7 @@ export function ProvidersView() {
   const provider = settings.provider;
   const info = getProviderInfo(provider);
   const activeModel = modelForProvider(settings, provider);
+  const providerChoices = selectableProviders(settings);
   const usesDynamicModels = providerUsesDynamicModels(provider);
   const usesCuratedModels = providerUsesCuratedModels(provider);
   const modelOptions = usesDynamicModels
@@ -236,10 +271,41 @@ export function ProvidersView() {
     update(patch);
     try {
       const next = await api.saveProviderSettings(patch);
-      setSettings(next);
+      setSettings(normalizeProviderSettings(next));
       void refreshProviderStatus();
     } catch {
       setSavedNote("Failed to save settings.");
+    }
+  };
+
+  const persistUpdate = (patch: Partial<ProviderSettings>) => {
+    void persistSettingsPatch(patch);
+  };
+
+  const toggleProviderEnabled = async (target: ProviderId, enabled: boolean) => {
+    if (!enabled && countEnabledProviders(settings) <= 1) {
+      setSavedNote("At least one provider must remain enabled.");
+      return;
+    }
+    setSaving(true);
+    setSavedNote(null);
+    try {
+      const merged = normalizeProviderSettings({
+        ...settings,
+        ...patchProviderEnabled(settings, target, enabled),
+      });
+      const { settings: coerced, switches } = coerceSettingsToEnabledProviders(merged);
+      const next = await api.saveProviderSettings(
+        buildProviderEnablementSavePayload(coerced),
+      );
+      setSettings(normalizeProviderSettings(next));
+      const notice = formatProviderEnablementSwitchNotice(switches);
+      setSavedNote(notice ?? `${getProviderInfo(target).label} ${enabled ? "enabled" : "disabled"}.`);
+      void refreshProviderStatus();
+    } catch {
+      setSavedNote("Failed to update provider enablement.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -256,9 +322,6 @@ export function ProvidersView() {
         : basePatch;
     rememberProviderSelection(provider, model);
     await persistSettingsPatch(patch);
-    console.log(
-      `[provider:selected] provider=${provider} model=${model} source=settings`,
-    );
   };
 
   const selectModel = (model: string) => {
@@ -304,9 +367,6 @@ export function ProvidersView() {
       const next = await api.saveProviderSettings(patch);
       setSettings(next);
       rememberProviderSelection(nextProvider, modelForProvider(next, nextProvider));
-      console.log(
-        `[provider:selected] provider=${nextProvider} model=${modelForProvider(next, nextProvider)} source=settings stage=global`,
-      );
       void refreshProviderStatus();
     } catch {
       setSavedNote("Failed to save provider selection.");
@@ -324,9 +384,6 @@ export function ProvidersView() {
       const status = healthToReliabilityStatus(result, settings, provider);
       if (result.ok) {
         setConnectionTestNote(`Connected · ${provider} · ${result.model}`);
-        console.log(
-          `[provider:connection] provider=${provider} model=${result.model} ok=true`,
-        );
       } else {
         const message = formatConnectionFailureMessage(
           status,
@@ -334,16 +391,12 @@ export function ProvidersView() {
           result.error,
         );
         setConnectionTestNote(message);
-        console.error(
-          `[provider:error] status=${status} message=${result.error ?? "health check failed"} provider=${provider} model=${result.model} apiKeyPresent=${getProviderInfo(provider).needsApiKey ? (provider === "gemini" ? settings.hasGeminiKey : provider === "anthropic" ? settings.hasAnthropicKey : provider === "groq" ? settings.hasGroqKey : settings.hasOpenRouterKey) : true}`,
-        );
       }
       setConnectionTestPhase(result.ok ? "done" : "error");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Connection test failed";
       setConnectionTestNote(message);
       setConnectionTestPhase("error");
-      console.error(`[provider:error] message=${message} provider=${provider}`);
     }
   };
 
@@ -387,6 +440,8 @@ export function ProvidersView() {
 
   return (
     <div className="providers">
+      <AboutBrandPanel />
+
       <div className="prov-strip">
         <Field label="Provider" value={info.label} />
         <Field
@@ -414,7 +469,7 @@ export function ProvidersView() {
           id="prov-agent-mode"
           className="prov-input"
           value={settings.agentMode ?? "single"}
-          onChange={(e) => update({ agentMode: e.target.value as AgentMode })}
+          onChange={(e) => persistUpdate({ agentMode: e.target.value as AgentMode })}
         >
           <option value="single">Single Agent</option>
           <option value="pipeline">Multi-Agent Pipeline</option>
@@ -430,7 +485,8 @@ export function ProvidersView() {
                 modelForProvider(settings, settings.plannerProvider ?? settings.provider)
               }
               geminiAvailableModelIds={geminiAvailableModelIds}
-              onProvider={(p) => update(patchStageProvider("planner", p))}
+              providerChoices={providerChoices}
+              onProvider={(p) => persistUpdate(patchStageProvider("planner", p))}
               onModel={(m) => void persistSettingsPatch(patchStageModel("planner", m))}
             />
             <StageRouteField
@@ -441,7 +497,8 @@ export function ProvidersView() {
                 modelForProvider(settings, settings.coderProvider ?? settings.provider)
               }
               geminiAvailableModelIds={geminiAvailableModelIds}
-              onProvider={(p) => update(patchStageProvider("coder", p))}
+              providerChoices={providerChoices}
+              onProvider={(p) => persistUpdate(patchStageProvider("coder", p))}
               onModel={(m) => void persistSettingsPatch(patchStageModel("coder", m))}
             />
             <StageRouteField
@@ -452,7 +509,8 @@ export function ProvidersView() {
                 modelForProvider(settings, settings.repairProvider ?? settings.provider)
               }
               geminiAvailableModelIds={geminiAvailableModelIds}
-              onProvider={(p) => update(patchStageProvider("repair", p))}
+              providerChoices={providerChoices}
+              onProvider={(p) => persistUpdate(patchStageProvider("repair", p))}
               onModel={(m) => void persistSettingsPatch(patchStageModel("repair", m))}
             />
             <Field label="Verifier" value="Local only" />
@@ -471,6 +529,22 @@ export function ProvidersView() {
 
       <section className="prov-block">
         <h3 className="prov-heading">Cost controls</h3>
+        <label className="prov-label prov-label--check">
+          <input
+            type="checkbox"
+            checked={settings.costMode === "economy"}
+            onChange={(e) =>
+              persistUpdate({ costMode: e.target.checked ? "economy" : "standard" })
+            }
+          />
+          Economy mode — cheaper models for coding & repairs; skip AI planner when
+          the local plan is enough
+        </label>
+        <p className="prov-hint">
+          {settings.costMode === "economy"
+            ? "Planner keeps your selected model; patch/repair stages use a lower-cost model (e.g. Haiku instead of Opus)."
+            : "Uses your selected model for every stage."}
+        </p>
         <label className="prov-label" htmlFor="prov-max-calls">
           Max AI calls per run
         </label>
@@ -482,7 +556,7 @@ export function ProvidersView() {
           max={50}
           value={settings.maxAiCalls ?? MAX_AI_CALLS_DEFAULT}
           onChange={(e) =>
-            update({ maxAiCalls: Math.max(1, Number(e.target.value) || 1) })
+            persistUpdate({ maxAiCalls: Math.max(1, Number(e.target.value) || 1) })
           }
         />
         <label className="prov-label" htmlFor="prov-planner-max-output">
@@ -497,7 +571,7 @@ export function ProvidersView() {
           step={512}
           value={settings.plannerMaxOutputTokens ?? DEFAULT_PLANNER_MAX_OUTPUT_TOKENS}
           onChange={(e) =>
-            update({
+            persistUpdate({
               plannerMaxOutputTokens: Math.max(
                 MIN_PLANNER_MAX_OUTPUT_TOKENS,
                 Math.min(
@@ -523,7 +597,7 @@ export function ProvidersView() {
           max={10}
           value={settings.maxRepairAttempts ?? MAX_REPAIR_ATTEMPTS_DEFAULT}
           onChange={(e) =>
-            update({
+            persistUpdate({
               maxRepairAttempts: Math.max(0, Number(e.target.value) || 0),
             })
           }
@@ -532,7 +606,7 @@ export function ProvidersView() {
           <input
             type="checkbox"
             checked={settings.stopOnProviderLimit !== false}
-            onChange={(e) => update({ stopOnProviderLimit: e.target.checked })}
+            onChange={(e) => persistUpdate({ stopOnProviderLimit: e.target.checked })}
           />
           Stop if provider returns rate-limit / insufficient credits
         </label>
@@ -540,7 +614,7 @@ export function ProvidersView() {
           <input
             type="checkbox"
             checked={settings.askBeforeFallback !== false}
-            onChange={(e) => update({ askBeforeFallback: e.target.checked })}
+            onChange={(e) => persistUpdate({ askBeforeFallback: e.target.checked })}
           />
           Ask before fallback provider
         </label>
@@ -553,13 +627,15 @@ export function ProvidersView() {
           value={settings.backupProvider ?? ""}
           onChange={(e) => {
             const value = e.target.value;
-            update({
+            persistUpdate({
               backupProvider: value ? (value as ProviderId) : null,
             });
           }}
         >
           <option value="">Auto (fallback order)</option>
-          {PROVIDERS.filter((p) => p.id !== provider).map((p) => (
+          {providerChoices
+            .filter((p) => p.id !== provider)
+            .map((p) => (
             <option key={p.id} value={p.id}>
               {p.label}
             </option>
@@ -568,7 +644,66 @@ export function ProvidersView() {
         <p className="prov-hint">{formatFallbackPolicy(settings)}</p>
       </section>
 
-      <ProviderReliabilityDiagnostics settings={settings} />
+      <section className="prov-block">
+        <h3 className="prov-heading">Developer diagnostics</h3>
+        <label className="prov-label prov-label--check">
+          <input
+            type="checkbox"
+            checked={developerDiagnostics}
+            onChange={(e) => setDeveloperDiagnostics(e.target.checked)}
+          />
+          Show raw prompts, provider responses, HTTP status, and parser details in Pipeline
+          Inspector
+        </label>
+        <p className="prov-hint">
+          Observability only — does not change AI workflow behavior. Toggle also available in the
+          Pipeline Diagnostics tab.
+        </p>
+      </section>
+
+      <ProviderReliabilityDiagnostics settings={settings} healthByProvider={healthByProvider} />
+
+      <section className="prov-block" data-testid={PROVIDER_ENABLEMENT_TEST_ID}>
+        <h3 className="prov-heading">Provider availability</h3>
+        <p className="prov-hint">
+          Disabled providers are excluded from health checks, routing, fallbacks,
+          and model dropdowns. API keys are preserved when a provider is disabled.
+        </p>
+        <div className="prov-enablement-grid">
+          {PROVIDERS.map((p) => {
+            const id = p.id;
+            const enabled = isProviderEnabled(settings, id);
+            const panelHealth = healthByProvider[id] ?? (id === provider ? health : null);
+            const status = resolveProviderPanelStatus(settings, id, panelHealth);
+            const onlyEnabled = enabled && countEnabledProviders(settings) <= 1;
+            return (
+              <div
+                key={id}
+                className={`prov-enablement-card${enabled ? "" : " prov-enablement-card--disabled"}`}
+              >
+                <div className="prov-enablement-card__head">
+                  <strong>{p.label}</strong>
+                  <span className={`prov-badge prov-badge--status prov-badge--${status}`}>
+                    {providerPanelStatusLabel(status)}
+                  </span>
+                </div>
+                <label className="prov-label prov-label--check">
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    disabled={saving || onlyEnabled}
+                    onChange={(e) => void toggleProviderEnabled(id, e.target.checked)}
+                  />
+                  Enabled
+                </label>
+                {onlyEnabled ? (
+                  <p className="prov-hint">At least one provider must stay enabled.</p>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       <section className="prov-block">
         <h3 className="prov-heading">Settings</h3>
@@ -588,7 +723,7 @@ export function ProvidersView() {
             void persistProviderSwitch(next);
           }}
         >
-          {PROVIDERS.map((p) => (
+          {providerChoices.map((p) => (
             <option key={p.id} value={p.id}>
               {p.label}
             </option>
@@ -690,7 +825,7 @@ export function ProvidersView() {
               id="prov-base"
               className="prov-input"
               value={settings.ollamaBaseUrl}
-              onChange={(e) => update({ ollamaBaseUrl: e.target.value })}
+              onChange={(e) => persistUpdate({ ollamaBaseUrl: e.target.value })}
             />
             <ProviderConnectionTest
               provider={provider}
@@ -801,7 +936,7 @@ export function ProvidersView() {
           className="prov-input"
           value={settings.fileWriteMode ?? "workspace"}
           onChange={(e) =>
-            update({ fileWriteMode: e.target.value as FileWriteMode })
+            persistUpdate({ fileWriteMode: e.target.value as FileWriteMode })
           }
         >
           <option value="workspace">Workspace Mode (overwrite existing files)</option>
@@ -823,7 +958,7 @@ export function ProvidersView() {
           className="prov-input"
           value={settings.autoFixMode ?? "ask"}
           onChange={(e) =>
-            update({ autoFixMode: e.target.value as AutoFixMode })
+            persistUpdate({ autoFixMode: e.target.value as AutoFixMode })
           }
         >
           <option value="off">Off</option>
@@ -899,6 +1034,7 @@ function StageRouteField({
   provider,
   model,
   geminiAvailableModelIds,
+  providerChoices,
   onProvider,
   onModel,
 }: {
@@ -906,6 +1042,7 @@ function StageRouteField({
   provider: ProviderId;
   model: string;
   geminiAvailableModelIds?: readonly string[] | undefined;
+  providerChoices: ReturnType<typeof selectableProviders>;
   onProvider: (provider: ProviderId) => void;
   onModel: (model: string) => void;
 }) {
@@ -925,7 +1062,7 @@ function StageRouteField({
         value={provider}
         onChange={(e) => onProvider(e.target.value as ProviderId)}
       >
-        {PROVIDERS.map((p) => (
+        {providerChoices.map((p) => (
           <option key={p.id} value={p.id}>
             {p.label}
           </option>

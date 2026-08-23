@@ -45,6 +45,7 @@ export type OrchestrationSyncRefs = Pick<
   | "pipelineCoderResultRef"
   | "lastContextSnapshotIdRef"
   | "editExplorationContentsRef"
+  | "activeEditorContextRef"
   | "createPlanErrorRef"
   | "projectMemoryRef"
   | "aiCallTrackerRef"

@@ -25,6 +25,15 @@ export type FollowUpSubmitAction =
       readonly kind: "agent_loop";
       readonly greenfieldBlockedByRoute: boolean;
     }
+  | {
+      readonly kind: "consultation";
+      readonly promptIntent: import("@/core/agent/agentIntentRouter").AgentPromptIntent;
+      readonly mixedEdit: boolean;
+    }
+  | {
+      readonly kind: "run_command";
+      readonly promptIntent: import("@/core/agent/agentIntentRouter").AgentPromptIntent;
+    }
   | { readonly kind: "blocked_scan"; readonly reason: string };
 
 export function routeExecutionFromDecision(
@@ -35,6 +44,13 @@ export function routeExecutionFromDecision(
   if (decision.selectedRoute === "greenfield") return "greenfield";
   if (decision.selectedRoute === "greenfield_recovery") return "greenfield_recovery";
   if (decision.selectedRoute === "build_loop") return "build_loop";
+  if (
+    decision.selectedRoute === "consultation" ||
+    decision.selectedRoute === "mixed_confirm"
+  ) {
+    return decision.selectedRoute === "mixed_confirm" ? "mixed_confirm" : "consultation";
+  }
+  if (decision.selectedRoute === "run_command") return "run_command";
   return fallback;
 }
 
@@ -69,12 +85,14 @@ export function isProjectIndexReadyForEdit(input: {
 export function resolveFollowUpSubmitAction(input: {
   readonly hasProject: boolean;
   readonly routeExecution: AgentExecutionKind;
+  readonly routePromptIntent?: import("@/core/agent/agentIntentRouter").AgentPromptIntent;
+  readonly routeMixedEdit?: boolean;
   readonly emptyProjectFolder: boolean;
   readonly scan: ProjectScan | null;
   readonly scanStatus: AgentScanStatus;
   readonly fallbackSourceFileCount?: number;
   readonly filesWritten?: readonly string[];
-  /** When omitted, reads `readUseAgentLoopForEdits()` (default on). */
+  /** When omitted, reads `readUseAgentLoopForEdits()` (default off — structured build_loop). */
   readonly useAgentLoopForEdits?: boolean;
 }): FollowUpSubmitAction {
   if (!input.hasProject) {
@@ -94,6 +112,24 @@ export function resolveFollowUpSubmitAction(input: {
 
   if (input.routeExecution === "greenfield_recovery") {
     return { kind: "greenfield_recovery" };
+  }
+
+  if (
+    input.routeExecution === "consultation" ||
+    input.routeExecution === "mixed_confirm"
+  ) {
+    return {
+      kind: "consultation",
+      promptIntent: input.routePromptIntent ?? "ask",
+      mixedEdit: input.routeMixedEdit ?? input.routeExecution === "mixed_confirm",
+    };
+  }
+
+  if (input.routeExecution === "run_command") {
+    return {
+      kind: "run_command",
+      promptIntent: input.routePromptIntent ?? "run",
+    };
   }
 
   const greenfieldBlockedByRoute = input.emptyProjectFolder;

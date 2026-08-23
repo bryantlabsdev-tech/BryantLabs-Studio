@@ -29,13 +29,14 @@ function projectHintFromContext(
   slim: boolean,
 ): string | undefined {
   if (!slim) return undefined;
+  const summary = context.repositorySummary?.trim().slice(0, 400) ?? "";
   return JSON.stringify({
     framework: context.framework,
     language: context.language,
     bundler: context.bundler,
     packageManager: context.packageManager,
-    entryPoints: context.entryPoints,
-    repositorySummary: context.repositorySummary,
+    entryPoints: context.entryPoints?.slice(0, 4),
+    ...(summary ? { repositorySummary: summary } : {}),
   });
 }
 

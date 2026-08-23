@@ -9,7 +9,7 @@ import { buildRepositoryIndex } from "@/core/repository";
 
 describe("exploreRepositoryBeforeEdit", () => {
   it("reads up to DEFAULT_MAX_EXPLORE_FILES ranked paths", async () => {
-    const paths = Array.from({ length: 16 }, (_, i) => `src/file-${i}.ts`);
+    const paths = Array.from({ length: 40 }, (_, i) => `src/file-${i}.ts`);
     const scan = mockProjectScan(paths, { root: "/tmp/app" });
     const repository = buildRepositoryIndex(scan);
     const readPaths: string[] = [];

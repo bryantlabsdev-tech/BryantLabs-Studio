@@ -5,7 +5,7 @@ import {
   classifyFollowUpPromptType,
   isUiOnlyFollowUpPrompt,
 } from "@/core/planner/promptClassification";
-import { isFunctionalFeaturePrompt } from "@/core/planner/fallback";
+import { isFunctionalFeaturePrompt, isGameplayOrLogicPrompt } from "@/core/planner/fallback";
 
 export type PlannerPreflightGate =
   | "host_unavailable"
@@ -206,7 +206,11 @@ export function canUseDeterministicPlanWithoutProviderCall(
   route?: string | null,
 ): boolean {
   if (route && route !== "edit_follow_up") return false;
-  if (!isUiOnlyFollowUpPrompt(userPrompt) && !isFunctionalFeaturePrompt(userPrompt.toLowerCase())) {
+  if (
+    !isUiOnlyFollowUpPrompt(userPrompt) &&
+    !isFunctionalFeaturePrompt(userPrompt.toLowerCase()) &&
+    !isGameplayOrLogicPrompt(userPrompt.toLowerCase())
+  ) {
     return false;
   }
   return plan.files.length > 0;

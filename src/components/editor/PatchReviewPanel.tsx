@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { AIPatchSession } from "@/core/planner/aiTypes";
 import type { PlanApplyFileEntry } from "@/core/planApply/types";
 import { DiffRowsView } from "@/components/editor/DiffRowsView";
+import { HunkDiffView } from "@/components/editor/HunkDiffView";
 import {
   deriveAiPatchReviewState,
   derivePlanApplyReviewState,
@@ -38,10 +39,14 @@ export interface PatchReviewPlanApplyProps {
   readonly onAcceptAll: () => void;
   readonly onRejectAll: () => void;
   readonly onRegenerate: () => void;
+  readonly acceptLabel?: string;
+  readonly rejectLabel?: string;
   readonly onApplyApproved?: () => void;
   readonly onSelectFile?: (relPath: string) => void;
   readonly onAcceptFile?: (relPath: string) => void;
   readonly onRejectFile?: (relPath: string) => void;
+  readonly onPartialContentChange?: (relPath: string, mergedAfter: string) => void;
+  readonly hunkReview?: boolean;
 }
 
 export type PatchReviewPanelProps = PatchReviewAiPatchProps | PatchReviewPlanApplyProps;
@@ -94,36 +99,18 @@ function PatchReviewMessages({
 }
 
 function PatchReviewBulkBar({
-  canAcceptAll,
-  canApplyApproved,
   busy,
-  onAcceptAll,
   onRejectAll,
   onRegenerate,
-  onApplyApproved,
-  acceptLabel = "Accept all",
   rejectLabel = "Reject all",
 }: {
-  readonly canAcceptAll: boolean;
-  readonly canApplyApproved: boolean;
   readonly busy: boolean;
-  readonly onAcceptAll: () => void;
   readonly onRejectAll: () => void;
   readonly onRegenerate: () => void;
-  readonly onApplyApproved?: () => void;
-  readonly acceptLabel?: string;
   readonly rejectLabel?: string;
 }) {
   return (
     <div className="patch-review__bulk-actions agent-patch-review__bulk-actions">
-      <button
-        type="button"
-        className="prov-btn prov-btn--primary"
-        disabled={!canAcceptAll || busy}
-        onClick={onAcceptAll}
-      >
-        {acceptLabel}
-      </button>
       <button
         type="button"
         className="prov-btn"
@@ -132,16 +119,6 @@ function PatchReviewBulkBar({
       >
         {rejectLabel}
       </button>
-      {onApplyApproved ? (
-        <button
-          type="button"
-          className="prov-btn prov-btn--primary"
-          disabled={!canApplyApproved || busy}
-          onClick={onApplyApproved}
-        >
-          Apply approved
-        </button>
-      ) : null}
       <button type="button" className="build-view__link" disabled={busy} onClick={onRegenerate}>
         Regenerate
       </button>
@@ -158,6 +135,8 @@ function PlanApplyFileList({
   onSelect,
   onAcceptFile,
   onRejectFile,
+  onPartialContentChange,
+  hunkReview,
   busy,
 }: {
   readonly files: readonly PlanApplyFileReview[];
@@ -168,6 +147,8 @@ function PlanApplyFileList({
   readonly onSelect?: (relPath: string) => void;
   readonly onAcceptFile?: (relPath: string) => void;
   readonly onRejectFile?: (relPath: string) => void;
+  readonly onPartialContentChange?: (relPath: string, mergedAfter: string) => void;
+  readonly hunkReview?: boolean;
   readonly busy: boolean;
 }) {
   const groups = useMemo(() => groupPlanApplyFiles(files), [files]);
@@ -217,7 +198,17 @@ function PlanApplyFileList({
                 <p className="agent-patch-review__file-reason">{file.reason}</p>
                 {expanded && file.basisContent !== undefined && file.newContent !== undefined ? (
                   <div className="run-conversation__diff-panel" data-testid="run-inline-diff">
-                    <DiffRowsView before={file.basisContent} after={file.newContent} />
+                    {hunkReview && onPartialContentChange ? (
+                      <HunkDiffView
+                        before={file.basisContent}
+                        after={file.newContent}
+                        onPartialAfterChange={(merged) =>
+                          onPartialContentChange(file.relPath, merged)
+                        }
+                      />
+                    ) : (
+                      <DiffRowsView before={file.basisContent} after={file.newContent} />
+                    )}
                   </div>
                 ) : null}
                 {onAcceptFile && onRejectFile ? (
@@ -359,13 +350,10 @@ function PlanApplyReviewPanel(props: PatchReviewPlanApplyProps) {
           {props.planSummary?.trim() || "Review proposed edits before applying them to your project."}
         </p>
         <PatchReviewBulkBar
-          canAcceptAll={review?.canAcceptAll ?? files.length === 0}
-          canApplyApproved={review?.canApplyApproved ?? false}
           busy={review?.busy ?? false}
-          onAcceptAll={props.onAcceptAll}
           onRejectAll={props.onRejectAll}
           onRegenerate={props.onRegenerate}
-          {...(props.onApplyApproved ? { onApplyApproved: props.onApplyApproved } : {})}
+          {...(props.rejectLabel ? { rejectLabel: props.rejectLabel } : {})}
         />
       </header>
 
@@ -382,16 +370,31 @@ function PlanApplyReviewPanel(props: PatchReviewPlanApplyProps) {
         {...(props.onSelectFile ? { onSelect: props.onSelectFile } : {})}
         {...(props.onAcceptFile ? { onAcceptFile: props.onAcceptFile } : {})}
         {...(props.onRejectFile ? { onRejectFile: props.onRejectFile } : {})}
+        {...(props.onPartialContentChange
+          ? { onPartialContentChange: props.onPartialContentChange }
+          : {})}
+        {...(props.hunkReview ? { hunkReview: props.hunkReview } : {})}
         busy={review?.busy ?? false}
       />
 
       {props.layout === "center" && selected?.basisContent !== undefined && selected.newContent !== undefined ? (
         <div className="patch-review__center-diff">
-          <DiffRowsView
-            before={selected.basisContent}
-            after={selected.newContent}
-            description={selected.summary ?? selected.relPath}
-          />
+          {props.hunkReview && props.onPartialContentChange ? (
+            <HunkDiffView
+              before={selected.basisContent}
+              after={selected.newContent}
+              description={selected.summary ?? selected.relPath}
+              onPartialAfterChange={(merged) =>
+                props.onPartialContentChange!(selected.relPath, merged)
+              }
+            />
+          ) : (
+            <DiffRowsView
+              before={selected.basisContent}
+              after={selected.newContent}
+              description={selected.summary ?? selected.relPath}
+            />
+          )}
         </div>
       ) : null}
     </section>

@@ -46,4 +46,17 @@ describe("build loop", () => {
     assert.ok(BUILD_PHASE_LABELS.review.includes("review"));
     assert.ok(BUILD_PHASE_LABELS.completed.length > 0);
   });
+
+  it("derives failed instead of review when apply plan produced no patches", () => {
+    const phase = deriveBuildPhase({
+      mode: "single",
+      buildRunning: false,
+      pipelineRunning: false,
+      pipelineStatus: null,
+      aiPlanStatus: "done",
+      planApplyPhase: "failed",
+      autoFixPhase: null,
+    });
+    assert.equal(phase, "failed");
+  });
 });

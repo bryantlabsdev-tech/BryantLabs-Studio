@@ -60,6 +60,13 @@ describe("plannerPreflight", () => {
     assert.equal(canUseDeterministicPlanWithoutProviderCall(prompt, plan, "edit_follow_up"), true);
   });
 
+  it("allows deterministic fallback for gameplay follow-ups like difficulty selector", () => {
+    const scan = mockProjectScan(["src/App.tsx", "src/index.css"]);
+    const prompt = "Add difficulty selector";
+    const plan = generatePlan(prompt, scan);
+    assert.equal(canUseDeterministicPlanWithoutProviderCall(prompt, plan, "edit_follow_up"), true);
+  });
+
   it("round-trips preflight diagnostics through log detail formatting", () => {
     const preflight = buildPlannerPreflightDiagnostics({
       userPrompt: "Fix UI",

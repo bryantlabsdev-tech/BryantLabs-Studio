@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { PipelineReviewGates } from "@/app/orchestration/pipelineGates";
 import { createApplyPlanRunController } from "@/app/orchestration/applyPlanRun";
 import { publishFailureReportOrchestration } from "@/app/orchestration/failureReportOrchestration";
+import type { GreenfieldRunUpdate } from "@/app/orchestration/followUpRunFailure";
 import { createPipelineSession } from "@/core/pipeline/stateMachine";
 import { deriveBuildPhase } from "@/core/build/types";
 import {
@@ -61,8 +62,9 @@ describe("failure report orchestration", () => {
       ) => {
         logs.push({ message, status });
       },
-      updateGreenfieldRun: (patch: Partial<GreenfieldRunSnapshot>) => {
-        snapshot = { ...snapshot, ...patch };
+      updateGreenfieldRun: (patch: GreenfieldRunUpdate) => {
+        const next = typeof patch === "function" ? patch(snapshot) : patch;
+        snapshot = { ...snapshot, ...next };
       },
     };
 

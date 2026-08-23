@@ -43,6 +43,19 @@ function baseSettings(patch: Partial<ProviderSettings> = {}): ProviderSettings {
 }
 
 describe("provider orchestration", () => {
+  it("economy mode routes coder to cheaper anthropic model", () => {
+    const settings = baseSettings({
+      provider: "anthropic",
+      anthropicModel: "claude-opus-4-6",
+      costMode: "economy",
+      agentMode: "single",
+    });
+    const planner = resolveStageRouting(settings, "planner");
+    const coder = resolveStageRouting(settings, "coder");
+    assert.equal(planner?.model, "claude-opus-4-6");
+    assert.equal(coder?.model, "claude-haiku-4-5-20251001");
+  });
+
   it("single agent mode uses global provider for all stages", () => {
     const settings = baseSettings({ provider: "anthropic", agentMode: "single" });
     const routing = resolveStageRouting(settings, "coder");
@@ -119,5 +132,43 @@ describe("provider orchestration", () => {
     });
     assert.match(line, /stage=planner/);
     assert.match(line, /success/);
+  });
+
+  it("remaps a disabled active provider during normalize", () => {
+    const settings = normalizeProviderSettings({
+      provider: "openrouter",
+      geminiModel: "gemini-2.5-flash",
+      ollamaModel: "qwen2.5-coder:7b",
+      ollamaBaseUrl: "http://localhost:11434",
+      anthropicModel: "claude-opus-4-6",
+      groqModel: "llama-3.3-70b-versatile",
+      openrouterModel: "anthropic/claude-sonnet-4",
+      hasGeminiKey: true,
+      hasAnthropicKey: true,
+      hasGroqKey: true,
+      hasOpenRouterKey: true,
+      autoFixMode: "ask",
+      agentMode: "single",
+      plannerProvider: "openrouter",
+      plannerModel: "",
+      coderProvider: "openrouter",
+      coderModel: "",
+      repairProvider: "openrouter",
+      repairModel: "",
+      maxAiCalls: 3,
+      maxRepairAttempts: 1,
+      stopOnProviderLimit: true,
+      askBeforeFallback: true,
+      providerEnabled: {
+        gemini: false,
+        anthropic: true,
+        openrouter: false,
+        groq: false,
+        ollama: false,
+      },
+    });
+    assert.equal(settings.provider, "anthropic");
+    assert.equal(settings.plannerProvider, "anthropic");
+    assert.equal(settings.coderProvider, "anthropic");
   });
 });

@@ -32,6 +32,7 @@ import { mergeRepositoryAndSemanticHits } from "@/core/semanticIndex/hybridSearc
 import { BRYANTLABS_AGENT_DISPLAY_NAME } from "@/core/studioRun/types";
 import { verificationSummaryLines } from "@/core/studioRun/types";
 import { exploreRepositoryBeforeEdit } from "@/core/agent/editExploration";
+import { formatAgentFilePreview } from "@/core/agent/formatAgentFilePreview";
 import { resolvePlannerSemanticBoostPaths } from "@/core/context/plannerSemanticBoost";
 import { invokeMcpTool as invokeMcpToolClient } from "@/core/mcp/client";
 import type { AgentOrchestrationHost } from "@/app/orchestration/agentTypes";
@@ -80,7 +81,7 @@ function buildAgentActCallbacks(
         if (!res.readable || res.content === undefined) {
           return { ok: false, preview: "" };
         }
-        return { ok: true, preview: res.content.slice(0, 2000) };
+        return { ok: true, preview: formatAgentFilePreview(res.content) };
       } catch {
         return { ok: false, preview: "" };
       }

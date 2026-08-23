@@ -35,5 +35,6 @@ export {
   type PreviewDiagnosticsPayload,
   probePreviewUrl,
   normalizePreviewUrl,
+  isAllowedPreviewUrl,
 } from "./preview.cjs";
 export { auditGreenfieldPreviewUrl } from "./uiAudit.cjs";

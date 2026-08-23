@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { useAgentRunViewModel } from "@/app/workspace/useAgentRunViewModel";
 import { FollowUpChatHistory } from "@/components/views/FollowUpChatHistory";
 import { FollowUpErrorBanner } from "@/components/views/FollowUpErrorBanner";
@@ -31,6 +31,7 @@ import { resolveDiagnosticReportBundle } from "@/core/diagnostics/diagnosticRepo
 import { extractRunFileDiffs, resolveAllowGeneratedFileDiffs } from "@/core/agent/runFileDiffs";
 import {
   ClarifyingQuestionGate,
+  ExecutionModeConfirmGate,
   FeasibilityGate,
   FolderSelectionGate,
   PromptContextViewer,
@@ -59,6 +60,9 @@ export function BuildView() {
     buildError,
     buildStatus,
     runBuildLoop,
+    runAgentConsultationFlow,
+    consumePendingMixedEdit,
+    consultationRunning,
     startAgent,
     cancelBuildLoop,
     retryApplyPlanReview,
@@ -66,6 +70,8 @@ export function BuildView() {
     continueBuildAfterReview,
     planApplySession,
     planApplyError,
+    setPlanApplyFileDecision,
+    setPlanApplyFilePartialContent,
     pipelineRunning,
     pipelineError,
     greenfieldRun,
@@ -112,6 +118,8 @@ export function BuildView() {
     openPath,
     openDiagnosticReport,
     openRunInspector,
+    gitStatus,
+    projectIndexStatus,
   } = useWorkspace();
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -151,6 +159,9 @@ export function BuildView() {
     setAgentGreenfieldPanelActive,
     runBuildLoop,
     startAgent,
+    runAgentConsultationFlow,
+    consumePendingMixedEdit,
+    consultationRunning,
     openProject,
     openProjectAt,
     setRailTool,
@@ -161,6 +172,8 @@ export function BuildView() {
     recordAgentUserMessage,
     recordAgentActivityMessage,
     providerStatus,
+    hasGitRepo: Boolean(gitStatus),
+    hasProjectIndex: projectIndexStatus != null,
   });
 
   const {
@@ -182,6 +195,9 @@ export function BuildView() {
     setClarityGate,
     staleRunGate,
     setStaleRunGate,
+    executionModeGate,
+    setExecutionModeGate,
+    proceedAfterExecutionMode,
     folderSelectionGate,
     setFolderSelectionGate,
     folderPickerError,
@@ -211,6 +227,7 @@ export function BuildView() {
     proceedAfterStaleRunReset,
     proceedAfterFeasibility,
     proceedAfterClarity,
+    releasePendingSubmit,
     resolveFolderGateCancel,
   } = submit;
 
@@ -386,6 +403,7 @@ export function BuildView() {
     setFolderPickerError(null);
     setFolderPickerBusy(false);
     setPrompt(cancel.prompt);
+    releasePendingSubmit();
   };
 
   const handleStartNewProject = async () => {
@@ -547,6 +565,9 @@ export function BuildView() {
       projectPath: project?.path ?? null,
       route: greenfieldRun.runTimeline?.route ?? null,
       generationMode: greenfieldRun.actionType,
+      buildError,
+      planApplyError,
+      pipelineError,
     });
     if (!bundle) {
       setCenterTab("studioLog");
@@ -628,6 +649,9 @@ export function BuildView() {
             onApprove: () => void continueBuildAfterReview(),
             onReject: () => cancelBuildLoop(),
             onRevision: handleRevision,
+            onPartialContentChange: setPlanApplyFilePartialContent,
+            onAcceptFile: (relPath: string) => setPlanApplyFileDecision(relPath, "approved"),
+            onRejectFile: (relPath: string) => setPlanApplyFileDecision(relPath, "rejected"),
           }
         : null,
     [
@@ -636,6 +660,8 @@ export function BuildView() {
       reviewChangedFiles,
       continueBuildAfterReview,
       cancelBuildLoop,
+      setPlanApplyFilePartialContent,
+      setPlanApplyFileDecision,
     ],
   );
 
@@ -821,14 +847,36 @@ export function BuildView() {
           <ClarifyingQuestionGate
             question={clarityGate.question}
             onProceed={proceedAfterClarity}
-            onCancel={() => setClarityGate(null)}
+            onCancel={() => {
+              setClarityGate(null);
+              releasePendingSubmit();
+            }}
           />
         ) : null}
 
         {staleRunGate && !active ? (
           <StaleRunGate
             onResetAndStart={proceedAfterStaleRunReset}
-            onCancel={() => setStaleRunGate(null)}
+            onCancel={() => {
+              setStaleRunGate(null);
+              releasePendingSubmit();
+            }}
+          />
+        ) : null}
+
+        {executionModeGate && !active ? (
+          <ExecutionModeConfirmGate
+            prompt={executionModeGate.prompt}
+            route={executionModeGate.route}
+            resolution={executionModeGate.resolution}
+            currentProjectPath={project?.path ?? null}
+            onContinue={(choice, createTarget) =>
+              void proceedAfterExecutionMode(choice, createTarget)
+            }
+            onCancel={() => {
+              setExecutionModeGate(null);
+              releasePendingSubmit();
+            }}
           />
         ) : null}
 
@@ -836,7 +884,10 @@ export function BuildView() {
           <FeasibilityGate
             result={feasibilityGate}
             onProceed={proceedAfterFeasibility}
-            onCancel={() => setFeasibilityGate(null)}
+            onCancel={() => {
+              setFeasibilityGate(null);
+              releasePendingSubmit();
+            }}
           />
         ) : null}
 
@@ -1057,16 +1108,23 @@ export function BuildView() {
             Plan
           </button>
           <button type="button" className="build-view__link" onClick={() => setCenterTab("inspector")}>
-            Run Inspector
+            Run Trace
+          </button>
+          <button
+            type="button"
+            className="build-view__link"
+            onClick={() => setCenterTab("pipelineInspector")}
+          >
+            Pipeline Diagnostics
           </button>
           <button type="button" className="build-view__link" onClick={() => openDeveloperConsole()}>
             Developer Console
           </button>
           <button type="button" className="build-view__link" onClick={() => setRailTool("providers")}>
-            Providers
+            Settings
           </button>
           <button type="button" className="build-view__link" onClick={() => setRailTool("pipeline")}>
-            Pipeline
+            Multi-Agent Pipeline
           </button>
           <button type="button" className="build-view__link" onClick={() => setCommandPaletteOpen(true)}>
             Command palette

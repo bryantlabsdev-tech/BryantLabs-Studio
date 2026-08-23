@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import {
   findAgentRunArtifact,
   type AgentRunArtifact,

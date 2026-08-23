@@ -3,13 +3,14 @@ import { describe, it } from "node:test";
 import { buildGreenfieldFallbackSourceFileCount } from "@/core/agent/agentGreenfieldDispatch";
 import {
   buildGreenfieldRecoveryContext,
+  isIncompleteGreenfieldRun,
   shouldBlockEditForIncompleteGreenfield,
   shouldBlockApplyPlanForIncompleteGreenfield,
   shouldRouteGreenfieldRecovery,
 } from "@/core/agent/greenfieldRecoveryRouting";
 import { hashPrompt } from "@/core/agent/runContextReset";
 import { routeAgentPrompt } from "@/core/agent/unifiedAgentRoute";
-import { createLatestAction } from "@/core/greenfield/runLog";
+import { createLatestAction, createRunLogEntry } from "@/core/greenfield/runLog";
 import { emptyGreenfieldRun, type GreenfieldRunSnapshot } from "@/core/greenfield/runState";
 import { mockProjectScan } from "@/core/repository/testScan";
 import type { CommandResult } from "@/types";
@@ -140,6 +141,106 @@ describe("greenfield recovery routing", () => {
       }),
       true,
     );
+  });
+
+  it("does not block edits when setup succeeded but apply_plan is running", () => {
+    const projectPath = "/tmp/fieldflow-success";
+    const run: GreenfieldRunSnapshot = {
+      ...failedNpmInstallGreenfieldRun(projectPath),
+      actionType: "apply_plan",
+      runResult: "running",
+      genStatus: "done",
+      writeStatus: "done",
+      setupStatus: "done",
+      setupResult: {
+        ok: true,
+        install: okCommand("npm install"),
+        typecheck: okCommand("npx tsc --noEmit"),
+        build: okCommand("npm run build"),
+      },
+    };
+    assert.equal(isIncompleteGreenfieldRun(run), false);
+    assert.equal(
+      shouldBlockEditForIncompleteGreenfield({ projectPath, greenfieldRun: run }),
+      false,
+    );
+  });
+
+  it("does not block edits when setup succeeded before runResult is finalized", () => {
+    const projectPath = "/tmp/fieldflow-success";
+    const run: GreenfieldRunSnapshot = {
+      ...failedNpmInstallGreenfieldRun(projectPath),
+      actionType: "greenfield",
+      runResult: "running",
+      genStatus: "done",
+      writeStatus: "done",
+      setupStatus: "done",
+      setupResult: {
+        ok: true,
+        install: okCommand("npm install"),
+        typecheck: okCommand("npx tsc --noEmit"),
+        build: okCommand("npm run build"),
+      },
+    };
+    assert.equal(isIncompleteGreenfieldRun(run), false);
+  });
+
+  it("does not block edits when the build entry succeeded even if setupResult is missing", () => {
+    const projectPath = "/tmp/fieldflow-built";
+    const run: GreenfieldRunSnapshot = {
+      ...failedNpmInstallGreenfieldRun(projectPath),
+      actionType: "apply_plan",
+      runResult: "running",
+      genStatus: "done",
+      writeStatus: "done",
+      setupStatus: "done",
+      setupResult: null,
+      finalMessage: null,
+      latestAction: null,
+      entries: [
+        createRunLogEntry("build", "success", "Build succeeded"),
+        createRunLogEntry("preview", "success", "Preview ready"),
+      ],
+    };
+    assert.equal(isIncompleteGreenfieldRun(run), false);
+    assert.equal(
+      shouldBlockEditForIncompleteGreenfield({ projectPath, greenfieldRun: run }),
+      false,
+    );
+  });
+
+  it("does not block edits after follow-up clear when lastSuccessfulRunAt is set", () => {
+    const projectPath = "/tmp/fieldflow-built";
+    const run: GreenfieldRunSnapshot = {
+      ...failedNpmInstallGreenfieldRun(projectPath),
+      actionType: "apply_plan",
+      runResult: "running",
+      genStatus: "idle",
+      writeStatus: "idle",
+      setupStatus: "idle",
+      setupResult: null,
+      entries: [],
+      lastSuccessfulRunAt: Date.now() - 60_000,
+    };
+    assert.equal(isIncompleteGreenfieldRun(run), false);
+    assert.equal(
+      shouldBlockEditForIncompleteGreenfield({ projectPath, greenfieldRun: run }),
+      false,
+    );
+  });
+
+  it("does not treat a failed follow-up edit as incomplete greenfield", () => {
+    const projectPath = "/tmp/fieldflow-built";
+    const run: GreenfieldRunSnapshot = {
+      ...failedNpmInstallGreenfieldRun(projectPath),
+      actionType: "apply_plan",
+      runResult: "failed",
+      genStatus: "done",
+      setupResult: null,
+      entries: [],
+      lastSuccessfulRunAt: Date.now() - 60_000,
+    };
+    assert.equal(isIncompleteGreenfieldRun(run), false);
   });
 
   it("blocks edit on incomplete greenfield even when prompt differs", () => {

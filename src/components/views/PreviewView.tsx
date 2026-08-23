@@ -17,6 +17,7 @@ import {
 } from "@/core/preview/diagnostics";
 import { normalizePreviewUrl } from "@/core/preview/normalizePreviewUrl";
 import { enableAdvancedPreviewControls } from "@/core/preview/viewport";
+import { shouldMountPreviewFrame } from "@/core/preview/previewMount";
 import { PreviewViewportControlsBar } from "@/components/preview/PreviewViewportControlsBar";
 
 export { normalizePreviewUrl } from "@/core/preview/normalizePreviewUrl";
@@ -190,13 +191,19 @@ export function PreviewView() {
     }
   }, [url, projectRoot, displayPort]);
 
+  const lastProbeKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
     const target = url ?? defaultPreviewUrl(displayPort);
     if (!projectRoot && !url) {
+      lastProbeKeyRef.current = null;
       setProbe(null);
       setFrameState("idle");
       return;
     }
+    const probeKey = `${target}::${reloadKey}`;
+    if (lastProbeKeyRef.current === probeKey) return;
+    lastProbeKeyRef.current = probeKey;
     setFrameState("loading");
     setFrameError(null);
     void runProbe(target);
@@ -204,7 +211,14 @@ export function PreviewView() {
 
   const httpReady = probe?.ok === true;
   const frameSrc = url ? normalizePreviewUrl(url) : null;
-  const showFrame = Boolean(frameSrc && httpReady && frameState !== "failed");
+  const showFrame = shouldMountPreviewFrame({
+    frameSrc,
+    frameState,
+    httpReady,
+    probing,
+    studioProcessRunning,
+    probeFailed: probe !== null && probe.ok === false,
+  });
   const mountFrame = showFrame;
 
   const frameRef = (isDesktop ? webviewRef : iframeRef) as RefObject<
@@ -619,7 +633,7 @@ export function PreviewView() {
                 className="preview-frame"
                 src={frameSrc}
                 partition="persist:bryantlabs-preview"
-                allowpopups
+                webpreferences="contextIsolation=yes, sandbox=yes, nativeWindowOpen=no"
               />
             ) : (
               <iframe

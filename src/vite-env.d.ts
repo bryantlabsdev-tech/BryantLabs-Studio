@@ -29,6 +29,7 @@ interface RoutingIntentState {
 
 interface StudioTestHooks {
   getReadinessState(): StudioReadinessState;
+  getGreenfieldRunSnapshot(): import("@/core/greenfield/runState").GreenfieldRunSnapshot;
   openProjectAt(folderPath: string): Promise<void>;
   getPatchPipelineState(): PatchPipelineState;
   getRoutingState(): RoutingIntentState | null;
@@ -38,6 +39,9 @@ interface StudioTestHooks {
     port?: number;
     root?: string;
   }): { ok: true; url: string; centerTab: string } | { ok: false; reason: string };
+  simulateLiveActivityStream(opts?: {
+    complete?: boolean;
+  }): { ok: true; runId: string } | { ok: false; reason: string };
   getProviderSmokeState(): {
     provider: import("@/core/providers/types").ProviderId | null;
     model: string | null;
@@ -45,6 +49,16 @@ interface StudioTestHooks {
   };
   checkConfiguredProviderHealth(): Promise<import("@/types").HealthResult>;
   runProviderSmokeTest(prompt: string): Promise<import("@/types").ProviderResponse>;
+  getTransportDiagnostics(): {
+    events: readonly import("@/core/diagnostics/providerTransport").ProviderTransportEvent[];
+    summary: {
+      total: number;
+      problems: number;
+      firstAttemptProblems: number;
+      lastProblem: import("@/core/diagnostics/providerTransport").ProviderTransportEvent | null;
+    };
+  };
+  clearTransportDiagnostics(): void;
 }
 
 interface StudioReadinessState {
@@ -52,6 +66,7 @@ interface StudioReadinessState {
   desktopApiReady: boolean;
   projectPath: string | null;
   scanStatus: string;
+  sourceFileCount: number;
   composerReady: boolean;
   composerBlockReason: string | null;
   centerTab: string;

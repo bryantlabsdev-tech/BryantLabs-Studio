@@ -5,6 +5,7 @@ import {
   buildCriticalAppScaffold,
   fillMissingGreenfieldFiles,
   isFallbackSkeletonAppContent,
+  isIncompleteStubAppContent,
 } from "@/core/greenfield/fallbackSkeleton";
 import { GREENFIELD_FILE_PATHS } from "@/core/greenfield/types";
 
@@ -92,5 +93,38 @@ describe("greenfield fallback skeleton", () => {
     assert.match(scaffold, /Dashboard/);
     assert.match(scaffold, /useState/);
     assert.equal(isFallbackSkeletonAppContent(scaffold), false);
+    assert.equal(isIncompleteStubAppContent(scaffold), false);
+  });
+
+  it("detects inline stub App shells that never import page modules", () => {
+    const stubApp = `
+import React from "react";
+import { Route, Routes } from "react-router-dom";
+import { Layout } from "./components/Layout";
+
+// Stub pages – these will be replaced once the real page modules are created.
+function DashboardPage() {
+  return <div><h1>Dashboard</h1><p>Welcome to Northstar</p></div>;
+}
+function ProjectsPage() {
+  return <div><h1>Projects</h1><p>Manage your projects here.</p></div>;
+}
+function TasksPage() {
+  return <div><h1>Tasks</h1><p>Manage your tasks here.</p></div>;
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<Layout />}>
+        <Route index element={<DashboardPage />} />
+        <Route path="projects" element={<ProjectsPage />} />
+        <Route path="tasks" element={<TasksPage />} />
+      </Route>
+    </Routes>
+  );
+}
+`.trim();
+    assert.equal(isIncompleteStubAppContent(stubApp), true);
   });
 });

@@ -303,7 +303,12 @@ export async function runGreenfieldGenerate(
   const prompt = buildGreenfieldPrompt(userPrompt);
   const maxOutputTokens = GREENFIELD_MAX_OUTPUT_TOKENS;
 
-  const configuredTimeoutMs = PROVIDER_TIMEOUT_MS.generateGreenfield;
+  const configuredTimeoutMs =
+    userPrompt.length >= 2200
+      ? PROVIDER_TIMEOUT_MS.generateGreenfieldXLarge
+      : userPrompt.length >= 900
+        ? PROVIDER_TIMEOUT_MS.generateGreenfieldLarge
+        : PROVIDER_TIMEOUT_MS.generateGreenfield;
   const providerStart = Date.now();
   const res = await impl.generate(raw, prompt, maxOutputTokens, {
     timeoutMs: configuredTimeoutMs,

@@ -1,4 +1,6 @@
 export * from "@/core/planApply/applyIntent";
+export * from "@/core/planApply/featureSatisfaction";
+export * from "@/core/planApply/coordinatedEditCompletion";
 export * from "@/core/planApply/types";
 export * from "@/core/planApply/resolve";
 export * from "@/core/planApply/stats";
@@ -12,3 +14,4 @@ export * from "@/core/planApply/markedFileParse";
 export * from "@/core/planApply/applyPlanPrompt";
 export * from "@/core/planApply/createFileTargets";
 export * from "@/core/planApply/applyPlanBatchSimulate";
+export * from "@/core/planApply/freshApply";

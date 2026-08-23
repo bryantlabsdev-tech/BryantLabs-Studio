@@ -1,21 +1,30 @@
 /**
  * Operation-specific HTTP timeouts for provider generate calls.
- * Health checks use their own fixed timeouts in gemini.cts / ollama.cts.
+ * Bounded for multi-phase editing — never 10–15 minute single calls.
  */
 
 export const PROVIDER_TIMEOUT_MS = {
   /** Health + Providers panel test prompt. */
   generateTest: 20_000,
   /** AI planning. */
-  generatePlan: 30_000,
-  /** Single-file / small patch proposal. */
-  generatePatchSmall: 60_000,
-  /** Multi-file / large patch proposal. */
-  generatePatch: 120_000,
-  /** Greenfield new-app generation. */
-  generateGreenfield: 120_000,
-  /** Auto-fix / repair patches. */
-  generateRepair: 60_000,
+  generatePlan: 180_000,
+  /** Single-file / small patch proposal (≤3 min). */
+  generatePatchSmall: 180_000,
+  /** Multi-file phase patch proposal (≤3 min). */
+  generatePatch: 180_000,
+  /**
+   * @deprecated Alias kept for callers; same as generatePatch (3 min max).
+   * Large edits must be split into phases instead of raising this budget.
+   */
+  generatePatchXLarge: 180_000,
+  /** Greenfield phase generation (≤3 min per phase). */
+  generateGreenfield: 180_000,
+  /** @deprecated Same as generateGreenfield — use multi-phase instead. */
+  generateGreenfieldLarge: 180_000,
+  /** @deprecated Same as generateGreenfield — use multi-phase instead. */
+  generateGreenfieldXLarge: 180_000,
+  /** Auto-fix / repair patches (≤3 min). */
+  generateRepair: 180_000,
 } as const;
 
 export type ProviderGenerateOperation =
@@ -98,4 +107,43 @@ export function resolveGenerateTimeout(
     }
   }
   return { timeoutMs, operation };
+}
+
+/** Match renderer estimatePromptComplexity for apply-plan HTTP budgets. */
+export function estimatePatchPromptComplexity(
+  prompt: string | null | undefined,
+): "standard" | "large" | "xlarge" {
+  const text = prompt?.trim() ?? "";
+  if (!text) return "standard";
+  const len = text.length;
+  const bullets = (text.match(/^\s*[-*•]/gm) ?? []).length;
+  const featureHits = (
+    text.match(
+      /dashboard|kanban|calendar|persist|theme|import|export|milestone|component/gi,
+    ) ?? []
+  ).length;
+  if (len >= 2200 || bullets >= 12 || featureHits >= 10) return "xlarge";
+  if (len >= 900 || bullets >= 6 || featureHits >= 5) return "large";
+  return "standard";
+}
+
+/**
+ * Phase-sized patch budgets — complexity no longer extends wall time.
+ * Large prompts must be split into phases (see core/editPhases).
+ */
+export function resolveApplyPlanPatchGenerateOpts(
+  userPrompt: string,
+  fileCount: number,
+): { timeoutMs: number; operation: "patch" | "patch_small" } {
+  void userPrompt;
+  if (fileCount > 1) {
+    return {
+      timeoutMs: PROVIDER_TIMEOUT_MS.generatePatch,
+      operation: "patch",
+    };
+  }
+  return {
+    timeoutMs: PROVIDER_TIMEOUT_MS.generatePatchSmall,
+    operation: "patch_small",
+  };
 }

@@ -37,12 +37,18 @@ export function hasProjectScaffoldMarkers(
 export function promptReferencesCurrentApp(prompt: string): boolean {
   const trimmed = prompt.trim();
   if (trimmed.length < 4) return false;
-  return /\b(this|the|current)\s+(app|project|calculator|dashboard|game|component)\b/i.test(
+  if (/\b(this|the|current)\s+(app|project|calculator|dashboard|game|component|application)\b/i.test(
       trimmed,
-    ) ||
+    )) {
+    return true;
+  }
+  return (
     /\bcalculator\b/i.test(trimmed) ||
     /\bhistory\s+(feature|section|panel|list)\b/i.test(trimmed) ||
-    /\badd\s+(calculation\s+)?history\b/i.test(trimmed);
+    /\badd\s+(calculation\s+)?history\b/i.test(trimmed) ||
+    /\bexisting\s+(visual\s+style|features?)\b/i.test(trimmed) ||
+    /\btransform\s+this\s+into\b/i.test(trimmed)
+  );
 }
 
 export function resolveEstablishedProject(input: {

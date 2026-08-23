@@ -30,6 +30,36 @@ const EMPTY_PREVIEW: AppPreviewState = {
   port: null,
 };
 
+export function mergeAppPreviewState(
+  prev: AppPreviewState,
+  state: {
+    url: string | null;
+    running: boolean;
+    root?: string | null;
+    lastSuccessfulPreviewAt?: number | null;
+    port?: number | null;
+  },
+): AppPreviewState {
+  const next: AppPreviewState = {
+    url: state.url,
+    running: state.running,
+    root: state.root ?? prev.root,
+    lastSuccessfulPreviewAt:
+      state.lastSuccessfulPreviewAt ?? prev.lastSuccessfulPreviewAt,
+    port: state.port ?? prev.port,
+  };
+  if (
+    prev.url === next.url &&
+    prev.running === next.running &&
+    prev.root === next.root &&
+    prev.lastSuccessfulPreviewAt === next.lastSuccessfulPreviewAt &&
+    prev.port === next.port
+  ) {
+    return prev;
+  }
+  return next;
+}
+
 /** Preview URL, tab focus, and preview lifecycle state. */
 export function usePreviewWorkspaceState(
   setCenterTab: React.Dispatch<React.SetStateAction<import("@/core/layout/types").CenterTab>>,
@@ -50,14 +80,7 @@ export function usePreviewWorkspaceState(
       lastSuccessfulPreviewAt?: number | null;
       port?: number | null;
     }) => {
-      setAppPreview((prev) => ({
-        url: state.url,
-        running: state.running,
-        root: state.root ?? prev.root,
-        lastSuccessfulPreviewAt:
-          state.lastSuccessfulPreviewAt ?? prev.lastSuccessfulPreviewAt,
-        port: state.port ?? prev.port,
-      }));
+      setAppPreview((prev) => mergeAppPreviewState(prev, state));
     },
     [],
   );

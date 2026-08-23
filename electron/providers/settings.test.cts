@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { sanitizeProviderSettingsInput } from "./settings.cjs";
+import {
+  coerceRawToEnabledProviders,
+  isAllowedOllamaBaseUrl,
+  sanitizeProviderSettingsInput,
+} from "./settings.cjs";
 
 describe("provider settings", () => {
   it("sanitizes groq provider settings input", () => {
@@ -61,5 +65,63 @@ describe("provider settings", () => {
     assert.equal(out.plannerMaxOutputTokens, 12000);
     const clamped = sanitizeProviderSettingsInput({ plannerMaxOutputTokens: 256 });
     assert.equal(clamped.plannerMaxOutputTokens, 1024);
+  });
+
+  it("coerces disabled openrouter settings onto anthropic", () => {
+    const out = coerceRawToEnabledProviders({
+      provider: "openrouter",
+      geminiModel: "gemini-2.5-flash",
+      geminiApiKey: "",
+      ollamaModel: "llama3.2",
+      ollamaBaseUrl: "http://localhost:11434",
+      anthropicModel: "claude-opus-4-6",
+      anthropicApiKey: "sk-ant-test",
+      groqModel: "llama-3.3-70b-versatile",
+      groqApiKey: "",
+      openrouterModel: "anthropic/claude-sonnet-4",
+      openrouterApiKey: "sk-or-test",
+      autoFixMode: "ask",
+      agentMode: "single",
+      backupProvider: "openrouter",
+      plannerProvider: "openrouter",
+      plannerModel: "qwen2.5-coder:7b",
+      coderProvider: "openrouter",
+      coderModel: "qwen2.5-coder:7b",
+      repairProvider: "openrouter",
+      repairModel: "qwen2.5-coder:7b",
+      maxAiCalls: 3,
+      maxRepairAttempts: 3,
+      stopOnProviderLimit: true,
+      askBeforeFallback: true,
+      fileWriteMode: "workspace",
+      plannerMaxOutputTokens: 8192,
+      providerEnabled: {
+        gemini: false,
+        anthropic: true,
+        openrouter: false,
+        groq: false,
+        ollama: false,
+      },
+      costMode: "standard",
+    });
+    assert.equal(out.provider, "anthropic");
+    assert.equal(out.plannerProvider, "anthropic");
+    assert.equal(out.coderProvider, "anthropic");
+    assert.equal(out.backupProvider, null);
+    assert.equal(out.coderModel, "");
+  });
+
+  it("keeps loopback Ollama URLs and drops remote ones", () => {
+    assert.equal(isAllowedOllamaBaseUrl("http://127.0.0.1:11434"), true);
+    assert.equal(isAllowedOllamaBaseUrl("http://localhost:11434"), true);
+    assert.equal(isAllowedOllamaBaseUrl("http://169.254.169.254/"), false);
+    const kept = sanitizeProviderSettingsInput({
+      ollamaBaseUrl: "http://127.0.0.1:11434",
+    });
+    assert.equal(kept.ollamaBaseUrl, "http://127.0.0.1:11434");
+    const dropped = sanitizeProviderSettingsInput({
+      ollamaBaseUrl: "http://169.254.169.254/",
+    });
+    assert.equal(dropped.ollamaBaseUrl, undefined);
   });
 });

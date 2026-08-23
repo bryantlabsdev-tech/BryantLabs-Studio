@@ -34,6 +34,9 @@ export interface PlanningOrchestrationHost {
   readonly aiPlanRef: MutableRefObject<AIPlanResult | null>;
   readonly createPlanErrorRef: MutableRefObject<string | null>;
   readonly editExplorationContentsRef: MutableRefObject<readonly ReferencedFileContent[]>;
+  readonly activeEditorContextRef: MutableRefObject<
+    import("@/core/context/activeEditorContext").ActiveEditorContext | null
+  >;
   readonly setPlan: Dispatch<SetStateAction<Plan | null>>;
   readonly setSessionMemory: Dispatch<SetStateAction<SessionMemorySnapshot>>;
   readonly setSessionMemoryDiagnostics: Dispatch<

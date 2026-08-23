@@ -29,6 +29,7 @@ export function BottomDock() {
     verifyStatus,
     problemsStatus,
     developerConsoleEnabled,
+    dockOpen,
     openDock,
   } = useWorkspace();
 
@@ -37,11 +38,12 @@ export function BottomDock() {
     : BASE_TABS;
 
   useEffect(() => {
-    if (verifyStatus === "running") {
-      openDock();
-      if (dockTab !== "console") setDockTab("verification");
+    if (verifyStatus !== "running") return;
+    if (!dockOpen) openDock();
+    if (dockTab !== "console" && dockTab !== "verification") {
+      setDockTab("verification");
     }
-  }, [verifyStatus, setDockTab, dockTab, openDock]);
+  }, [verifyStatus, setDockTab, dockTab, dockOpen, openDock]);
 
   useEffect(() => {
     if (!developerConsoleEnabled && dockTab === "console") {

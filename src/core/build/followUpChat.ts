@@ -31,6 +31,18 @@ export function loadFollowUpChat(projectPath: string): FollowUpChatMessage[] {
   }
 }
 
+export function mergeFollowUpChat(
+  disk: readonly FollowUpChatMessage[],
+  local: readonly FollowUpChatMessage[],
+): FollowUpChatMessage[] {
+  const byId = new Map<string, FollowUpChatMessage>();
+  for (const message of [...disk, ...local]) {
+    if (!message?.id) continue;
+    byId.set(message.id, message);
+  }
+  return [...byId.values()].sort((a, b) => a.at - b.at).slice(-MAX_MESSAGES);
+}
+
 export function saveFollowUpChat(
   projectPath: string,
   messages: readonly FollowUpChatMessage[],
