@@ -37,6 +37,7 @@ import {
 } from "@/core/planner/aiPlanFailureMessage";
 import type { PlanApplySession } from "@/core/planApply";
 import type { BuildPipelineHost, BuildStatusInput } from "@/app/orchestration/types";
+import { recordFollowUpRunFailure } from "@/app/orchestration/followUpRunFailure";
 
 export function computeBuildStatus(input: BuildStatusInput): BuildLoopStatus {
   const phase = deriveBuildPhase({
@@ -130,7 +131,7 @@ async function executeSingleAgentFollowUp(
   }
   const autoContinue =
     shouldAutoContinueFollowUpApply(trimmed) || !readFollowUpReviewFirst();
-  const applyResult = await host.startApplyPlan({ autoContinue });
+  const applyResult = await host.startApplyPlan({ autoContinue, prompt: trimmed });
   if (applyResult.waitingForReview) {
     recordRunTimelineStage("waiting_for_review", `${applyResult.validReady} file(s)`);
     host.releaseBuildRunForReview?.();
@@ -184,6 +185,7 @@ export async function runSingleAgentBuildLoop(
     scan: host.scan,
     projectPath: host.project.path,
     greenfieldRun: host.greenfieldRun,
+    persistedModifiedFiles: host.sessionMemory.modifiedFiles,
   });
   if (!effectiveScan) {
     callbacks.setBuildError(
@@ -219,12 +221,15 @@ export async function runSingleAgentBuildLoop(
 
   const runBlockReason = host.getAgentRunBlockReason();
   if (runBlockReason) {
+    recordFollowUpRunFailure(host, runBlockReason);
     callbacks.setBuildError(runBlockReason);
     return;
   }
 
   if (host.buildRunning || host.pipelineRunning) {
-    callbacks.setBuildError("A follow-up run is already in progress.");
+    const message = "A follow-up run is already in progress.";
+    recordFollowUpRunFailure(host, message);
+    callbacks.setBuildError(message);
     return;
   }
 
@@ -280,8 +285,7 @@ export async function runSingleAgentBuildLoop(
       const message =
         err instanceof Error ? err.message : "Agent follow-up failed unexpectedly.";
       callbacks.setBuildError(message);
-      host.recordFollowUpFailureMessage?.(message);
-      failRunTimeline(message);
+      recordFollowUpRunFailure(host, message);
     } finally {
       callbacks.setBuildRunning(false);
       host.finalizeFollowUpActivityRun?.();
@@ -307,8 +311,7 @@ export async function runSingleAgentBuildLoop(
     }
 
     callbacks.setBuildError(error);
-    host.recordFollowUpFailureMessage?.(error);
-    failRunTimeline(error);
+    recordFollowUpRunFailure(host, error, "apply_plan");
 
     if (attempt === 0 && host.attemptFollowUpAutoEscalation) {
       const escalated = await host.attemptFollowUpAutoEscalation(error);

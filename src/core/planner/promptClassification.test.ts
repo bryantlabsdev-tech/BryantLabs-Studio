@@ -3,8 +3,11 @@ import { describe, it } from "node:test";
 import { buildUiAuditAdvisoryFixPrompt } from "@/core/agent/uiAuditAdvisoryUx";
 import { recommendationsForUiAuditIssues } from "@/core/agent/uiAuditAdvisoryUx";
 import {
+  hasFunctionalBehaviorRequest,
+  hasVisualStylingRequest,
   isFunctionalFeaturePrompt,
   isGameplayOrLogicPrompt,
+  isMixedFunctionalUiPrompt,
   isUiLayoutPrompt,
   isUiOnlyStylingPrompt,
 } from "@/core/planner/fallback";
@@ -72,5 +75,62 @@ describe("promptClassification", () => {
     assert.equal(isFunctionalFeaturePrompt(lower), false);
     assert.equal(isUiLayoutPrompt(lower), true);
     assert.equal(classifyFollowUpPromptType(prompt), "ui_layout");
+  });
+
+  it("classifies mixed filter + overdue highlight as functional, not styling-only", () => {
+    const prompt =
+      "Add a high-priority-only filter and visually highlight overdue tasks";
+    const lower = prompt.toLowerCase();
+    assert.equal(hasFunctionalBehaviorRequest(lower), true);
+    assert.equal(hasVisualStylingRequest(lower), true);
+    assert.equal(isMixedFunctionalUiPrompt(prompt), true);
+    assert.equal(isFunctionalFeaturePrompt(lower), true);
+    assert.equal(isUiOnlyStylingPrompt(prompt), false);
+    assert.equal(isUiOnlyFollowUpPrompt(prompt), false);
+    assert.equal(classifyFollowUpPromptType(prompt), "functional");
+  });
+
+  it("classifies search box plus yellow matches as mixed/functional", () => {
+    const prompt = "Add a search box and make matches yellow";
+    assert.equal(isMixedFunctionalUiPrompt(prompt), true);
+    assert.equal(isUiOnlyFollowUpPrompt(prompt), false);
+    assert.equal(classifyFollowUpPromptType(prompt), "functional");
+  });
+
+  it("classifies a behavior button plus red styling as mixed/functional", () => {
+    const prompt = "Add a button that clears completed tasks and style it red";
+    assert.equal(isMixedFunctionalUiPrompt(prompt), true);
+    assert.equal(isUiOnlyStylingPrompt(prompt), false);
+    assert.equal(classifyFollowUpPromptType(prompt), "functional");
+  });
+
+  it("classifies restyling an existing button as styling-only", () => {
+    const prompt = "Make the existing button red";
+    assert.equal(isFunctionalFeaturePrompt(prompt.toLowerCase()), false);
+    assert.equal(isMixedFunctionalUiPrompt(prompt), false);
+    assert.equal(isUiOnlyStylingPrompt(prompt), true);
+    assert.equal(isUiOnlyFollowUpPrompt(prompt), true);
+  });
+
+  it("classifies spacing/typography polish as styling-only", () => {
+    const prompt = "Increase spacing and improve typography";
+    assert.equal(isFunctionalFeaturePrompt(prompt.toLowerCase()), false);
+    assert.equal(isUiOnlyStylingPrompt(prompt), true);
+    assert.equal(isUiOnlyFollowUpPrompt(prompt), true);
+  });
+
+  it("classifies filter-by-priority as functional", () => {
+    const prompt = "Filter tasks by priority";
+    assert.equal(isFunctionalFeaturePrompt(prompt.toLowerCase()), true);
+    assert.equal(isMixedFunctionalUiPrompt(prompt), false);
+    assert.equal(isUiOnlyFollowUpPrompt(prompt), false);
+    assert.equal(classifyFollowUpPromptType(prompt), "functional");
+  });
+
+  it("does not let styling words override functional verbs", () => {
+    const prompt =
+      "Add a high-priority-only filter and visually highlight overdue incomplete tasks.";
+    assert.equal(isUiOnlyStylingPrompt(prompt), false);
+    assert.equal(isFunctionalFeaturePrompt(prompt.toLowerCase()), true);
   });
 });

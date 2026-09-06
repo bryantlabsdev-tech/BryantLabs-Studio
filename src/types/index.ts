@@ -408,6 +408,8 @@ export interface BryantLabsApi {
       uiEditMode?: boolean;
     },
   ): Promise<ApplyPlanBatchPatchResult>;
+  /** Apply Plan — JSON-string IPC so Chromium structured-clone cannot hang. */
+  proposeApplyPlanPatchesJson(payloadJson: string): Promise<ApplyPlanBatchPatchResult>;
   /** Phase 13 — targeted repair proposal after verification failure. */
   proposeAutoFix(
     provider: ProviderId,

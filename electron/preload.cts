@@ -190,6 +190,20 @@ const api = {
       symbols,
       planMeta,
     ),
+  proposeApplyPlanPatchesJson: (payloadJson: string) => {
+    if (typeof payloadJson !== "string") {
+      return Promise.resolve({
+        ok: false,
+        provider: "anthropic",
+        model: "",
+        raw: null,
+        latencyMs: 0,
+        error: "proposeApplyPlanPatchesJson requires a JSON string.",
+        missingPaths: [],
+      });
+    }
+    return ipcRenderer.invoke("providers:applyPlanBatchJson", payloadJson);
+  },
   proposeApplyPlanPatches: (
     provider: string,
     prompt: string,

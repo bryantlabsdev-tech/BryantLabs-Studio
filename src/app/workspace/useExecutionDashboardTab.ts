@@ -19,6 +19,8 @@ export function useExecutionDashboardTab(opts: {
   const { centerTab, setCenterTab, greenfieldRun, activeAgentRunId, buildRunning, pipelineRunning } =
     opts;
   const switchStateRef = useRef(INITIAL_EXECUTION_TAB_SWITCH_STATE);
+  const centerTabRef = useRef(centerTab);
+  centerTabRef.current = centerTab;
 
   const runInProgress = resolveRunInProgress({
     greenfieldRun,
@@ -30,18 +32,18 @@ export function useExecutionDashboardTab(opts: {
   useEffect(() => {
     switchStateRef.current = applyUserCenterTabPin(switchStateRef.current, {
       runInProgress,
-      centerTab,
+      centerTab: centerTabRef.current,
     });
   }, [runInProgress, centerTab]);
 
   useEffect(() => {
     const result = evaluateExecutionTabOnRunProgress(switchStateRef.current, {
       runInProgress,
-      centerTab,
+      centerTab: centerTabRef.current,
     });
     switchStateRef.current = result.nextState;
-    if (result.tabToSet && result.tabToSet !== centerTab) {
+    if (result.tabToSet && result.tabToSet !== centerTabRef.current) {
       setCenterTab(result.tabToSet);
     }
-  }, [runInProgress, centerTab, setCenterTab]);
+  }, [runInProgress, setCenterTab]);
 }

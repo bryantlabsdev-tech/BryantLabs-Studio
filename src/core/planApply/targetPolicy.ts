@@ -47,12 +47,44 @@ export function isUiOnlyApplyPrompt(prompt: string): boolean {
   return isUiOnlyFollowUpPrompt(prompt);
 }
 
+/**
+ * Vite/React mount stubs (createRoot + import App). Feature edits belong in App.tsx,
+ * not these bootstrap files — including them causes Missing @@FILE rejections and
+ * false "updating main.tsx" narration.
+ */
+export function isEntryBootstrapPath(relPath: string): boolean {
+  const norm = normalizeRelPath(relPath).toLowerCase();
+  return (
+    norm === "src/main.tsx" ||
+    norm === "src/main.ts" ||
+    norm === "src/main.jsx" ||
+    norm === "src/main.js" ||
+    norm === "src/index.tsx" ||
+    norm === "src/index.ts" ||
+    norm === "src/index.jsx" ||
+    norm === "src/index.js"
+  );
+}
+
+export const ENTRY_BOOTSTRAP_SKIP_MESSAGE =
+  "Not needed for feature edits (entry bootstrap only)";
+
+export const NON_SOURCE_SKIP_MESSAGE =
+  "Not a source file for feature edits";
+
+export function isNonSourceApplyNoise(relPath: string): boolean {
+  const norm = normalizeRelPath(relPath);
+  const base = fileBasename(norm).toLowerCase();
+  return base === ".gitkeep" || base === ".ds_store";
+}
+
 /** Paths eligible for gameplay / feature_addition apply (logic + styling). */
 export function isGameplayPatchTarget(relPath: string): boolean {
   const norm = normalizeRelPath(relPath);
   if (norm === "src/App.tsx" || norm === "src/index.css" || norm === "src/App.css") {
     return true;
   }
+  if (isEntryBootstrapPath(norm)) return false;
   if (!/\.tsx$/i.test(norm)) return false;
   return /sudoku|gameboard|game-board|board|cell|grid|pad|modal|stat/i.test(norm);
 }
@@ -193,6 +225,14 @@ export function filterPlanApplyTargets(
   if (functional) {
     const kept: PlanApplyTargetCandidate[] = [];
     for (const c of candidates) {
+      if (isEntryBootstrapPath(c.relPath)) {
+        skipped.push(`${c.relPath}: ${ENTRY_BOOTSTRAP_SKIP_MESSAGE}`);
+        continue;
+      }
+      if (isNonSourceApplyNoise(c.relPath)) {
+        skipped.push(`${c.relPath}: ${NON_SOURCE_SKIP_MESSAGE}`);
+        continue;
+      }
       if (isBlockedNonUiTarget(c.relPath) && !configAllowed) {
         skipped.push(`${c.relPath}: ${CONFIG_UI_BLOCK_MESSAGE}`);
         continue;
@@ -238,6 +278,10 @@ export function filterPlanApplyTargets(
 
   const kept: PlanApplyTargetCandidate[] = [];
   for (const c of candidates) {
+    if (isEntryBootstrapPath(c.relPath)) {
+      skipped.push(`${c.relPath}: ${ENTRY_BOOTSTRAP_SKIP_MESSAGE}`);
+      continue;
+    }
     if (isBlockedNonUiTarget(c.relPath)) {
       skipped.push(`${c.relPath}: ${CONFIG_UI_BLOCK_MESSAGE}`);
       continue;

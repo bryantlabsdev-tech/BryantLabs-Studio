@@ -65,6 +65,11 @@ export function resolveAgentSubmitRoute(input: {
     };
   }
 
+  const pathMatches =
+    Boolean(input.projectPath) &&
+    (input.greenfieldRun.targetFolder === input.projectPath ||
+      input.greenfieldRun.projectPath === input.projectPath);
+
   return routeAgentPrompt({
     prompt: trimmed,
     projectOpen: input.projectOpen,
@@ -74,8 +79,11 @@ export function resolveAgentSubmitRoute(input: {
     ...(input.modeOverride !== undefined ? { modeOverride: input.modeOverride } : {}),
     filesWritten: input.greenfieldRun.filesWritten,
     previousSuccessfulRun:
-      input.greenfieldRun.runResult === "success" &&
-      input.greenfieldRun.filesWritten.length > 0,
+      pathMatches && input.greenfieldRun.runResult === "success",
+    projectSourceFilesExistOnDisk:
+      pathMatches &&
+      (input.greenfieldRun.filesWritten.length > 0 ||
+        input.greenfieldRun.runResult === "success"),
     greenfieldRecovery,
     greenfieldRecoveryReason: greenfieldRecovery
       ? `failed_greenfield_${recoveryContext?.failedStage ?? recoveryContext?.errorCategory ?? "setup"}`

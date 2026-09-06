@@ -1,4 +1,4 @@
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { useEffectiveGreenfieldRun } from "@/app/workspace/useEffectiveGreenfieldRun";
 import { HistoricalRunBanner } from "@/components/views/HistoricalRunBanner";
 import { GREENFIELD_FILE_PATHS } from "@/core/greenfield";

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { RunCompareModal } from "@/components/views/RunCompareModal";
 
 export function RunCompareModalHost() {

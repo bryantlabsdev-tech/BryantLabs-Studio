@@ -73,6 +73,16 @@ describe("apply intent routing", () => {
     assert.equal(isSmallUiApplyPrompt(prompt), false);
   });
 
+  it("mixed filter + overdue highlight routes to feature_addition, not small_ui", () => {
+    const prompt =
+      "Add a high-priority-only filter and visually highlight overdue incomplete tasks.";
+    const c = classifyApplyIntent(prompt);
+    assert.equal(c.intent, "feature_addition");
+    assert.equal(c.reason, "mixed_functional_ui");
+    assert.equal(isSmallUiApplyPrompt(prompt), false);
+    assert.equal(isUiOnlyApplyPrompt(prompt), false);
+  });
+
   it("gameplay prompt allows App.tsx edits in collectTargets", () => {
     const prompt =
       "Upgrade Sudoku gameplay. Add notes mode, hints, mistake counter, win modal.";

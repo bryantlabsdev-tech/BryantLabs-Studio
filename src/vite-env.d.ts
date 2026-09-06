@@ -29,6 +29,8 @@ interface RoutingIntentState {
 
 interface StudioTestHooks {
   getReadinessState(): StudioReadinessState;
+  getGreenfieldRunSnapshot(): import("@/core/greenfield/runState").GreenfieldRunSnapshot;
+  getFollowUpSettlementDiagnostic(): import("@/core/agent/followUpSettlementDiagnostics").FollowUpSettlementDiagnostic;
   openProjectAt(folderPath: string): Promise<void>;
   getPatchPipelineState(): PatchPipelineState;
   getRoutingState(): RoutingIntentState | null;
@@ -52,6 +54,8 @@ interface StudioReadinessState {
   desktopApiReady: boolean;
   projectPath: string | null;
   scanStatus: string;
+  indexedSourceFileCount: number;
+  effectiveIndexedSourceFileCount: number;
   composerReady: boolean;
   composerBlockReason: string | null;
   centerTab: string;
@@ -73,6 +77,7 @@ interface StudioReadinessState {
 
 interface Window {
   __studioTestHooks?: StudioTestHooks;
+  __studioMaxUpdateDepthErrors?: string[];
 }
 
 declare module "*?worker" {

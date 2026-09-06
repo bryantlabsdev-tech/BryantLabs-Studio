@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { usePreviewAncestorAudit } from "@/hooks/usePreviewAncestorAudit";
 import { usePreviewFrameSize } from "@/hooks/usePreviewFrameSize";
 import { PreviewAncestorAuditPanel } from "@/components/preview/PreviewAncestorAuditPanel";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { EmptyState } from "@/components/EmptyState";
 import { createLatestAction } from "@/core/greenfield/runLog";
 import type {
@@ -16,6 +16,7 @@ import {
   formatViteConfigDiagnosticsCopy,
 } from "@/core/preview/diagnostics";
 import { normalizePreviewUrl } from "@/core/preview/normalizePreviewUrl";
+import { shouldRetryPreviewHttpProbe } from "@/core/preview/reopenPreviewAutostart";
 import { enableAdvancedPreviewControls } from "@/core/preview/viewport";
 import { PreviewViewportControlsBar } from "@/components/preview/PreviewViewportControlsBar";
 
@@ -202,6 +203,32 @@ export function PreviewView() {
     void runProbe(target);
   }, [url, reloadKey, runProbe, displayPort, projectRoot]);
 
+  useEffect(() => {
+    const target = url ?? (displayPort ? defaultPreviewUrl(displayPort) : null);
+    if (
+      !shouldRetryPreviewHttpProbe({
+        running: appPreview.running || studioProcessRunning,
+        url: target,
+        probeOk: probe?.ok === true,
+      })
+    ) {
+      return;
+    }
+    const id = window.setInterval(() => {
+      if (!target) return;
+      setFrameState((prev) => (prev === "failed" ? "loading" : prev));
+      void runProbe(target);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [
+    appPreview.running,
+    studioProcessRunning,
+    url,
+    displayPort,
+    probe?.ok,
+    runProbe,
+  ]);
+
   const httpReady = probe?.ok === true;
   const frameSrc = url ? normalizePreviewUrl(url) : null;
   const showFrame = Boolean(frameSrc && httpReady && frameState !== "failed");
@@ -315,9 +342,9 @@ export function PreviewView() {
     if (!projectRoot || !api?.greenfieldPreviewStart) return;
     if (
       greenfieldRun.actionType === "greenfield" &&
-      greenfieldRun.setupStatus === "error" ||
-      greenfieldRun.setupStatus === "repair_needed" ||
-      greenfieldRun.setupStatus === "repairing"
+      (greenfieldRun.setupStatus === "error" ||
+        greenfieldRun.setupStatus === "repair_needed" ||
+        greenfieldRun.setupStatus === "repairing")
     ) {
       const blocked =
         greenfieldRun.failureReport?.rootCauseLine ??

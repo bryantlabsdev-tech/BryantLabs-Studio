@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { FOLDER_SELECTION_GATE_COPY } from "@/core/agent/folderSelectionGate";
 import { latestPromptsByStage } from "@/core/intelligence/promptVisibility";
 import type { FeasibilityResult } from "@/core/intelligence";

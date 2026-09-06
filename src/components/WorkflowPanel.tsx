@@ -1,4 +1,4 @@
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { RAW_GREENFIELD_MUTEX_MESSAGE } from "@/core/agent/agentRunMutex";
 import { ViewSuspense } from "@/components/ViewSuspense";
 import {

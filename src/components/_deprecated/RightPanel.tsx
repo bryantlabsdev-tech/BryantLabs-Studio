@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { PlanComparisonView } from "@/components/PlanComparisonView";
 import { ProvidersView } from "@/components/views/ProvidersView";
 import { AIPatchView } from "@/components/views/AIPatchView";

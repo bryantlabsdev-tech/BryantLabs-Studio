@@ -50,14 +50,26 @@ export function usePreviewWorkspaceState(
       lastSuccessfulPreviewAt?: number | null;
       port?: number | null;
     }) => {
-      setAppPreview((prev) => ({
-        url: state.url,
-        running: state.running,
-        root: state.root ?? prev.root,
-        lastSuccessfulPreviewAt:
-          state.lastSuccessfulPreviewAt ?? prev.lastSuccessfulPreviewAt,
-        port: state.port ?? prev.port,
-      }));
+      setAppPreview((prev) => {
+        const next = {
+          url: state.url,
+          running: state.running,
+          root: state.root ?? prev.root,
+          lastSuccessfulPreviewAt:
+            state.lastSuccessfulPreviewAt ?? prev.lastSuccessfulPreviewAt,
+          port: state.port ?? prev.port,
+        };
+        if (
+          next.url === prev.url &&
+          next.running === prev.running &&
+          next.root === prev.root &&
+          next.lastSuccessfulPreviewAt === prev.lastSuccessfulPreviewAt &&
+          next.port === prev.port
+        ) {
+          return prev;
+        }
+        return next;
+      });
     },
     [],
   );

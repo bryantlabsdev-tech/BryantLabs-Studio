@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { useEffectiveGreenfieldRun } from "@/app/workspace/useEffectiveGreenfieldRun";
 import { HistoricalRunBanner } from "@/components/views/HistoricalRunBanner";
 import { StudioRunLogInspector } from "@/components/views/StudioRunLogInspector";

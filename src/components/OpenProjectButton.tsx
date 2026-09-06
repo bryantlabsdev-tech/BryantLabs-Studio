@@ -1,4 +1,4 @@
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { FolderOpenIcon } from "@/components/icons";
 
 interface OpenProjectButtonProps {

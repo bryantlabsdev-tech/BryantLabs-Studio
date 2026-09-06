@@ -1,6 +1,6 @@
 import type { MouseEvent } from "react";
 import { useMemo, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import type { AgentRunCardViewModel } from "@/core/agent/agentRunCard";
 import type { AgentRunArtifact } from "@/core/agent/agentRunHistory";
 import {

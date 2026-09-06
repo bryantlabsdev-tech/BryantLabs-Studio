@@ -107,7 +107,7 @@ export function useWorkspacePlanApplyControls(input: {
   );
 
   const startApplyPlan = useCallback(
-    async (opts?: { autoContinue?: boolean }) => {
+    async (opts?: { autoContinue?: boolean; prompt?: string }) => {
       const activePlan = input.planState.planRef.current ?? input.plan;
       const effectiveScan =
         input.project != null
@@ -143,6 +143,7 @@ export function useWorkspacePlanApplyControls(input: {
       return input.executeApplyPlan({
         directRewrite: false,
         ...(opts?.autoContinue !== undefined ? { autoContinue: opts.autoContinue } : {}),
+        ...(opts?.prompt !== undefined ? { prompt: opts.prompt } : {}),
       });
     },
     [input],

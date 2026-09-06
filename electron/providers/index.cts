@@ -48,6 +48,7 @@ import {
   type ApplyPlanBatchPatchMeta,
 } from "./applyPlanPatch.cjs";
 import { filterDirectRewriteFiles } from "./applyPlanPrompt.cjs";
+import { hydrateApplyPlanBatchFiles } from "./applyPlanBatchHydrate.cjs";
 import {
   APPLY_PLAN_PATCH_FORMAT_ERROR,
   normalizeApplyPlanPath,
@@ -677,16 +678,34 @@ export async function runApplyPlanBatchPatch(
   files: readonly PatchTargetFile[],
   meta: ApplyPlanBatchPatchMeta,
 ): Promise<ApplyPlanBatchPatchResult> {
+  const hydrated = hydrateApplyPlanBatchFiles(files);
+  if (!hydrated.ok) {
+    return {
+      ok: false,
+      provider,
+      model: "",
+      raw: null,
+      latencyMs: 0,
+      error: hydrated.error,
+      missingPaths: hydrated.missingPaths,
+    };
+  }
   if (isMockProviderEnabled()) {
-    return mockApplyPlanBatchPatch(provider, userPrompt, files, meta) as ApplyPlanBatchPatchResult;
+    return mockApplyPlanBatchPatch(
+      provider,
+      userPrompt,
+      hydrated.files,
+      meta,
+    ) as ApplyPlanBatchPatchResult;
   }
   const raw = await loadRawSettings();
   const impl = IMPLS[provider];
+  const hydratedFiles = hydrated.files;
   const batchFiles = meta.directRewrite
     ? filterDirectRewriteFiles(
-        files.map((f) => ({ path: f.path, content: f.content })),
+        hydratedFiles.map((f) => ({ path: f.path, content: f.content })),
       ).map((f) => ({ path: f.path, content: f.content }))
-    : [...files];
+    : [...hydratedFiles];
   const targetPaths = batchFiles.map((f) => normalizeApplyPlanPath(f.path));
 
   if (!impl) {

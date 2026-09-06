@@ -1,13 +1,12 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   type PropsWithChildren,
 } from "react";
+import { WorkspaceContext } from "@/app/workspaceContext";
 import type { BryantLabsApi, VerificationResult } from "@/types";
 import {
   buildRepositoryIndex,
@@ -32,6 +31,17 @@ import {
   setRunCheckpointStorePort,
 } from "@/core/runPersistence";
 import { resolveEffectiveProjectScan } from "@/core/agent/resolveEffectiveProjectScan";
+import {
+  createFinalizationWorkKey,
+  decideScanAfterGreenfieldWrites,
+  knownPathsIncludeAppSources,
+  projectScansEquivalent,
+  runCreateFinalizationWorkOnce,
+} from "@/core/agent/greenfieldCreateFinalization";
+import {
+  previewAutostartLatchAfterProjectChange,
+  shouldAutostartPreviewOnReopen,
+} from "@/core/preview/reopenPreviewAutostart";
 import { normalizeProjectMemory } from "@/core/projectMemory/store";
 import {
   EMPTY_PROJECT_MEMORY,
@@ -46,7 +56,7 @@ import {
 import { MemorySuggestionDialog } from "@/components/MemorySuggestionDialog";
 import { ResumeRunDialog } from "@/components/ResumeRunDialog";
 import { ProviderFallbackDialog } from "@/components/ProviderFallbackDialog";
-import { getAgentStartDisabledState } from "@/core/agent/agentReadiness";
+import { countProjectSourceFiles, getAgentStartDisabledState } from "@/core/agent/agentReadiness";
 import { WorkspaceErrorBoundary } from "@/components/WorkspaceErrorBoundary";
 import {
   clearSessionMemory as clearMemoryScope,
@@ -60,6 +70,7 @@ import {
 import type { Patch } from "@/core/editor";
 import {
   executionLogService,
+  executionLogStatesEqual,
   type ExecutionLogState,
 } from "@/core/console/executionLogService";
 import { loadPanelLayout } from "@/core/layout/panelLayout";
@@ -118,7 +129,7 @@ import { useWorkspaceDirectEdit } from "@/app/workspace/useWorkspaceDirectEdit";
 import { useWorkspaceContextValue } from "@/app/workspace/useWorkspaceContextValue";
 import { useProjectProblems } from "@/hooks/useProjectProblems";
 import type { ProjectProblem } from "@/core/diagnostics/projectProblems";
-import type { WorkspaceState, EditStatus } from "@/app/workspace/workspaceState";
+import type { EditStatus } from "@/app/workspace/workspaceState";
 import type { EditTarget } from "@/app/workspace/workspaceState";
 import { useFollowUpChatState } from "@/app/workspace/useFollowUpChatState";
 import { useAgentChatRecording } from "@/app/workspace/useAgentChatRecording";
@@ -147,8 +158,6 @@ import {
 import { setIntelligenceHost } from "@/app/intelligence/intelligenceHost";
 
 type VerifyStatus = "idle" | "running" | "done" | "error";
-
-const WorkspaceContext = createContext<WorkspaceState | null>(null);
 
 function getApi(): BryantLabsApi | undefined {
   return window.bryantlabs;
@@ -366,14 +375,31 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     agentLastExecRef,
   } = useAgentLoopWorkspaceState();
 
+  const [sessionMemory, setSessionMemory] = useState<SessionMemorySnapshot>(
+    emptySessionMemory(),
+  );
+  const sessionMemoryRef = useRef(sessionMemory);
+  sessionMemoryRef.current = sessionMemory;
+
+  const persistedModifiedKey = sessionMemory.modifiedFiles.join("\0");
+  const writtenFilesKey = greenfieldRun.filesWritten.join("\0");
+  const knownSourcePathsRef = useRef<string[]>([]);
+  knownSourcePathsRef.current = [
+    ...greenfieldRun.filesWritten,
+    ...sessionMemory.modifiedFiles,
+  ];
   const effectiveScan = useMemo(
     () =>
       resolveEffectiveProjectScan({
         scan,
         projectPath: project?.path ?? null,
-        greenfieldRun,
+        greenfieldRun: {
+          filesWritten: writtenFilesKey.length > 0 ? writtenFilesKey.split("\0") : [],
+        },
+        persistedModifiedFiles:
+          persistedModifiedKey.length > 0 ? persistedModifiedKey.split("\0") : [],
       }),
-    [scan, project?.path, greenfieldRun],
+    [scan, project?.path, writtenFilesKey, persistedModifiedKey],
   );
 
   const repository = useMemo(
@@ -435,11 +461,6 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
   const followUpRunStartedAtRef = useRef<number | null>(null);
   const followUpActivityRunRef = useRef<FollowUpActivityRun | null>(null);
   const followUpEscalatedRef = useRef(false);
-  const [sessionMemory, setSessionMemory] = useState<SessionMemorySnapshot>(
-    emptySessionMemory(),
-  );
-  const sessionMemoryRef = useRef(sessionMemory);
-  sessionMemoryRef.current = sessionMemory;
   const [sessionMemoryDiagnostics, setSessionMemoryDiagnostics] =
     useState<SessionMemoryDiagnostics | null>(null);
   const {
@@ -762,6 +783,20 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
   const applyScanResult = useCallback(
     (result: import("@/types").ProjectScan) => {
       const enriched = enrichProjectScan(result);
+      const decision = decideScanAfterGreenfieldWrites({
+        scan: enriched,
+        scanStatus: "done",
+        knownSourcePaths: knownSourcePathsRef.current,
+      });
+      if (!decision.acceptAsDone) {
+        setScanStatus("scanning");
+        return;
+      }
+      const prevScan = lastGoodScanRef.current;
+      if (projectScansEquivalent(prevScan, enriched)) {
+        setScanStatus("done");
+        return;
+      }
       lastGoodScanRef.current = enriched;
       setScan(enriched);
       setScanStatus("done");
@@ -776,35 +811,118 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
 
   const runScan = useCallback(async () => {
     if (!api) return;
-    if (!lastGoodScanRef.current) {
-      setScanStatus("scanning");
-    }
-    try {
-      if (api.getProjectIndexStatus) {
-        const indexStatus = await api.getProjectIndexStatus();
-        setProjectIndexStatus(indexStatus);
+    const projectPath = project?.path;
+    const work = async () => {
+      if (!lastGoodScanRef.current) {
+        setScanStatus("scanning");
       }
-      const result = await api.scanProject();
-      if (result) {
-        applyScanResult(result);
-      } else {
-        if (lastGoodScanRef.current) {
+      try {
+        if (api.getProjectIndexStatus) {
+          const indexStatus = await api.getProjectIndexStatus();
+          setProjectIndexStatus(indexStatus);
+        }
+        const known = knownSourcePathsRef.current;
+        const shouldForce =
+          countProjectSourceFiles(lastGoodScanRef.current) === 0 &&
+          knownPathsIncludeAppSources(known);
+        const result =
+          shouldForce && api.rescanProject
+            ? await api.rescanProject()
+            : await api.scanProject();
+        if (result) {
+          applyScanResult(result);
+        } else if (lastGoodScanRef.current) {
           setScan(lastGoodScanRef.current);
           setScanStatus("error");
         } else {
           setScan(null);
           setScanStatus("idle");
         }
+      } catch {
+        if (lastGoodScanRef.current) {
+          setScan(lastGoodScanRef.current);
+        } else {
+          setScan(null);
+        }
+        setScanStatus("error");
       }
-    } catch {
-      if (lastGoodScanRef.current) {
-        setScan(lastGoodScanRef.current);
-      } else {
-        setScan(null);
-      }
-      setScanStatus("error");
+    };
+    if (projectPath) {
+      await runCreateFinalizationWorkOnce(
+        createFinalizationWorkKey("rescan", projectPath, writtenFilesKey),
+        work,
+      );
+      return;
     }
-  }, [api, applyScanResult, setProjectIndexStatus]);
+    await work();
+  }, [api, applyScanResult, project?.path, setProjectIndexStatus, writtenFilesKey]);
+
+  const previewAutostartPathRef = useRef<string | null>(null);
+  const previewAutostartPrevProjectRef = useRef<string | null>(null);
+  useEffect(() => {
+    const projectPath = project?.path ?? null;
+    previewAutostartPathRef.current = previewAutostartLatchAfterProjectChange(
+      previewAutostartPrevProjectRef.current,
+      projectPath,
+      previewAutostartPathRef.current,
+    );
+    previewAutostartPrevProjectRef.current = projectPath;
+    if (!api?.greenfieldPreviewStart || !projectPath) return;
+    if (
+      !shouldAutostartPreviewOnReopen({
+        projectPath,
+        scanStatus,
+        indexedSourceFileCount: countProjectSourceFiles(scan),
+        previewRunning: appPreview.running,
+        startedForProjectPath: previewAutostartPathRef.current,
+        genStatus: greenfieldRun.genStatus,
+        setupStatus: greenfieldRun.setupStatus,
+        buildRunning,
+        pipelineRunning,
+      })
+    ) {
+      return;
+    }
+    previewAutostartPathRef.current = projectPath;
+    void runCreateFinalizationWorkOnce(
+      createFinalizationWorkKey("preview", projectPath, "reopen"),
+      async () => {
+        try {
+          const res = await api.greenfieldPreviewStart(projectPath);
+          if (!res.ok || !res.url) return;
+          let port = 4173;
+          try {
+            const parsed = new URL(res.url).port;
+            if (parsed) port = Number(parsed);
+          } catch {
+            port = 4173;
+          }
+          patchAppPreview({
+            url: res.url,
+            running: true,
+            root: projectPath,
+            lastSuccessfulPreviewAt: Date.now(),
+            port,
+          });
+          requestPreviewTab();
+        } catch {
+          /* latch already set; user can Start Preview */
+        }
+      },
+    );
+  }, [
+    api,
+    project?.path,
+    scan,
+    scanStatus,
+    appPreview.running,
+    greenfieldRun.genStatus,
+    greenfieldRun.setupStatus,
+    buildRunning,
+    pipelineRunning,
+    patchAppPreview,
+    requestPreviewTab,
+  ]);
 
   const directEdit = useWorkspaceDirectEdit({
     api,
@@ -836,7 +954,14 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     if (!api?.onProjectIndexUpdated || !project?.path) return;
     const refreshFromIndex = async () => {
       try {
-        const result = await api.scanProject();
+        const known = knownSourcePathsRef.current;
+        const shouldForce =
+          countProjectSourceFiles(lastGoodScanRef.current) === 0 &&
+          knownPathsIncludeAppSources(known);
+        const result =
+          shouldForce && api.rescanProject
+            ? await api.rescanProject()
+            : await api.scanProject();
         if (result) applyScanResult(result);
         if (api.getProjectIndexStatus) {
           setProjectIndexStatus(await api.getProjectIndexStatus());
@@ -1051,7 +1176,11 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     executionLogService.start();
-    const unsub = executionLogService.subscribe(setDeveloperConsole);
+    const unsub = executionLogService.subscribe((state) => {
+      setDeveloperConsole((prev) =>
+        executionLogStatesEqual(prev, state) ? prev : state,
+      );
+    });
     return () => {
       unsub();
       executionLogService.stop();
@@ -1074,7 +1203,9 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
   }, []);
 
   useEffect(() => {
-    const syncDock = () => setDockOpen(loadPanelLayout().dockOpen);
+    const syncDock = () => {
+      setDockOpen(loadPanelLayout().dockOpen);
+    };
     window.addEventListener("bryantlabs:dock-changed", syncDock);
     return () => window.removeEventListener("bryantlabs:dock-changed", syncDock);
   }, []);
@@ -1968,10 +2099,4 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
 }
 
 export type { WorkspaceState } from "@/app/workspace/workspaceState";
-export function useWorkspace(): WorkspaceState {
-  const ctx = useContext(WorkspaceContext);
-  if (!ctx) {
-    throw new Error("useWorkspace must be used within a WorkspaceProvider");
-  }
-  return ctx;
-}
+export { useWorkspace } from "@/app/workspaceContext";

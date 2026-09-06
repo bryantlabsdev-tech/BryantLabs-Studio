@@ -19,7 +19,7 @@ import {
 } from "@/core/diagnostics/diagnosticReport";
 import { DiagnosticReportActions } from "@/components/views/DiagnosticReportActions";
 import { RunInspectorActions } from "@/components/views/RunInspectorActions";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 
 interface RunHistorySearchProps {
   readonly history: readonly AgentRunArtifact[];

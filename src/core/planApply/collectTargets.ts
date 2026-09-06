@@ -13,14 +13,18 @@ import {
 } from "@/core/planApply/createFileTargets";
 import { resolvePlanFilePath } from "@/core/planApply/resolve";
 import { isGameplayApplyPrompt } from "@/core/planApply/applyIntent";
-import { isFunctionalFeaturePrompt } from "@/core/planner/fallback";
+import { findPrimaryStylesheets, findReactAppEntry, isFunctionalFeaturePrompt, isMixedFunctionalUiPrompt, normalizeRelPath } from "@/core/planner/fallback";
 import {
   buildGameplayAllowlist,
   buildUiOnlyAllowlist,
   CONFIG_UI_BLOCK_MESSAGE,
+  ENTRY_BOOTSTRAP_SKIP_MESSAGE,
+  NON_SOURCE_SKIP_MESSAGE,
   filterPlanApplyTargets,
   isBlockedNonUiTarget,
   isConfigPackageTarget,
+  isEntryBootstrapPath,
+  isNonSourceApplyNoise,
   isUiCorePatchTarget,
   isUiOnlyApplyPrompt,
   SELECTION_REASON,
@@ -147,6 +151,8 @@ export function collectPlanApplyTargets(
       if (!resolved || allowPaths.has(resolved.relPath)) continue;
       if (isBlockedNonUiTarget(resolved.relPath)) {
         skipped.push(`${resolved.relPath}: ${CONFIG_UI_BLOCK_MESSAGE}`);
+      } else if (isEntryBootstrapPath(resolved.relPath)) {
+        skipped.push(`${resolved.relPath}: ${ENTRY_BOOTSTRAP_SKIP_MESSAGE}`);
       } else {
         skipped.push(
           `${resolved.relPath}: Not in UI allowlist (src/App.tsx, src/index.css, src/App.css only)`,
@@ -227,6 +233,14 @@ export function collectPlanApplyTargets(
       skipped.push(`${resolved.relPath}: ${resolved.reason}`);
       continue;
     }
+    if (isEntryBootstrapPath(resolved.relPath)) {
+      skipped.push(`${resolved.relPath}: ${ENTRY_BOOTSTRAP_SKIP_MESSAGE}`);
+      continue;
+    }
+    if (isNonSourceApplyNoise(resolved.relPath)) {
+      skipped.push(`${resolved.relPath}: ${NON_SOURCE_SKIP_MESSAGE}`);
+      continue;
+    }
     if (seen.has(resolved.relPath)) continue;
     seen.add(resolved.relPath);
     candidates.push({
@@ -279,6 +293,48 @@ export function collectPlanApplyTargets(
       if (seenPaths.has(allowed.relPath)) continue;
       seenPaths.add(allowed.relPath);
       targets.push(targetFromCandidate(allowed, scan));
+    }
+  } else if (isFunctionalFeaturePrompt(promptLower)) {
+    const seenPaths = new Set(targets.map((t) => t.relPath));
+    const app = findReactAppEntry(scan);
+    if (app) {
+        const rel = normalizeRelPath(app.path);
+      if (!seenPaths.has(rel) && !isEntryBootstrapPath(rel)) {
+        seenPaths.add(rel);
+        targets.push(
+          targetFromCandidate(
+            {
+              relPath: rel,
+              absPath: app.absPath,
+              selectionReason: SELECTION_REASON.reactEntry,
+              planReason: "Functional behavior belongs in the React app entry",
+            },
+            scan,
+          ),
+        );
+      }
+    }
+    if (isMixedFunctionalUiPrompt(prompt)) {
+      const sheets = findPrimaryStylesheets(scan);
+      const cssFiles = [sheets.indexCss, sheets.appCss].filter(
+        (file): file is { path: string; absPath: string } => Boolean(file),
+      );
+      for (const css of cssFiles) {
+        const rel = normalizeRelPath(css.path);
+        if (seenPaths.has(rel)) continue;
+        seenPaths.add(rel);
+        targets.push(
+          targetFromCandidate(
+            {
+              relPath: rel,
+              absPath: css.absPath,
+              selectionReason: SELECTION_REASON.primaryStylesheet,
+              planReason: "Visual styling requested alongside functional behavior",
+            },
+            scan,
+          ),
+        );
+      }
     }
   }
 
@@ -391,6 +447,7 @@ export function buildNarrowedRetryTargets(
     for (const f of aiPlan!.plan!.files.slice(0, NARROWED_RETRY_MAX)) {
       const resolved = resolvePlanFilePath(f.path, scan);
       if (!resolved) continue;
+      if (isEntryBootstrapPath(resolved.relPath)) continue;
       const selectionReason = "Retry: narrowed to top AI plan files";
       out.push({
         relPath: resolved.relPath,
@@ -412,7 +469,9 @@ export function buildNarrowedRetryTargets(
       sessionMemory: opts.sessionMemory,
       maxFiles: NARROWED_RETRY_MAX,
     });
-    return smart.files.map((f) => {
+    return smart.files
+      .filter((f) => !isEntryBootstrapPath(f.path))
+      .map((f) => {
       const selectionReason = `Retry: smart selection (score ${f.score})`;
       return {
         relPath: f.path,
@@ -431,6 +490,7 @@ export function buildNarrowedRetryTargets(
     .map((f) => {
       const resolved = resolvePlanFilePath(f.path, scan);
       if (!resolved) return null;
+      if (isEntryBootstrapPath(resolved.relPath)) return null;
       return { file: f, resolved };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null)

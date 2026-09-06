@@ -11,8 +11,8 @@ import { commandResultLine } from "@/core/greenfield/runLog";
 import { finalizeOrchestrationAfterApplyPlan } from "@/app/orchestration/applyPlanFinalize";
 import {
   runFollowUpQuickRepairBeforeAutoFix,
-  runFollowUpUiAuditAfterPreview,
 } from "@/app/orchestration/followUpVerifyRepairOrchestration";
+import { schedulePostApplyUiAudit } from "@/app/orchestration/postApplyUiAudit";
 import {
   logPatchApplied,
   logPatchApplyFailed,
@@ -37,7 +37,13 @@ import {
 import { getIntelligenceHost } from "@/app/intelligence/intelligenceHost";
 import type { ApplyPlanOrchestrationHost } from "@/app/orchestration/applyPlanTypes";
 import { formatApplyPlanSuccessLatestAction } from "@/core/orchestration/applyPlanSuccess";
-import { computePlanApplyTotals, validateProposalQuality, validateCreateProposalQuality } from "@/core/planApply";
+import {
+  computePlanApplyTotals,
+  evaluateIncompleteCoordinatedApply,
+  settleIncompleteCoordinatedApply,
+  validateProposalQuality,
+  validateCreateProposalQuality,
+} from "@/core/planApply";
 import { freezePlanApplyFileDiffs } from "@/core/agent/runFileDiffs";
 import { previewDiagnosticsToFailureInfo } from "@/core/preview/diagnostics";
 import {
@@ -99,6 +105,20 @@ export async function applyApprovedPlanFilesOrchestration(
     logPatchApplyFailed(reason);
     resolved.setPlanApplyError(reason);
     return { ok: false, verification: null, applied: [], error: "No approved files" };
+  }
+
+  const incompleteBeforeWrite = evaluateIncompleteCoordinatedApply({
+    prompt: planApplySession.prompt,
+    targetPaths: planApplySession.files.map((f) => f.relPath),
+    files: planApplySession.files,
+  });
+  if (incompleteBeforeWrite.incomplete) {
+    const reason =
+      incompleteBeforeWrite.message ?? "Incomplete patch batch — refusing write.";
+    logPatchApplyFailed(reason);
+    settleIncompleteCoordinatedApply(resolved, incompleteBeforeWrite);
+    resolved.publishFailureReport(buildApplyPlanFailureReport({ applyError: reason }));
+    return { ok: false, verification: null, applied: [], error: reason };
   }
 
   resolved.setPlanApplySession((prev) =>
@@ -529,14 +549,6 @@ export async function applyApprovedPlanFilesOrchestration(
       resolved.appendGreenfieldRunLog("preview", "failed", msg);
     }
 
-    if (previewUrl && verification) {
-      await runFollowUpUiAuditAfterPreview(resolved, {
-        folderPath: project.path,
-        previewUrl,
-        userPrompt: prompt,
-        verification,
-      });
-    }
   }
 
   const failureReport = buildApplyPlanFailureReport({
@@ -576,6 +588,21 @@ export async function applyApprovedPlanFilesOrchestration(
       });
       resolved.updateGreenfieldRun({ failureReport: null });
     }
+  }
+
+  const incompleteApply = evaluateIncompleteCoordinatedApply({
+    prompt,
+    targetPaths: planApplySession.files.map((f) => f.relPath),
+    files: planApplySession.files,
+  });
+  if (incompleteApply.incomplete) {
+    finalOverallOk = false;
+    finalFailureReport = buildApplyPlanFailureReport({
+      applyError: incompleteApply.message,
+      verification: finalVerification,
+      verifyErr,
+      ...(previewInfo ? { previewInfo } : {}),
+    });
   }
 
   if (staleResult("apply and verify")) {
@@ -720,6 +747,29 @@ export async function applyApprovedPlanFilesOrchestration(
 
   if (finalOverallOk && !pipelineMode) {
     resolved.archiveActiveRunContextAfterSuccess?.();
+  }
+
+  if (
+    finalOverallOk &&
+    previewUrl &&
+    finalVerification &&
+    !pipelineMode &&
+    !verifyErr &&
+    resolved.api
+  ) {
+    schedulePostApplyUiAudit(
+      {
+        api: resolved.api,
+        appendGreenfieldRunLog: resolved.appendGreenfieldRunLog,
+        updateGreenfieldRun: resolved.updateGreenfieldRun,
+      },
+      {
+        folderPath: project.path,
+        previewUrl,
+        userPrompt: prompt,
+        verification: finalVerification,
+      },
+    );
   }
 
   return {

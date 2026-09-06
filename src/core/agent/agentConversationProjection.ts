@@ -385,6 +385,7 @@ export function buildAgentConversationProjection(
   }
 
   for (const tool of failureTools) {
+    if (input.summary?.outcome === "success") continue;
     const line = tool.label.startsWith("I ")
       ? tool.label
       : `I couldn't safely apply this edit because ${tool.label.charAt(0).toLowerCase()}${tool.label.slice(1)}.`;

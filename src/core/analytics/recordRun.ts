@@ -222,5 +222,18 @@ export function buildAnalyticsRecord(opts: {
 }
 
 export function analyticsRecordKey(record: StudioAnalyticsRecord): string {
-  return `${record.projectPath ?? "none"}-${record.actionType}-${record.at}-${record.status}`;
+  return `${record.projectPath ?? "none"}-${record.actionType}-${record.status}`;
+}
+
+export function analyticsDedupeKey(
+  snapshot: GreenfieldRunSnapshot,
+  ok: boolean,
+): string {
+  return [
+    snapshot.projectPath ?? "none",
+    snapshot.actionType,
+    String(snapshot.runStartedAt ?? "na"),
+    snapshot.runResult,
+    ok ? "ok" : "fail",
+  ].join("\0");
 }

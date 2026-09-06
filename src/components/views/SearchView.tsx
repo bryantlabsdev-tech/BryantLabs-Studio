@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { SymbolEntry } from "@/types";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { IndexStatus } from "@/components/IndexStatus";
 import { EmptyState } from "@/components/EmptyState";
 

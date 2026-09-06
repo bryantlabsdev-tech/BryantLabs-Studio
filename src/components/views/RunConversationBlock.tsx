@@ -11,7 +11,7 @@ import type { RunFileDiff } from "@/core/agent/runFileDiffs";
 import { AgentExecutionFlow } from "@/components/agent/AgentExecutionFlow";
 import { buildAgentRunFinalSummary } from "@/core/agent/agentLiveActivityTimeline";
 import { resolveDiagnosticReportBundle } from "@/core/diagnostics/diagnosticReport";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 
 export interface RunReviewProps {
   readonly awaiting: boolean;

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { useSelectedAgentArtifact } from "@/app/workspace/useSelectedAgentArtifact";
 import type { AgentRunArtifact } from "@/core/agent/agentRunHistory";
 import { greenfieldSnapshotFromArtifact } from "@/core/agent/artifactObservability";

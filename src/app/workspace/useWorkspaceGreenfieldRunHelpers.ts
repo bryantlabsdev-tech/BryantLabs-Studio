@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { bindRunTimelinePersistence } from "@/core/agent/runTimeline";
 import {
   appendGreenfieldRunEntry,
@@ -52,6 +52,13 @@ export function useWorkspaceGreenfieldRunHelpers(input: {
     return () => bindRunTimelinePersistence(null);
   }, [input.updateGreenfieldRun]);
 
+  const projectPathRef = useRef(input.projectPath);
+  projectPathRef.current = input.projectPath;
+  const panelActiveRef = useRef(input.agentGreenfieldPanelActive);
+  panelActiveRef.current = input.agentGreenfieldPanelActive;
+  const runRef = useRef(input.greenfieldRun);
+  runRef.current = input.greenfieldRun;
+
   const appendGreenfieldRunLog = useCallback(
     (
       stage: GreenfieldRunLogEntry["stage"],
@@ -59,35 +66,33 @@ export function useWorkspaceGreenfieldRunHelpers(input: {
       message: string,
       detailsOrOpts?: string | RunLogEntryOptions,
     ) => {
-      input.setGreenfieldRun((prev) => {
-        const next = appendGreenfieldRunEntry(prev, stage, status, message, detailsOrOpts);
-        if (
-          status === "failed" &&
-          prev.actionType === "greenfield" &&
-          !input.agentGreenfieldPanelActive
-        ) {
-          input.setCenterTab("studioLog");
-        }
-        const details =
-          typeof detailsOrOpts === "string"
-            ? detailsOrOpts
-            : detailsOrOpts?.details;
-        studioEventBus.emit({
-          type: "run.log",
-          timestamp: Date.now(),
-          projectPath: next.projectPath ?? input.projectPath ?? null,
-          runId: "",
-          stage,
-          status,
-          message,
-          ...(details ? { details } : {}),
-          provider: next.provider,
-          model: next.model,
-        });
-        return next;
+      input.setGreenfieldRun((prev) =>
+        appendGreenfieldRunEntry(prev, stage, status, message, detailsOrOpts),
+      );
+      if (
+        status === "failed" &&
+        stage !== "ui_audit" &&
+        !panelActiveRef.current
+      ) {
+        input.setCenterTab("studioLog");
+      }
+      const details =
+        typeof detailsOrOpts === "string" ? detailsOrOpts : detailsOrOpts?.details;
+      const run = runRef.current;
+      studioEventBus.emit({
+        type: "run.log",
+        timestamp: Date.now(),
+        projectPath: run.projectPath ?? projectPathRef.current ?? null,
+        runId: "",
+        stage,
+        status,
+        message,
+        ...(details ? { details } : {}),
+        provider: run.provider,
+        model: run.model,
       });
     },
-    [input],
+    [input.setGreenfieldRun, input.setCenterTab],
   );
 
   const prepareGreenfieldCallBudget = useCallback((settings: ProviderSettings) => {
@@ -169,7 +174,13 @@ export function useWorkspaceGreenfieldRunHelpers(input: {
     });
     input.setAgentGreenfieldPanelActive(false);
     input.recordAgentActivityMessage("Run cancelled. You can try again.");
-  }, [input]);
+  }, [
+    input.greenfieldRunControlRef,
+    input.setGreenfieldRun,
+    input.setAgentGreenfieldPanelActive,
+    input.recordAgentActivityMessage,
+    input.projectPath,
+  ]);
 
   const triggerGreenfieldRepair = useCallback(async () => {
     await input.greenfieldRunControlRef.current?.runRepair?.();

@@ -246,6 +246,20 @@ export function buildAgentToolStream(input: BuildAgentToolStreamInput): AgentToo
       continue;
     }
 
+    if (group === "ui_audit" || entry.stage === "ui_audit") {
+      upsertTool(items, indexById, {
+        id: "run:ui_audit",
+        kind: "run",
+        label:
+          status === "failed"
+            ? `${entry.message.trim() || "UI audit"} (advisory)`
+            : entry.message.trim() || "UI audit",
+        status: status === "failed" ? "success" : status,
+        at,
+      });
+      continue;
+    }
+
     if (entry.status === "failed") {
       const headline =
         card?.failureDetails?.headline ??

@@ -1,4 +1,4 @@
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import type { RailTool } from "@/core/layout/types";
 import {
   FolderIcon,

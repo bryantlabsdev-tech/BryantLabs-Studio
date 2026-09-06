@@ -71,6 +71,40 @@ function deactivateFeed(feed: readonly AgentFeedEntry[]): AgentFeedEntry[] {
   return feed.map((e) => (e.active ? { ...e, active: false } : e));
 }
 
+export function syncAgentSessionFromPipeline(
+  session: AgentWorkspaceSession | null,
+  input: {
+    readonly goal: string | null;
+    readonly phase: string | null;
+    readonly task: string | null;
+    readonly file: string | null;
+    readonly model: string | null;
+    readonly tokens: string | null;
+  },
+): AgentWorkspaceSession | null {
+  if (!session || session.status === "idle") return session;
+  let next = session;
+  if (input.goal || input.phase) {
+    next = patchAgentContext(next, {
+      ...(input.goal ? { goal: input.goal } : {}),
+      ...(input.phase ? { phase: input.phase } : {}),
+    });
+  }
+  if (input.task || input.file) {
+    next = patchAgentContext(next, {
+      ...(input.task ? { task: input.task } : {}),
+      ...(input.file ? { file: input.file } : {}),
+    });
+  }
+  if (input.model || input.tokens) {
+    next = patchAgentContext(next, {
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.tokens ? { tokens: input.tokens } : {}),
+    });
+  }
+  return next;
+}
+
 export function startAgentSession(
   session: AgentWorkspaceSession | null,
   goal: string,
@@ -102,10 +136,15 @@ export function patchAgentContext(
   session: AgentWorkspaceSession,
   patch: Partial<AgentContextSnapshot>,
 ): AgentWorkspaceSession {
-  return {
-    ...session,
-    context: { ...session.context, ...patch },
-  };
+  for (const key of Object.keys(patch) as (keyof AgentContextSnapshot)[]) {
+    if (session.context[key] !== patch[key]) {
+      return {
+        ...session,
+        context: { ...session.context, ...patch },
+      };
+    }
+  }
+  return session;
 }
 
 export function appendAgentFeed(

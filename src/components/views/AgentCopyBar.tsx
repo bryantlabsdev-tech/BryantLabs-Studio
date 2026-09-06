@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { emptyAgentWorkspaceSession } from "@/core/agentWorkspace";
 import {
   buildAgentExportContext,

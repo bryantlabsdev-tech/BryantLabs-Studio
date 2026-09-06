@@ -2,7 +2,10 @@ import type { ProjectScan } from "@/types";
 import type { ProjectMemory } from "@/core/projectMemory/types";
 import type { SessionMemorySnapshot } from "@/core/sessionMemory/types";
 import { rankSmartFiles } from "@/core/fileSelection";
-import type { PlanApplyTargetCandidate } from "@/core/planApply/targetPolicy";
+import {
+  isEntryBootstrapPath,
+  type PlanApplyTargetCandidate,
+} from "@/core/planApply/targetPolicy";
 
 export const SMART_SELECTION_MAX = 8;
 
@@ -31,6 +34,7 @@ export function mergeCandidatesWithSmartSelection(
   const rankedCandidates: PlanApplyTargetCandidate[] = [];
   for (const file of selection.files) {
     if (seen.has(file.path)) continue;
+    if (isEntryBootstrapPath(file.path)) continue;
     seen.add(file.path);
     rankedCandidates.push({
       relPath: file.path,

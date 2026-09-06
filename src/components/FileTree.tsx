@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FileNode, ProjectInfo } from "@/types";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { FileTreeNode } from "@/components/FileTreeNode";
 
 interface FileTreeProps {

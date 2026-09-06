@@ -67,6 +67,11 @@ const FUNCTIONAL_FEATURE_PHRASES = [
   "localstorage",
   "use state",
   "state management",
+  "clear completed",
+  "confirmation dialog",
+  "search box",
+  "event handler",
+  "business logic",
 ] as const;
 
 const FUNCTIONAL_FEATURE_KEYWORDS = [
@@ -76,7 +81,37 @@ const FUNCTIONAL_FEATURE_KEYWORDS = [
   "component",
 ] as const;
 
-export function isFunctionalFeaturePrompt(promptLower: string): boolean {
+const FUNCTIONAL_BEHAVIOR_RE =
+  /\b(filters?|filtering|search(ing|es|ed)?|sort(ing|ed)?|validat(e|ion|ing)|persist(ence|ing)?|localstorage|event handlers?|onclick|usestate|navigation|router|routing|transform(ation|s)?|overdue|due dates?)\b/i;
+
+const NEW_CONTROL_BEHAVIOR_RE =
+  /\b((add|create)\s+(a\s+|an\s+)?([\w-]+\s+){0,4}(button|control|filter|dialog|modal|toggle|checkbox|input)|button that|control that)\b/i;
+
+/** Restyle an existing control — not a new behavior. */
+const APPEARANCE_ONLY_RESTYLE_RE =
+  /\b(make|turn|change|set|recolor|recolour|restyle)\b[\s\S]{0,48}\b(existing|current)?\s*(the\s+)?(button|buttons|text|title|heading|label)s?\b[\s\S]{0,32}\b(red|blue|green|yellow|gold|black|white|pink|orange|purple|color|colour)\b/i;
+
+const VISUAL_STYLING_RE =
+  /\b(visual(ly)?|highlight(s|ed|ing)?|styling|stylesheet|css|theme|typography|spacing|padding|margin|font-size|appearance|look|layout|yellow|gold)\b|\b(color|colour|style|font)\b/i;
+
+const APPEARANCE_ONLY_POLISH_RE =
+  /\b(spacing|typography|kerning|line-height|font-size|padding|margin|letter-spacing)\b/i;
+
+export function hasVisualStylingRequest(promptLower: string): boolean {
+  if (VISUAL_STYLING_RE.test(promptLower)) return true;
+  if (APPEARANCE_ONLY_POLISH_RE.test(promptLower)) return true;
+  if (
+    /\b(blue|red|green|gold|yellow|pink|color|colour|font|margin|padding|rounded|border-radius|shadow|gradient)\b/.test(
+      promptLower,
+    ) &&
+    /\b(button|buttons|ui|style|css|theme|look|appearance|make|turn)\b/.test(promptLower)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function hasLegacyFunctionalFeatureSignal(promptLower: string): boolean {
   for (const phrase of FUNCTIONAL_FEATURE_PHRASES) {
     if (promptLower.includes(phrase)) return true;
   }
@@ -103,6 +138,30 @@ export function isFunctionalFeaturePrompt(promptLower: string): boolean {
     return true;
   }
   return false;
+}
+
+/** New or changed behavior — filters, controls, state, persistence, etc. */
+export function hasFunctionalBehaviorRequest(promptLower: string): boolean {
+  if (APPEARANCE_ONLY_RESTYLE_RE.test(promptLower) && !NEW_CONTROL_BEHAVIOR_RE.test(promptLower)) {
+    return false;
+  }
+  if (hasLegacyFunctionalFeatureSignal(promptLower)) return true;
+  if (FUNCTIONAL_BEHAVIOR_RE.test(promptLower)) return true;
+  if (NEW_CONTROL_BEHAVIOR_RE.test(promptLower)) return true;
+  if (/\b(add|create)\b/.test(promptLower) && /\b(task|todo|item|entry|field)s?\b/.test(promptLower)) {
+    return true;
+  }
+  return false;
+}
+
+export function isFunctionalFeaturePrompt(promptLower: string): boolean {
+  return hasFunctionalBehaviorRequest(promptLower);
+}
+
+/** Functional behavior plus an appearance change — not styling-only. */
+export function isMixedFunctionalUiPrompt(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  return hasFunctionalBehaviorRequest(lower) && hasVisualStylingRequest(lower);
 }
 
 export function isUiLayoutPrompt(promptLower: string): boolean {
@@ -190,8 +249,11 @@ export function isUiOnlyStylingPrompt(prompt: string): boolean {
   if (isGameplayOrLogicPrompt(lower)) return false;
   if (isFunctionalFeaturePrompt(lower)) return false;
   if (isUiLayoutPrompt(lower)) return true;
+  if (APPEARANCE_ONLY_POLISH_RE.test(lower) || APPEARANCE_ONLY_RESTYLE_RE.test(lower)) {
+    return true;
+  }
   if (
-    /\b(blue|red|green|gold|color|colour|font|margin|padding|rounded|border-radius|shadow|gradient)\b/.test(
+    /\b(blue|red|green|gold|yellow|color|colour|font|margin|padding|rounded|border-radius|shadow|gradient)\b/.test(
       lower,
     ) &&
     /\b(button|buttons|ui|style|css|theme|look|appearance)\b/.test(lower)

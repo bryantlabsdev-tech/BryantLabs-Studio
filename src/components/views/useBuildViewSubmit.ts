@@ -24,6 +24,20 @@ import {
   resolveBuildViewSubmitRoute,
   resolveFollowUpSubmitAction,
 } from "@/core/build/buildViewSubmitFlow";
+import {
+  executeFollowUpSubmitAction,
+} from "@/core/agent/followUpExecution";
+import {
+  acquireSubmitOperation,
+  canAcceptGreenfieldCompletion,
+  createSubmitOperationId,
+  markFollowUpAccepted,
+  releaseSubmitOperation,
+  type SubmitOperationGate,
+} from "@/core/agent/followUpSubmitGate";
+import { countProjectSourceFiles } from "@/core/agent/agentReadiness";
+import { resolveEffectiveProjectScan } from "@/core/agent/resolveEffectiveProjectScan";
+import { recordSubmitRoutingDiagnostic } from "@/core/agent/followUpSettlementDiagnostics";
 import { studioEventBus } from "@/core/console/studioEventBus";
 import type { FeasibilityResult } from "@/core/intelligence";
 import type { BuildLoopStatus } from "@/core/build";
@@ -72,6 +86,7 @@ export interface UseBuildViewSubmitInput {
   readonly recordAgentUserMessage: (text: string) => void;
   readonly recordAgentActivityMessage: (text: string) => void;
   readonly providerStatus: { provider?: string; model?: string } | null;
+  readonly rescan?: () => Promise<void>;
 }
 
 export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
@@ -101,8 +116,17 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
   const [providerSettings, setProviderSettings] = useState<ProviderSettings | null>(null);
 
   const pendingFolderResumeRef = useRef<PendingFolderResume | null>(null);
+  const pendingRescanFollowUpRef = useRef<{
+    prompt: string;
+    route: Pick<RouteAgentPromptResult, "execution" | "intent">;
+  } | null>(null);
   const submitLockRef = useRef(false);
   const activeSubmitPromptRef = useRef<string | null>(null);
+  const submitGateRef = useRef<SubmitOperationGate>({
+    inFlightOperationId: null,
+    followUpAccepted: false,
+  });
+  const activeOperationIdRef = useRef<string | null>(null);
   const api = window.bryantlabs;
 
   useEffect(() => {
@@ -157,6 +181,7 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
   const releaseSubmitLock = useCallback(() => {
     submitLockRef.current = false;
     activeSubmitPromptRef.current = null;
+    releaseSubmitOperation(submitGateRef.current);
   }, []);
 
   useEffect(() => {
@@ -233,6 +258,9 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
   const startFollowUpRun = useCallback(
     (trimmed: string, route: Pick<RouteAgentPromptResult, "execution" | "intent">) => {
       const effectivePrompt = prompt.trim().length >= 4 ? prompt.trim() : trimmed;
+      const projectFilesExistOnDisk =
+        input.greenfieldRun.filesWritten.length > 0 ||
+        input.greenfieldRun.runResult === "success";
       const action = resolveFollowUpSubmitAction({
         hasProject: input.hasProject,
         routeExecution: route.execution,
@@ -243,35 +271,50 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
           ? { fallbackSourceFileCount: greenfieldFallbackCount }
           : {}),
         filesWritten: input.greenfieldRun.filesWritten,
+        projectSourceFilesExistOnDisk: projectFilesExistOnDisk,
+        previousSuccessfulRun: input.greenfieldRun.runResult === "success",
       });
+
+      markFollowUpAccepted(submitGateRef.current);
+      setLastAgentIntent(route.intent);
+      setGreenfieldMode(false);
+      setGreenfieldRecoveryMode(false);
+      setGreenfieldPrompt("");
 
       if (action.kind === "no_project") {
         setFolderSelectionGate({ pendingPrompt: trimmed });
         return;
       }
-      if (action.kind === "greenfield" || action.kind === "greenfield_recovery") {
-        setGreenfieldRecoveryMode(action.kind === "greenfield_recovery");
-        setGreenfieldPrompt(trimmed);
-        setGreenfieldMode(true);
-        return;
-      }
-      if (action.kind === "blocked_scan") {
-        setBlockedMessage(action.reason);
-        return;
-      }
-      if (action.greenfieldBlockedByRoute) {
-        input.appendGreenfieldRunLog(
-          "pipeline",
-          "success",
-          GREENFIELD_BLOCKED_BY_ROUTE_LABEL,
-          GREENFIELD_BLOCKED_BY_ROUTE_DETAIL,
-        );
-      }
-      setLastAgentIntent(route.intent);
-      if (action.kind === "agent_loop" || action.kind === "build_loop") {
-        void input.startAgent(effectivePrompt);
-        return;
-      }
+
+      executeFollowUpSubmitAction(action, effectivePrompt, {
+        startGreenfield: (followUpPrompt) => {
+          setGreenfieldRecoveryMode(action.kind === "greenfield_recovery");
+          setGreenfieldPrompt(followUpPrompt);
+          setGreenfieldMode(true);
+        },
+        startBuildLoop: (followUpPrompt) => {
+          if (action.kind === "build_loop" && action.greenfieldBlockedByRoute) {
+            input.appendGreenfieldRunLog(
+              "pipeline",
+              "success",
+              GREENFIELD_BLOCKED_BY_ROUTE_LABEL,
+              GREENFIELD_BLOCKED_BY_ROUTE_DETAIL,
+            );
+          }
+          void input.runBuildLoop(followUpPrompt);
+        },
+        startAgent: (followUpPrompt) => {
+          void input.startAgent(followUpPrompt);
+        },
+        requestRescan: () => {
+          pendingRescanFollowUpRef.current = { prompt: effectivePrompt, route };
+          setBlockedMessage("Waiting for project scan to finish…");
+          void input.rescan?.();
+        },
+        block: (reason) => {
+          setBlockedMessage(reason);
+        },
+      });
     },
     [prompt, input, emptyProjectFolder, greenfieldFallbackCount],
   );
@@ -286,13 +329,50 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
 
   const proceedWithSubmit = useCallback(
     (trimmed: string, route: RouteAgentPromptResult) => {
+      const operationId = createSubmitOperationId("submit");
+      const acquired = acquireSubmitOperation(submitGateRef.current, operationId);
+      if (!acquired.ok) {
+        if (acquired.reason === "duplicate") return;
+        setSubmissionError("A run is already in progress. Wait for it to finish.");
+        return;
+      }
       if (submitLockRef.current) {
         if (activeSubmitPromptRef.current === trimmed) return;
+        releaseSubmitOperation(submitGateRef.current, operationId);
         setSubmissionError("A run is already in progress. Wait for it to finish.");
         return;
       }
       submitLockRef.current = true;
       activeSubmitPromptRef.current = trimmed;
+      activeOperationIdRef.current = operationId;
+
+      const effectiveScan = resolveEffectiveProjectScan({
+        scan: input.scan,
+        projectPath: input.projectPath,
+        greenfieldRun: input.greenfieldRun,
+        persistedModifiedFiles: input.sessionMemory.modifiedFiles,
+      });
+      const isFollowUp =
+        route.execution === "build_loop" ||
+        route.intent === "follow_up" ||
+        input.greenfieldRun.runResult === "success";
+      recordSubmitRoutingDiagnostic({
+        projectPath: input.projectPath,
+        indexedSourceFileCount: countProjectSourceFiles(input.scan),
+        promptLength: trimmed.length,
+        isFollowUp,
+        submitEventId: operationId,
+        activeRunId: input.activeAgentRunId,
+        greenfieldStatus: input.greenfieldRun.runResult,
+        currentActionType: input.greenfieldRun.actionType,
+        selectedRoutingDecision: route.decision.selectedRoute,
+        routingReason: route.reason,
+        scanStatus: input.scanStatus,
+        effectiveProjectScanSourceCount: countProjectSourceFiles(effectiveScan),
+        projectFilesExistOnDisk:
+          input.greenfieldRun.filesWritten.length > 0 ||
+          input.greenfieldRun.runResult === "success",
+      });
 
       logBuildViewSubmitAccepted(flowInput(trimmed), route);
       setBlockedMessage(null);
@@ -318,6 +398,10 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
         return;
       }
       if (gate.kind === "greenfield") {
+        if (input.greenfieldRun.runResult === "success") {
+          startFollowUpRun(gate.prompt, { execution: "build_loop", intent: "follow_up" });
+          return;
+        }
         if (!gate.recovery) input.clearRunContextForNewSubmit();
         input.recordAgentActivityMessage(
           route.activityNote ??
@@ -439,6 +523,9 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     setFolderPickerError(null);
     setFolderPickerBusy(false);
     pendingFolderResumeRef.current = null;
+    pendingRescanFollowUpRef.current = null;
+    submitGateRef.current = { inFlightOperationId: null, followUpAccepted: false };
+    activeOperationIdRef.current = null;
     setGreenfieldMode(false);
     setGreenfieldRecoveryMode(false);
     setGreenfieldPrompt("");
@@ -518,6 +605,34 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     resumePendingFolderPrompt();
   }, [input.hasProject, input.scanStatus, input.projectPath, resumePendingFolderPrompt]);
 
+  useEffect(() => {
+    const pending = pendingRescanFollowUpRef.current;
+    if (!pending) return;
+    const ready =
+      countProjectSourceFiles(input.scan) > 0 ||
+      (greenfieldFallbackCount ?? 0) > 0 ||
+      input.greenfieldRun.filesWritten.length > 0;
+    if (!ready) return;
+    if (input.scanStatus === "scanning") return;
+    pendingRescanFollowUpRef.current = null;
+    setBlockedMessage(null);
+    startFollowUpRun(pending.prompt, pending.route);
+  }, [
+    input.scan,
+    input.scanStatus,
+    input.greenfieldRun.filesWritten.length,
+    greenfieldFallbackCount,
+    startFollowUpRun,
+  ]);
+
+  const acceptGreenfieldCompletion = useCallback((): boolean => {
+    return canAcceptGreenfieldCompletion({
+      completingOperationId: activeOperationIdRef.current ?? "greenfield",
+      activeOperationId: activeOperationIdRef.current,
+      followUpAccepted: submitGateRef.current.followUpAccepted,
+    });
+  }, []);
+
   return {
     prompt,
     setPrompt,
@@ -573,6 +688,7 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     proceedAfterFeasibility,
     proceedAfterClarity,
     releaseSubmitLock,
+    acceptGreenfieldCompletion,
     resolveFolderGateCancel,
     planPendingFolderResume,
     shouldResumePendingPrompt,

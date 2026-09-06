@@ -1,4 +1,4 @@
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { PlanView } from "@/components/PlanView";
 import { AIPlanView } from "@/components/AIPlanView";
 import { PlanApplyReview } from "@/components/PlanApplyReview";

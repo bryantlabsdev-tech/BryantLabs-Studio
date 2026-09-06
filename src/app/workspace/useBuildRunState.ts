@@ -1,6 +1,12 @@
 import { useCallback, useRef, useState } from "react";
 import { logRunFailureFromSnapshot, resetRunFailureLogDedupe } from "@/core/agent/runFailureDiagnostics";
-import { emptyGreenfieldRun, appendGreenfieldRunEntry, type GreenfieldRunSnapshot } from "@/core/greenfield/runState";
+import {
+  emptyGreenfieldRun,
+  appendGreenfieldRunEntry,
+  applyGreenfieldRunUpdate,
+  greenfieldRunSnapshotsEqual,
+  type GreenfieldRunSnapshot,
+} from "@/core/greenfield/runState";
 import type { GreenfieldRunLogEntry } from "@/core/greenfield/runLog";
 
 export interface BuildRunWorkspaceState {
@@ -10,7 +16,11 @@ export interface BuildRunWorkspaceState {
     cancel: () => void;
     runRepair?: () => Promise<void>;
   } | null>;
-  readonly updateGreenfieldRun: (patch: Partial<GreenfieldRunSnapshot>) => void;
+  readonly updateGreenfieldRun: (
+    patch:
+      | Partial<GreenfieldRunSnapshot>
+      | ((prev: GreenfieldRunSnapshot) => Partial<GreenfieldRunSnapshot>),
+  ) => void;
   readonly resetGreenfieldRun: () => void;
   readonly appendGreenfieldRunLog: (
     stage: GreenfieldRunLogEntry["stage"],
@@ -22,25 +32,43 @@ export interface BuildRunWorkspaceState {
 
 /** Greenfield run snapshot and control refs. */
 export function useBuildRunWorkspaceState(): BuildRunWorkspaceState {
-  const [greenfieldRun, setGreenfieldRun] = useState(emptyGreenfieldRun());
+  const [greenfieldRun, setGreenfieldRunState] = useState(emptyGreenfieldRun());
   const greenfieldRunControlRef = useRef<{
     cancel: () => void;
     runRepair?: () => Promise<void>;
   } | null>(null);
 
-  const updateGreenfieldRun = useCallback((patch: Partial<GreenfieldRunSnapshot>) => {
-    setGreenfieldRun((prev) => {
-      const next = { ...prev, ...patch };
-      if (next.runResult === "failed" && prev.runResult !== "failed") {
-        logRunFailureFromSnapshot(next);
-      }
-      return next;
-    });
-  }, []);
+  const setGreenfieldRun = useCallback<React.Dispatch<React.SetStateAction<GreenfieldRunSnapshot>>>(
+    (action) => {
+      setGreenfieldRunState((prev) => {
+        const next = typeof action === "function" ? action(prev) : action;
+        return greenfieldRunSnapshotsEqual(prev, next) ? prev : next;
+      });
+    },
+    [],
+  );
+
+  const updateGreenfieldRun = useCallback(
+    (
+      patch:
+        | Partial<GreenfieldRunSnapshot>
+        | ((prev: GreenfieldRunSnapshot) => Partial<GreenfieldRunSnapshot>),
+    ) => {
+      setGreenfieldRunState((prev) => {
+        const next = applyGreenfieldRunUpdate(prev, patch);
+        if (next === prev) return prev;
+        if (next.runResult === "failed" && prev.runResult !== "failed") {
+          logRunFailureFromSnapshot(next);
+        }
+        return next;
+      });
+    },
+    [],
+  );
 
   const resetGreenfieldRun = useCallback(() => {
     resetRunFailureLogDedupe();
-    setGreenfieldRun(emptyGreenfieldRun());
+    setGreenfieldRunState(emptyGreenfieldRun());
   }, []);
 
   const appendGreenfieldRunLog = useCallback(
@@ -50,7 +78,7 @@ export function useBuildRunWorkspaceState(): BuildRunWorkspaceState {
       message: string,
       details?: string,
     ) => {
-      setGreenfieldRun((prev) =>
+      setGreenfieldRunState((prev) =>
         appendGreenfieldRunEntry(prev, stage, status, message, details),
       );
     },

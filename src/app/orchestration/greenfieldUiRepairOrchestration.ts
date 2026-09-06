@@ -23,6 +23,10 @@ import { createLatestAction } from "@/core/greenfield/runLog";
 import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
 import type { GreenfieldSetupResult } from "@/core/greenfield/types";
 import type { BryantLabsApi } from "@/types";
+import {
+  createFinalizationWorkKey,
+  runCreateFinalizationWorkOnce,
+} from "@/core/agent/greenfieldCreateFinalization";
 
 export interface GreenfieldUiRepairHost {
   readonly api: BryantLabsApi;
@@ -279,6 +283,16 @@ async function applyDeterministicUiRepair(
 }
 
 export async function runGreenfieldUiAuditAndRepair(
+  host: GreenfieldUiRepairHost,
+  input: GreenfieldUiAuditAndRepairInput,
+): Promise<GreenfieldUiAuditAndRepairResult> {
+  return runCreateFinalizationWorkOnce(
+    createFinalizationWorkKey("ui_audit", input.folderPath, input.previewUrl),
+    () => runGreenfieldUiAuditAndRepairOnce(host, input),
+  );
+}
+
+async function runGreenfieldUiAuditAndRepairOnce(
   host: GreenfieldUiRepairHost,
   input: GreenfieldUiAuditAndRepairInput,
 ): Promise<GreenfieldUiAuditAndRepairResult> {

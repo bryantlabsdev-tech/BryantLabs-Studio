@@ -25,7 +25,45 @@ export type FollowUpSubmitAction =
       readonly kind: "agent_loop";
       readonly greenfieldBlockedByRoute: boolean;
     }
-  | { readonly kind: "blocked_scan"; readonly reason: string };
+  | { readonly kind: "blocked_scan"; readonly reason: string }
+  | { readonly kind: "wait_for_rescan"; readonly reason: string };
+
+export interface FollowUpSubmitHandlers {
+  readonly startGreenfield: (prompt: string) => void;
+  readonly startBuildLoop: (prompt: string) => void;
+  readonly startAgent: (prompt: string) => void;
+  readonly requestRescan: () => void;
+  readonly block: (reason: string) => void;
+}
+
+/** Dispatch a resolved follow-up action. Greenfield is never started for edit routes. */
+export function executeFollowUpSubmitAction(
+  action: FollowUpSubmitAction,
+  prompt: string,
+  handlers: FollowUpSubmitHandlers,
+): void {
+  switch (action.kind) {
+    case "greenfield":
+    case "greenfield_recovery":
+      handlers.startGreenfield(prompt);
+      return;
+    case "build_loop":
+      handlers.startBuildLoop(prompt);
+      return;
+    case "agent_loop":
+      handlers.startAgent(prompt);
+      return;
+    case "wait_for_rescan":
+      handlers.requestRescan();
+      return;
+    case "blocked_scan":
+      handlers.block(action.reason);
+      return;
+    case "no_project":
+      handlers.block("Open a project folder before requesting changes.");
+      return;
+  }
+}
 
 export function routeExecutionFromDecision(
   decision: AgentRouteDecisionTrace | null | undefined,
@@ -74,6 +112,8 @@ export function resolveFollowUpSubmitAction(input: {
   readonly scanStatus: AgentScanStatus;
   readonly fallbackSourceFileCount?: number;
   readonly filesWritten?: readonly string[];
+  readonly projectSourceFilesExistOnDisk?: boolean;
+  readonly previousSuccessfulRun?: boolean;
   /** When omitted, reads `readUseAgentLoopForEdits()` (default on). */
   readonly useAgentLoopForEdits?: boolean;
 }): FollowUpSubmitAction {
@@ -82,6 +122,17 @@ export function resolveFollowUpSubmitAction(input: {
   }
 
   if (input.routeExecution === "blocked") {
+    if (
+      (input.scanStatus === "scanning" || input.scanStatus === "idle") &&
+      (input.projectSourceFilesExistOnDisk ||
+        input.previousSuccessfulRun ||
+        (input.filesWritten?.length ?? 0) > 0)
+    ) {
+      return {
+        kind: "wait_for_rescan",
+        reason: "Waiting for project scan to finish…",
+      };
+    }
     return {
       kind: "blocked_scan",
       reason: "Prompt could not be routed.",
@@ -89,6 +140,17 @@ export function resolveFollowUpSubmitAction(input: {
   }
 
   if (input.routeExecution === "greenfield") {
+    if (
+      input.projectSourceFilesExistOnDisk ||
+      input.previousSuccessfulRun ||
+      (input.fallbackSourceFileCount ?? 0) > 0 ||
+      (input.filesWritten?.length ?? 0) > 0
+    ) {
+      return {
+        kind: "wait_for_rescan",
+        reason: "Waiting for project scan to finish…",
+      };
+    }
     return { kind: "greenfield" };
   }
 

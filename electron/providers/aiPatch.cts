@@ -51,6 +51,7 @@ export interface PatchSymbol {
 export interface PatchTargetFile {
   path: string;
   content: string;
+  absPath?: string;
 }
 
 export interface AIPatchProposal {

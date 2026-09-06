@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { EmptyState } from "@/components/EmptyState";
 
 const EXAMPLES = ["Add dark mode", "Create login page", "Fix navbar spacing"];

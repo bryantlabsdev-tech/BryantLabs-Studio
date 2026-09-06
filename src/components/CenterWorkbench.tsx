@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { useAgentRunViewModel } from "@/app/workspace/useAgentRunViewModel";
 import { useExecutionDashboardTab } from "@/app/workspace/useExecutionDashboardTab";
+import {
+  evaluateWorkbenchAutoTab,
+  INITIAL_WORKBENCH_AUTO_TAB_STATE,
+} from "@/app/workspace/workbenchAutoTabPolicy";
 import type { CenterTab } from "@/core/layout/types";
 import { EditorPanel } from "@/components/EditorPanel";
 import { DiffView } from "@/components/editor/DiffView";
@@ -77,6 +81,7 @@ export function CenterWorkbench() {
     activeAgentRunId,
     buildRunning,
     pipelineRunning,
+    inspectorSession,
     lockInspectorRun,
     setCenterInspectorActive,
     projectIntelligence,
@@ -112,36 +117,26 @@ export function CenterWorkbench() {
   useEffect(() => {
     if (centerTab === "inspector") {
       const runId = activeAgentRunId ?? greenfieldRun.runTimeline?.runId ?? null;
-      setCenterInspectorActive(runId);
-      if (runId) lockInspectorRun(runId);
+      if (!inspectorSession.centerInspectorActive) {
+        setCenterInspectorActive(runId);
+      }
+      if (runId && inspectorSession.lockedRunId !== runId) {
+        lockInspectorRun(runId);
+      }
       return;
     }
-    setCenterInspectorActive(null);
+    if (inspectorSession.centerInspectorActive) {
+      setCenterInspectorActive(null);
+    }
   }, [
     activeAgentRunId,
     centerTab,
     greenfieldRun.runTimeline?.runId,
+    inspectorSession.centerInspectorActive,
+    inspectorSession.lockedRunId,
     lockInspectorRun,
     setCenterInspectorActive,
   ]);
-
-  useEffect(() => {
-    if (runStatus.isActive) return;
-    if (previewTabNonce > 0) setCenterTab("preview");
-  }, [previewTabNonce, setCenterTab, runStatus.isActive]);
-
-  useEffect(() => {
-    if (runStatus.isActive) return;
-    if (reviewing && pendingPatch) setCenterTab("diff");
-  }, [reviewing, pendingPatch, setCenterTab, runStatus.isActive]);
-
-  useEffect(() => {
-    if (planApplySession?.phase !== "waiting_for_review") return;
-    const ready = planApplySession.files.some(
-      (f) => f.status === "ready" && f.diffStats?.changed,
-    );
-    if (ready) setCenterTab("diff");
-  }, [planApplySession, setCenterTab]);
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -184,15 +179,35 @@ export function CenterWorkbench() {
         })()
       : null;
 
+  const hasAiPatchForEditor = Boolean(aiPatchForEditor);
+  const reviewingPendingPatch = Boolean(reviewing && pendingPatch);
+  const planApplyReadyForReview =
+    (planApplySession?.phase === "waiting_for_review" ||
+      planApplySession?.phase === "review") &&
+    planApplyChangedFiles.length > 0;
+  const autoTabStateRef = useRef(INITIAL_WORKBENCH_AUTO_TAB_STATE);
+  const centerTabRef = useRef(centerTab);
+  centerTabRef.current = centerTab;
   useEffect(() => {
-    if (runStatus.isActive) return;
-    if (aiPatchForEditor) setCenterTab("diff");
-  }, [aiPatchForEditor, runStatus.isActive, setCenterTab]);
-
-  useEffect(() => {
-    if (aiPatchApplyStatus !== "applied") return;
-    setCenterTab("editor");
-  }, [aiPatchApplyStatus, setCenterTab]);
+    const result = evaluateWorkbenchAutoTab(autoTabStateRef.current, {
+      previewTabNonce,
+      reviewingPendingPatch,
+      planApplyReadyForReview,
+      aiPatchForEditor: hasAiPatchForEditor,
+      aiPatchApplied: aiPatchApplyStatus === "applied",
+    });
+    autoTabStateRef.current = result.nextState;
+    if (result.tabToSet && result.tabToSet !== centerTabRef.current) {
+      setCenterTab(result.tabToSet);
+    }
+  }, [
+    aiPatchApplyStatus,
+    hasAiPatchForEditor,
+    planApplyReadyForReview,
+    previewTabNonce,
+    reviewingPendingPatch,
+    setCenterTab,
+  ]);
 
   const overflowActive = OVERFLOW_TAB_IDS.has(centerTab);
 

@@ -1,3 +1,5 @@
+import { isMixedFunctionalUiPrompt } from "@/core/planner/fallback";
+
 export type RequirementType =
   | "feature"
   | "page"
@@ -214,8 +216,19 @@ function parseColonLine(line: string): {
   return { parent, values: values.length > 0 ? values : [rhs], rhs };
 }
 
+function mixedEditSegments(prompt: string): string[] | null {
+  if (!isMixedFunctionalUiPrompt(prompt)) return null;
+  const trimmed = prompt.trim();
+  if (trimmed.length > 280 || /\n/.test(trimmed)) return null;
+  const parts = trimmed
+    .split(/\s+and\s+/i)
+    .map((part) => part.replace(/[.!?]+$/g, "").trim())
+    .filter((part) => part.length >= 3);
+  return parts.length === 2 ? parts : null;
+}
+
 export function extractPromptRequirements(prompt: string): ExtractedRequirement[] {
-  const segments = segmentPrompt(prompt);
+  const segments = mixedEditSegments(prompt) ?? segmentPrompt(prompt);
   const requirements: ExtractedRequirement[] = [];
   const seen = new Set<string>();
   let sectionParent: string | undefined;

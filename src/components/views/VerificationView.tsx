@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { CommandResult, VerificationResult } from "@/types";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { EmptyState } from "@/components/EmptyState";
 import { deriveVerificationProblems } from "@/core/diagnostics/verificationProblems";
 

@@ -76,6 +76,7 @@ export function createPlanOrchestration(
     scan: host.scan,
     projectPath: host.project?.path ?? null,
     greenfieldRun: host.greenfieldRun,
+    persistedModifiedFiles: host.sessionMemory.modifiedFiles,
   });
   if (!effectiveScan) {
     host.createPlanErrorRef.current = "Project scan not available.";
@@ -344,6 +345,7 @@ export async function runAIPlanOrchestration(
           scan: host.scan,
           projectPath: host.project.path,
           ...(host.greenfieldRun ? { greenfieldRun: host.greenfieldRun } : {}),
+          persistedModifiedFiles: host.sessionMemory.modifiedFiles,
         })
       : null;
 
@@ -742,6 +744,7 @@ export async function executeAIPlanForPromptOrchestration(
           scan: host.scan,
           projectPath: host.project.path,
           greenfieldRun: host.greenfieldRun,
+          persistedModifiedFiles: host.sessionMemory.modifiedFiles,
         })
       : null;
   if (!host?.api || !effectiveScan) return null;

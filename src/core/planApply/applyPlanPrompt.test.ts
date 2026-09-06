@@ -42,6 +42,24 @@ describe("Apply Plan prompts", () => {
     assert.ok(!prompt.includes("package.json"));
   });
 
+  it("includes mixed-request coverage without dropping the functional half", () => {
+    const prompt = buildApplyPlanBatchPatchPrompt({
+      userPrompt:
+        "Add a high-priority-only filter and visually highlight overdue incomplete tasks.",
+      planSummary: "Filter + overdue highlight",
+      files: [
+        { path: "src/App.tsx", content: "export default function App() {}" },
+        { path: "src/index.css", content: "body {}" },
+      ],
+      mode: "standard",
+    });
+    assert.match(prompt, /REQUIREMENT COVERAGE/);
+    assert.match(prompt, /filter state/);
+    assert.match(prompt, /overdue detection/);
+    assert.match(prompt, /visual styling/);
+    assert.match(prompt, /Preserve existing features/);
+  });
+
   it("repair prompt includes prior model output and original files", () => {
     const prompt = buildApplyPlanBatchPatchPrompt({
       userPrompt: "Make calculator UI premium",

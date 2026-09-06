@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import {
   PROVIDERS,
   getProviderInfo,
@@ -64,6 +64,15 @@ import { runGreenfieldGenerateWithReliability } from "@/core/greenfield/generate
 import { emitGreenfieldConsoleEvent } from "@/core/console/greenfieldConsoleEvents";
 import { beginRunTimeline, recordRunTimelineStage } from "@/core/agent/runTimeline";
 import { logPromptSubmission } from "@/core/agent/promptSubmission";
+import {
+  shouldAutoStartEmbeddedGreenfield,
+  shouldResetGreenfieldAutoStartLatch,
+} from "@/core/agent/greenfieldAutoStart";
+import {
+  createFinalizationWorkKey,
+  runCreateFinalizationWorkOnce,
+} from "@/core/agent/greenfieldCreateFinalization";
+import { incrementGenerateInvocations } from "@/core/agent/followUpSettlementDiagnostics";
 /**
  * New App wizard (Phase 10). Greenfield generation from an empty folder —
  * not agent mode. Human approves before any write; auto-repair may run on TS/build failure.
@@ -216,8 +225,21 @@ export function NewAppView({
   }, [embedded, initialFolder, project?.path, project?.name, updateGreenfieldRun]);
 
   useEffect(() => {
-    if (!embedded || !autoStartGeneration || autoStartedRef.current) return;
-    if (genStatus === "running" || generateLockRef.current) return;
+    if (
+      !shouldAutoStartEmbeddedGreenfield({
+        embedded,
+        autoStartGeneration,
+        alreadyStarted: autoStartedRef.current,
+        genStatus,
+        generateLocked: generateLockRef.current,
+        promptLength: prompt.trim().length,
+        folderPresent: Boolean(folder),
+        greenfieldRecovery,
+        runResult: greenfieldRun.runResult,
+      })
+    ) {
+      return;
+    }
     if (!folder || !settings || !prompt.trim()) return;
     if (!isProviderReady(settings)) {
       onSubmissionError?.("Connect an AI provider in Settings before generating.");
@@ -230,6 +252,7 @@ export function NewAppView({
     }
     const fn = generateFnRef.current;
     if (!fn) return;
+    autoStartedRef.current = true;
     void fn();
   }, [
     embedded,
@@ -240,6 +263,8 @@ export function NewAppView({
     agentRunBlockReason,
     onSubmissionError,
     genStatus,
+    greenfieldRecovery,
+    greenfieldRun.runResult,
   ]);
 
   useEffect(() => {
@@ -250,12 +275,29 @@ export function NewAppView({
 
   useEffect(() => {
     if (!embedded || !autoStartGeneration) return;
+    if (
+      !shouldResetGreenfieldAutoStartLatch({
+        alreadyStarted: autoStartedRef.current,
+        genStatus,
+        runResult: greenfieldRun.runResult,
+      })
+    ) {
+      return;
+    }
     autoStartedRef.current = false;
     autoPipelineTriggeredRef.current = false;
     if (greenfieldRecovery) {
       recoveryStartedRef.current = false;
     }
-  }, [embedded, autoStartGeneration, greenfieldRecovery, initialPrompt, initialFolder?.path]);
+  }, [
+    embedded,
+    autoStartGeneration,
+    greenfieldRecovery,
+    initialPrompt,
+    initialFolder?.path,
+    genStatus,
+    greenfieldRun.runResult,
+  ]);
 
   useEffect(() => {
     if (!embedded || !greenfieldRecovery || recoveryStartedRef.current) return;
@@ -557,6 +599,7 @@ export function NewAppView({
     }
     generateLockRef.current = true;
     autoStartedRef.current = true;
+    incrementGenerateInvocations();
     cancelledRef.current = false;
     const requestStartedAt = new Date().toISOString();
     const requestStartMs = Date.now();
@@ -928,7 +971,13 @@ export function NewAppView({
   ) => {
     const writeTarget = targetFolder ?? folder;
     if (!writeTarget) return;
-
+    return runCreateFinalizationWorkOnce(
+      createFinalizationWorkKey(
+        "preview",
+        writeTarget.path,
+        opts?.setupOnly ? "setup-only" : "write-setup",
+      ),
+      async () => {
     let writtenFilesForSetup: readonly string[] = [];
 
     if (opts?.setupOnly) {
@@ -1463,6 +1512,8 @@ export function NewAppView({
       });
       setFinalMessage(failMsg);
     }
+      },
+    );
   };
   writeAndSetupRef.current = writeAndSetup;
 

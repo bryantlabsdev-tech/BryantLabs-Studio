@@ -1,9 +1,13 @@
 import { useLayoutEffect, useRef } from "react";
 import { getLastRoutingIntent, isStudioTestMode } from "@/app/workspace";
 import type { StudioReadinessState } from "@/app/workspace/studioTestReadiness";
+import type { FollowUpSettlementDiagnostic } from "@/core/agent/followUpSettlementDiagnostics";
+import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
 import type { HealthResult, ProviderId, ProviderResponse } from "@/types";
 
 export interface StudioTestHookCallbacks {
+  readonly getGreenfieldRunSnapshot: () => GreenfieldRunSnapshot;
+  readonly getFollowUpSettlementDiagnostic: () => FollowUpSettlementDiagnostic;
   readonly getReadinessState: () => StudioReadinessState;
   readonly openProjectAt: (folderPath: string) => Promise<void>;
   readonly getPatchPipelineState: () => {
@@ -43,6 +47,9 @@ export function useStudioTestHooks(callbacks: StudioTestHookCallbacks): void {
 
     const hooks = {
       getReadinessState: () => callbacksRef.current.getReadinessState(),
+      getGreenfieldRunSnapshot: () => callbacksRef.current.getGreenfieldRunSnapshot(),
+      getFollowUpSettlementDiagnostic: () =>
+        callbacksRef.current.getFollowUpSettlementDiagnostic(),
       openProjectAt: (folderPath: string) =>
         callbacksRef.current.openProjectAt(folderPath),
       getPatchPipelineState: () => callbacksRef.current.getPatchPipelineState(),

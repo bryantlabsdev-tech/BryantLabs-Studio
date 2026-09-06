@@ -32,7 +32,10 @@ import {
 import type { ContextFailureMeta } from "@/core/contextEngine/types";
 import { getIntelligenceHost } from "@/app/intelligence/intelligenceHost";
 import { recordPromptVisibility } from "@/core/intelligence/promptVisibility";
-import { buildApplyPlanZeroProposalsReport } from "@/core/diagnostics/failureReport";
+import {
+  buildApplyPlanFailureReport,
+  buildApplyPlanZeroProposalsReport,
+} from "@/core/diagnostics/failureReport";
 import { isEditablePath } from "@/core/editor";
 import {
   estimateAiCalls,
@@ -55,6 +58,9 @@ import {
   CONFIG_UI_BLOCK_MESSAGE,
   CREATE_TARGET_ACCEPTED_LABEL,
   CREATE_TARGET_REJECTED_LABEL,
+  evaluateIncompleteCoordinatedApply,
+  settleAbandonedApplyPlan,
+  settleIncompleteCoordinatedApply,
   SCAFFOLD_TARGET_SKIPPED_LABEL,
   isBlockedNonUiTarget,
   isUiCorePatchTarget,
@@ -81,6 +87,8 @@ import type { Plan } from "@/core/planner";
 import type { ApplyPlanOrchestrationHost } from "@/app/orchestration/applyPlanTypes";
 import { recordProviderUsage } from "@/core/sessionMemory";
 import { applyApprovedPlanFilesOrchestration } from "@/app/orchestration/applyPlanApply";
+import { incrementApplyPlanInvocations } from "@/core/agent/followUpSettlementDiagnostics";
+import { buildFollowUpRunFailurePatch } from "@/app/orchestration/followUpRunFailure";
 
 /** Max target-file size we will send for an Apply Plan batch proposal (chars). */
 export const MAX_AI_PATCH_CHARS = 60_000;
@@ -90,6 +98,8 @@ export interface ExecuteApplyPlanOptions {
   readonly pipelineMode?: boolean;
   /** When true, approve and apply immediately after successful propose (single-agent follow-up). */
   readonly autoContinue?: boolean;
+  /** Submitted follow-up text; wins over a stale plan/lastPlanPrompt. */
+  readonly prompt?: string;
 }
 
 export interface ExecuteApplyPlanResult {
@@ -120,6 +130,29 @@ export async function executeApplyPlanOrchestration(
   host: ApplyPlanOrchestrationHost | null,
   opts: ExecuteApplyPlanOptions,
 ): Promise<ExecuteApplyPlanResult> {
+  try {
+    const result = await executeApplyPlanOrchestrationBody(host, opts);
+    if (host) {
+      settleAbandonedApplyPlan(
+        host,
+        "Apply Plan ended without reaching a terminal state.",
+      );
+    }
+    return result;
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Apply Plan failed.";
+    if (host) {
+      settleAbandonedApplyPlan(host, message);
+    }
+    return { ...EMPTY_RESULT, error: message };
+  }
+}
+
+async function executeApplyPlanOrchestrationBody(
+  host: ApplyPlanOrchestrationHost | null,
+  opts: ExecuteApplyPlanOptions,
+): Promise<ExecuteApplyPlanResult> {
   const plan = host ? resolveActivePlan(host) : null;
   const effectiveScan =
     host?.project != null
@@ -127,6 +160,7 @@ export async function executeApplyPlanOrchestration(
           scan: host.scan,
           projectPath: host.project.path,
           ...(host.greenfieldRun ? { greenfieldRun: host.greenfieldRun } : {}),
+          persistedModifiedFiles: host.sessionMemory.modifiedFiles,
         })
       : null;
 
@@ -171,7 +205,11 @@ export async function executeApplyPlanOrchestration(
 
   const studioApi = resolved.api;
   const projectScan = resolved.scan;
-  const userPrompt = resolveUserPlanPrompt(plan, resolved.lastPlanPrompt);
+  const userPrompt = resolveUserPlanPrompt(
+    plan,
+    resolved.lastPlanPrompt,
+    opts.prompt,
+  );
   if (!userPrompt) {
     resolved.setPlanApplyError(
       "Enter your change request in the Plan tab (not a terminal command), then Analyze & plan.",
@@ -291,6 +329,7 @@ export async function executeApplyPlanOrchestration(
   }
 
   const runId = resolved.beginApplyPlanRun();
+  incrementApplyPlanInvocations();
   const staleResult = (detail?: string) => {
     if (!resolved.isStaleApplyPlanRun(runId)) return false;
     resolved.ignoreStaleApplyPlanResult(runId, detail);
@@ -781,16 +820,59 @@ export async function executeApplyPlanOrchestration(
         if (basis !== undefined) promptBasisByPath.set(f.path, basis);
       }
 
-      const invoke = async (provider: ProviderId) =>
-        studioApi.proposeApplyPlanPatches(provider, prompt, ctx.context, promptFiles, {
-          planSummary: ctx.planSummary,
-          targetPaths: promptFiles.map((f) => f.path),
-          slimContext: ctx.slimContext,
-          directRewrite,
-          intelligenceBlock: ctx.intelligenceBlock,
-          contextNotes: ctx.contextNotes,
-          uiEditMode: ctx.uiEditMode,
+      const invoke = async (provider: ProviderId) => {
+        const ipcFiles = promptFiles.map((f) => {
+          const entry = promptEntryByPath.get(f.path);
+          const isCreate = (entry?.action ?? "modify") === "create";
+          return {
+            path: f.path,
+            content: "",
+            ...(entry?.absPath && !isCreate ? { absPath: entry.absPath } : {}),
+          };
         });
+        const ipcContext = {
+          framework: ctx.context.framework,
+          language: ctx.context.language,
+          bundler: ctx.context.bundler,
+          packageManager: ctx.context.packageManager,
+          entryPoints: (ctx.context.entryPoints ?? []).slice(0, 4),
+          repositorySummary: String(ctx.context.repositorySummary ?? "").slice(0, 800),
+          dependencies: [] as string[],
+          totalFiles: ctx.context.totalFiles,
+          totalFolders: ctx.context.totalFolders,
+          files: [] as [],
+          symbols: [] as [],
+        };
+        let payloadJson: string;
+        try {
+          payloadJson = JSON.stringify({
+            provider,
+            prompt,
+            context: ipcContext,
+            files: ipcFiles,
+            meta: {
+              planSummary: String(ctx.planSummary ?? prompt).slice(0, 1_500),
+              targetPaths: promptFiles.map((f) => f.path),
+              slimContext: true,
+              ...(directRewrite ? { directRewrite: true } : {}),
+              intelligenceBlock: String(ctx.intelligenceBlock ?? "").slice(0, 2_000),
+              contextNotes: String(ctx.contextNotes ?? "").slice(0, 2_000),
+              ...(ctx.uiEditMode ? { uiEditMode: true } : {}),
+            },
+          });
+        } catch (err) {
+          return {
+            ok: false as const,
+            provider,
+            model: "",
+            raw: null,
+            latencyMs: 0,
+            error: `Failed to serialize apply-plan payload: ${err instanceof Error ? err.message : String(err)}`,
+            missingPaths: promptFiles.map((f) => f.path),
+          };
+        }
+        return studioApi.proposeApplyPlanPatchesJson(payloadJson);
+      };
 
       const batchResult = applyPlanSettings
         ? await resolved.invokeCoderCall(
@@ -1188,6 +1270,39 @@ export async function executeApplyPlanOrchestration(
   }
 
   if (autoContinue && validReady > 0 && !pipelineMode) {
+    const incompleteBeforeWrite = evaluateIncompleteCoordinatedApply({
+      prompt,
+      targetPaths: targets.map((t) => t.relPath),
+      files: sessionFiles,
+    });
+    if (incompleteBeforeWrite.incomplete) {
+      const message =
+        incompleteBeforeWrite.message ??
+        `Incomplete patch batch: ${validReady}/${patchTargetCount} files ready`;
+      resolved.appendGreenfieldRunLog(
+        "apply_plan",
+        "failed",
+        `Refusing incomplete apply (${validReady}/${patchTargetCount} ready)`,
+        `missing=${incompleteBeforeWrite.missing.join(",") || "unknown"} · ${message}`,
+      );
+      settleIncompleteCoordinatedApply(resolved, incompleteBeforeWrite);
+      if (resolved.greenfieldRun) {
+        resolved.updateGreenfieldRun(
+          buildFollowUpRunFailurePatch(resolved.greenfieldRun, message),
+        );
+      }
+      failRunTimeline(message);
+      resolved.publishFailureReport(
+        buildApplyPlanFailureReport({ applyError: message }),
+      );
+      return {
+        validReady,
+        autoContinued: false,
+        applyOk: false,
+        error: message,
+      };
+    }
+
     const approved = withAllReadyFilesApproved(reviewSession);
     const applyingSession = { ...approved, phase: "applying" as const };
     applySession = applyingSession;

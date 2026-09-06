@@ -52,6 +52,7 @@ export interface BuildPipelineHost {
   readonly clearRunContextForNewSubmit: () => void;
   readonly startApplyPlan: (opts?: {
     autoContinue?: boolean;
+    prompt?: string;
   }) => Promise<import("@/app/orchestration/applyPlan").ExecuteApplyPlanResult>;
   readonly approveAllPlanApplyFiles: () => void;
   readonly applyApprovedPlanFiles: (opts?: {
@@ -67,6 +68,7 @@ export interface BuildPipelineHost {
     directRewrite: boolean;
     pipelineMode?: boolean;
     autoContinue?: boolean;
+    prompt?: string;
   }) => Promise<import("@/app/orchestration/applyPlan").ExecuteApplyPlanResult>;
   readonly startAutoFixAfterApply: (opts: {
     verification: VerificationResult;
@@ -152,7 +154,11 @@ export interface BuildPipelineHost {
   readonly releaseBuildRunForReview?: () => void;
   readonly setPlanApplySession: Dispatch<SetStateAction<PlanApplySession | null>>;
   readonly setPlanApplyError: Dispatch<SetStateAction<string | null>>;
-  readonly updateGreenfieldRun: (patch: Partial<GreenfieldRunSnapshot>) => void;
+  readonly updateGreenfieldRun: (
+    patch:
+      | Partial<GreenfieldRunSnapshot>
+      | ((prev: GreenfieldRunSnapshot) => Partial<GreenfieldRunSnapshot>),
+  ) => void;
   readonly refreshProviderStatus?: () => Promise<void>;
   readonly syncAppContextBeforeEdit?: () => void;
   readonly runAgentFollowUp?: (prompt: string) => Promise<void>;

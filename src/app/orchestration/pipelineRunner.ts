@@ -36,6 +36,7 @@ function requireHost(host: BuildPipelineHost | null): ResolvedPipelineHost {
     scan: host.scan,
     projectPath: host.project.path,
     greenfieldRun: host.greenfieldRun,
+    persistedModifiedFiles: host.sessionMemory.modifiedFiles,
   });
   if (!effectiveScan) {
     throw new Error("Pipeline requires an open project.");

@@ -5,7 +5,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { WelcomeEditor } from "@/components/WelcomeEditor";
 import { FolderOpenIcon } from "@/components/icons";
 import { EDITOR_PANEL } from "@/core/panels";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { EditToolbar } from "@/components/editor/EditToolbar";
 import { EditorFileTabs } from "@/components/editor/EditorFileTabs";
 import { InlineEditPanel } from "@/components/editor/InlineEditPanel";

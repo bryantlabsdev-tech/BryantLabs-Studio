@@ -24,6 +24,7 @@ describe("studioTestReadiness", () => {
     });
     assert.equal(state.composerReady, false);
     assert.equal(state.scanStatus, "scanning");
+    assert.equal(state.indexedSourceFileCount, 0);
   });
 
   it("marks preview visible when preview tab is active with url", () => {

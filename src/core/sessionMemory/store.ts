@@ -226,13 +226,23 @@ export function setProjectContext(
     return memory;
   }
   if (loaded && loaded.projectPath === projectPath) {
-    return { ...loaded, branch };
+    return loaded.branch === branch ? loaded : { ...loaded, branch };
   }
   return {
     ...emptySessionMemory(projectPath, branch),
     projectPath,
     branch,
   };
+}
+
+/** Keep the previous snapshot when git refresh reports the same branch. */
+export function applySessionMemoryBranch(
+  memory: SessionMemorySnapshot,
+  branch: string,
+): SessionMemorySnapshot {
+  if (!memory.projectPath) return memory;
+  if (memory.branch === branch) return memory;
+  return { ...memory, branch };
 }
 
 export function clearSessionMemory(

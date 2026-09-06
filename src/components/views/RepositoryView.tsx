@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { IndexStatus } from "@/components/IndexStatus";
 import { EmptyState } from "@/components/EmptyState";
 import type { RepositorySearchHit } from "@/core/repository/types";

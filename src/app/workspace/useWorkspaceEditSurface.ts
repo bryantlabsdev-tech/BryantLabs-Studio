@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type { BryantLabsApi, FileNode } from "@/types";
 import type { Patch } from "@/core/editor";
 import type { EditTarget, EditStatus } from "@/app/workspace/workspaceState";
@@ -40,88 +40,85 @@ export function useWorkspaceEditSurface(input: {
   readonly pendingPatch: Patch | null;
   readonly setCenterTab: React.Dispatch<React.SetStateAction<CenterTab>>;
 }) {
-  const activateFile = useCallback(
-    (path: string) => {
-      const cached = input.openFilesByPath[path];
-      if (!cached) return;
-      input.setActivePath(path);
-      input.setActiveFile(cached);
-      input.setFileStatus("loaded");
-      input.setCenterTab("editor");
-    },
-    [input],
-  );
+  const inputRef = useRef(input);
+  inputRef.current = input;
 
-  const closeFile = useCallback(
-    (path: string) => {
-      const nextTabs = input.openFileTabs.filter((tabPath) => tabPath !== path);
-      const { [path]: _removed, ...rest } = input.openFilesByPath;
-      input.setOpenFileTabs(nextTabs);
-      input.setOpenFilesByPath(rest);
+  const activateFile = useCallback((path: string) => {
+    const current = inputRef.current;
+    const cached = current.openFilesByPath[path];
+    if (!cached) return;
+    current.setActivePath(path);
+    current.setActiveFile(cached);
+    current.setFileStatus("loaded");
+    current.setCenterTab("editor");
+  }, []);
 
-      if (input.activePath !== path) return;
+  const closeFile = useCallback((path: string) => {
+    const current = inputRef.current;
+    const nextTabs = current.openFileTabs.filter((tabPath) => tabPath !== path);
+    const { [path]: _removed, ...rest } = current.openFilesByPath;
+    current.setOpenFileTabs(nextTabs);
+    current.setOpenFilesByPath(rest);
 
-      const currentIndex = input.openFileTabs.indexOf(path);
-      const fallback =
-        nextTabs[currentIndex] ??
-        nextTabs[currentIndex - 1] ??
-        nextTabs[nextTabs.length - 1] ??
-        null;
+    if (current.activePath !== path) return;
 
-      if (fallback && rest[fallback]) {
-        input.setActivePath(fallback);
-        input.setActiveFile(rest[fallback]!);
-        input.setFileStatus("loaded");
-      } else {
-        input.setActivePath(null);
-        input.setActiveFile(null);
-        input.setFileStatus("idle");
-      }
-    },
-    [input],
-  );
+    const currentIndex = current.openFileTabs.indexOf(path);
+    const fallback =
+      nextTabs[currentIndex] ??
+      nextTabs[currentIndex - 1] ??
+      nextTabs[nextTabs.length - 1] ??
+      null;
 
-  const openFile = useCallback(
-    async (node: FileNode) => {
-      if (!input.api || node.type !== "file") return;
-      const path = node.path;
-      input.setCenterTab("editor");
+    if (fallback && rest[fallback]) {
+      current.setActivePath(fallback);
+      current.setActiveFile(rest[fallback]!);
+      current.setFileStatus("loaded");
+    } else {
+      current.setActivePath(null);
+      current.setActiveFile(null);
+      current.setFileStatus("idle");
+    }
+  }, []);
 
-      const cached = input.openFilesByPath[path];
-      if (cached) {
-        input.setActivePath(path);
-        input.setActiveFile(cached);
-        input.setFileStatus("loaded");
-        input.setError(null);
-        return;
-      }
+  const openFile = useCallback(async (node: FileNode) => {
+    const current = inputRef.current;
+    if (!current.api || node.type !== "file") return;
+    const path = node.path;
+    current.setCenterTab("editor");
 
-      input.setActivePath(path);
-      input.setFileStatus("loading");
-      input.setError(null);
-      input.plan.setAiPatchSession(null);
-      input.plan.setPatchStatus("idle");
-      input.plan.setPatchError(null);
-      input.plan.setAiPatchApproved(false);
-      input.plan.setAiPatchApplyStatus("idle");
-      input.plan.setAiPatchApplyError(null);
-      try {
-        const result = await input.api.readFile(path);
-        const openFileEntry: OpenFile = { node, result };
-        input.setActiveFile(openFileEntry);
-        input.setOpenFilesByPath((prev) => ({ ...prev, [path]: openFileEntry }));
-        input.setOpenFileTabs((prev) =>
-          prev.includes(path) ? prev : [...prev, path],
-        );
-        input.setFileStatus(result.readable ? "loaded" : "error");
-      } catch {
-        input.setActiveFile(null);
-        input.setFileStatus("error");
-        input.setError("Failed to read file.");
-      }
-    },
-    [input],
-  );
+    const cached = current.openFilesByPath[path];
+    if (cached) {
+      current.setActivePath(path);
+      current.setActiveFile(cached);
+      current.setFileStatus("loaded");
+      current.setError(null);
+      return;
+    }
+
+    current.setActivePath(path);
+    current.setFileStatus("loading");
+    current.setError(null);
+    current.plan.setAiPatchSession(null);
+    current.plan.setPatchStatus("idle");
+    current.plan.setPatchError(null);
+    current.plan.setAiPatchApproved(false);
+    current.plan.setAiPatchApplyStatus("idle");
+    current.plan.setAiPatchApplyError(null);
+    try {
+      const result = await current.api.readFile(path);
+      const openFileEntry: OpenFile = { node, result };
+      current.setActiveFile(openFileEntry);
+      current.setOpenFilesByPath((prev) => ({ ...prev, [path]: openFileEntry }));
+      current.setOpenFileTabs((prev) =>
+        prev.includes(path) ? prev : [...prev, path],
+      );
+      current.setFileStatus(result.readable ? "loaded" : "error");
+    } catch {
+      current.setActiveFile(null);
+      current.setFileStatus("error");
+      current.setError("Failed to read file.");
+    }
+  }, []);
 
   const openPath = useCallback(
     async (absPath: string) => {
@@ -132,41 +129,41 @@ export function useWorkspaceEditSurface(input: {
     [openFile],
   );
 
-  const listDirectory = useCallback(
-    async (dirPath: string): Promise<FileNode[]> => {
-      if (!input.api) return [];
-      return input.api.listDirectory(dirPath);
-    },
-    [input.api],
-  );
+  const listDirectory = useCallback(async (dirPath: string): Promise<FileNode[]> => {
+    const current = inputRef.current;
+    if (!current.api) return [];
+    return current.api.listDirectory(dirPath);
+  }, []);
 
   const resetPatch = useCallback(() => {
-    input.setPendingPatch(null);
-    input.setReviewing(false);
-    input.setEditError(null);
-    input.setEditStatus("idle");
-  }, [input]);
+    const current = inputRef.current;
+    current.setPendingPatch(null);
+    current.setReviewing(false);
+    current.setEditError(null);
+    current.setEditStatus("idle");
+  }, []);
 
   const selectEditTarget = useCallback(
     (target: EditTarget) => {
-      input.setEditTarget(target);
+      inputRef.current.setEditTarget(target);
       resetPatch();
       void openPath(target.absPath);
     },
-    [input, openPath, resetPatch],
+    [openPath, resetPatch],
   );
 
   const clearEditTarget = useCallback(() => {
-    input.setEditTarget(null);
+    inputRef.current.setEditTarget(null);
     resetPatch();
-  }, [input, resetPatch]);
+  }, [resetPatch]);
 
   const reviewPatch = useCallback(() => {
-    if (input.pendingPatch) {
-      input.setReviewing(true);
-      input.setCenterTab("editor");
+    const current = inputRef.current;
+    if (current.pendingPatch) {
+      current.setReviewing(true);
+      current.setCenterTab("editor");
     }
-  }, [input]);
+  }, []);
 
   const discardPatch = useCallback(() => resetPatch(), [resetPatch]);
 

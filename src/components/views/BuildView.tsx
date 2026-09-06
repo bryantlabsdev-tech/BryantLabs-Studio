@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { useAgentRunViewModel } from "@/app/workspace/useAgentRunViewModel";
 import { FollowUpChatHistory } from "@/components/views/FollowUpChatHistory";
 import { FollowUpErrorBanner } from "@/components/views/FollowUpErrorBanner";
@@ -161,6 +161,7 @@ export function BuildView() {
     recordAgentUserMessage,
     recordAgentActivityMessage,
     providerStatus,
+    rescan,
   });
 
   const {
@@ -211,6 +212,7 @@ export function BuildView() {
     proceedAfterStaleRunReset,
     proceedAfterFeasibility,
     proceedAfterClarity,
+    acceptGreenfieldCompletion,
     resolveFolderGateCancel,
   } = submit;
 
@@ -739,6 +741,9 @@ export function BuildView() {
     previewReady: boolean;
     uiAuditPassed: boolean;
   }) => {
+    if (!acceptGreenfieldCompletion()) {
+      return;
+    }
     setGreenfieldIndexSyncPending(true);
     recordAgentGreenfieldSuccess(input);
     archiveActiveRunContextAfterSuccess();

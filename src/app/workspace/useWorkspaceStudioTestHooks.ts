@@ -1,5 +1,6 @@
 import { useCallback, type Dispatch, type SetStateAction } from "react";
 import { createAgentRunId } from "@/app/workspace/useAgentRunHistoryController";
+import { getFollowUpSettlementDiagnostic } from "@/core/agent/followUpSettlementDiagnostics";
 import { useStudioTestHooks } from "@/app/workspace/useStudioTestHooks";
 import {
   computeStudioReadinessState,
@@ -261,8 +262,20 @@ export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput
     [api, providerStatus?.provider, providerStatus?.model],
   );
 
+  const getGreenfieldRunSnapshot = useCallback(
+    () => greenfieldRun,
+    [greenfieldRun],
+  );
+
+  const getFollowUpSettlementDiagnosticHook = useCallback(
+    () => getFollowUpSettlementDiagnostic(),
+    [],
+  );
+
   useStudioTestHooks({
     getReadinessState,
+    getGreenfieldRunSnapshot,
+    getFollowUpSettlementDiagnostic: getFollowUpSettlementDiagnosticHook,
     openProjectAt,
     getPatchPipelineState,
     simulatePatchReadyForReview,

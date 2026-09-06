@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import type { FileNode } from "@/types";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { ChevronIcon, FileIcon, FolderIcon } from "@/components/icons";
 
 interface FileTreeNodeProps {

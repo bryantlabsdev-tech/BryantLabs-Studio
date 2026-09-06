@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import type { UtilityTab } from "@/core/layout/types";
 import { PlanComparisonView } from "@/components/PlanComparisonView";
 import { GreenfieldDebugPanel } from "@/components/views/GreenfieldDebugPanel";

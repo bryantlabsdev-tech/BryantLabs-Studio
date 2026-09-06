@@ -15,7 +15,6 @@ import {
 } from "@/components/views/RunConversationBlock";
 import { AGENT_COPY } from "@/core/agent/agentExecutionCopy";
 import { EmptyState } from "@/components/EmptyState";
-import { BrandLogo } from "@/components/BrandLogo";
 import {
   AgentConversationThread,
   AgentThreadContinuation,
@@ -263,7 +262,6 @@ export function FollowUpChatHistory({
         <EmptyState
           title="Start a conversation"
           description={emptyHint}
-          icon={<BrandLogo size={40} className="empty-state__brand-logo" />}
           action={
             emptyExamples.length > 0 && onSuggestionClick ? (
               <ul className="follow-up-chat__empty-examples">

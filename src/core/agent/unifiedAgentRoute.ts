@@ -91,6 +91,8 @@ export interface RouteAgentPromptInput {
   readonly fallbackSourceFileCount?: number;
   readonly filesWritten?: readonly string[];
   readonly previousSuccessfulRun?: boolean;
+  /** Source files are on disk even if the current scan is empty/stale. */
+  readonly projectSourceFilesExistOnDisk?: boolean;
   readonly modeOverride?: ComposerModeOverride;
   /** Same-prompt retry after failed greenfield setup — skip edit_follow_up routing. */
   readonly greenfieldRecovery?: boolean;
@@ -257,6 +259,7 @@ function shouldBlockGreenfieldRoute(input: {
   readonly fallbackSourceCount: number;
   readonly filesWritten: readonly string[];
   readonly previousSuccessfulRun: boolean;
+  readonly projectSourceFilesExistOnDisk: boolean;
   readonly editPhrasing: boolean;
   readonly prompt: string;
 }): string | null {
@@ -266,11 +269,17 @@ function shouldBlockGreenfieldRoute(input: {
   if (input.fallbackSourceCount > 0) {
     return "fallback_source_files";
   }
+  if (input.projectSourceFilesExistOnDisk) {
+    return "project_files_exist_on_disk";
+  }
   if (
     input.previousSuccessfulRun &&
     input.filesWritten.length > 0
   ) {
     return "previous_successful_run_with_files";
+  }
+  if (input.previousSuccessfulRun) {
+    return "previous_successful_run";
   }
   if (hasProjectScaffoldMarkers(null, input.filesWritten)) {
     return "files_written_scaffold_present";
@@ -349,6 +358,7 @@ export function routeAgentPrompt(
         fallbackSourceCount,
         filesWritten: filesWrittenForRouting,
         previousSuccessfulRun: input.previousSuccessfulRun === true,
+        projectSourceFilesExistOnDisk: input.projectSourceFilesExistOnDisk === true,
         editPhrasing,
         prompt: trimmed,
       });
@@ -381,12 +391,22 @@ export function routeAgentPrompt(
     return blocked("Enter a goal with at least 4 characters.", decisionWithReject);
   }
 
-  if (input.scanStatus === "scanning") {
+  if (input.scanStatus === "scanning" || input.scanStatus === "idle") {
     const hasIndexFallback =
       (input.fallbackSourceFileCount ?? 0) > 0 ||
       (input.filesWritten?.length ?? 0) > 0;
     if (!hasIndexFallback) {
-      return blocked("Waiting for project scan to finish…", decisionWithReject);
+      if (
+        input.projectSourceFilesExistOnDisk ||
+        input.previousSuccessfulRun
+      ) {
+        return blocked("Waiting for project scan to finish…", decisionWithReject, {
+          reason: "wait_for_rescan",
+        });
+      }
+      if (input.scanStatus === "scanning") {
+        return blocked("Waiting for project scan to finish…", decisionWithReject);
+      }
     }
   }
 
@@ -480,6 +500,15 @@ export function routeAgentPrompt(
   }
 
   if (!hasSources) {
+    if (
+      fallbackSourceCount === 0 &&
+      filesWrittenForRouting.length === 0 &&
+      (input.projectSourceFilesExistOnDisk || input.previousSuccessfulRun)
+    ) {
+      return blocked("Waiting for project scan to finish…", decisionWithReject, {
+        reason: "wait_for_rescan",
+      });
+    }
     if (establishedProject || greenfieldBlockReason) {
       if (looksLikeRepairPrompt(trimmed)) {
         return buildLoopRoute(

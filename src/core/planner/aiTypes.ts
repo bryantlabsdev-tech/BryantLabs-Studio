@@ -224,6 +224,7 @@ export interface PatchSymbol {
 export interface PatchTargetFile {
   path: string;
   content: string;
+  absPath?: string;
 }
 
 /** Optional plan context for per-file patch proposals (plan apply). */

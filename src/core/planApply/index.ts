@@ -1,4 +1,6 @@
 export * from "@/core/planApply/applyIntent";
+export * from "@/core/planApply/coordinatedEditCompletion";
+export * from "@/core/planApply/applyPlanSettlement";
 export * from "@/core/planApply/types";
 export * from "@/core/planApply/resolve";
 export * from "@/core/planApply/stats";
