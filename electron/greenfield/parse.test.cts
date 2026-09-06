@@ -1,7 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { GREENFIELD_PATHS } from "./paths.cjs";
-import { parseGreenfieldResponseDetailed } from "./parse.cjs";
+import {
+  GREENFIELD_INCOMPLETE_PARSE,
+  GREENFIELD_MISSING_REQUIRED_FILES,
+  GREENFIELD_UNEXPECTED_FILE_PATHS,
+  parseGreenfieldResponseDetailed,
+} from "./parse.cjs";
 
 function markerBody(path: string, content: string, end: string): string {
   return `@@FILE:${path}@@\n${content}\n${end}\n`;
@@ -35,6 +40,10 @@ describe("parseGreenfieldResponseDetailed", () => {
     const result = parseGreenfieldResponseDetailed(text);
     assert.equal(result.ok, false);
     assert.match(result.errorMessage ?? "", /Missing required files:/);
+    assert.match(result.errorMessage ?? "", /parsed 1\/7 expected files/);
+    assert.equal(result.errorCode, GREENFIELD_INCOMPLETE_PARSE);
+    assert.ok(result.errorCodes?.includes(GREENFIELD_MISSING_REQUIRED_FILES));
+    assert.ok(result.errorCodes?.includes(GREENFIELD_INCOMPLETE_PARSE));
     assert.ok(result.diagnostics.missingFiles.includes("index.html"));
     assert.ok(result.diagnostics.missingFiles.includes("vite.config.ts"));
     assert.equal(result.diagnostics.parsedFiles.length, 1);
@@ -47,6 +56,9 @@ describe("parseGreenfieldResponseDetailed", () => {
     const result = parseGreenfieldResponseDetailed(text);
     assert.equal(result.ok, false);
     assert.match(result.errorMessage ?? "", /Unexpected file paths:/);
+    assert.match(result.errorMessage ?? "", /parsed 7\/7 expected files/);
+    assert.equal(result.errorCode, GREENFIELD_UNEXPECTED_FILE_PATHS);
+    assert.ok(result.errorCodes?.includes(GREENFIELD_UNEXPECTED_FILE_PATHS));
     assert.ok(result.diagnostics.unexpectedFiles.includes("README.md"));
   });
 

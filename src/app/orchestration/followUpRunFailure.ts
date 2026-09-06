@@ -1,13 +1,33 @@
 import { failRunTimeline } from "@/core/agent/runTimeline";
-import type { RunLogStage } from "@/core/greenfield/runLog";
-import {
-  finalizeDanglingRunningLogEntries,
-  type GreenfieldRunSnapshot,
-} from "@/core/greenfield/runState";
+import type { GreenfieldRunLogEntry, RunLogStage } from "@/core/greenfield/runLog";
+import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
 
 export type GreenfieldRunUpdate =
   | Partial<GreenfieldRunSnapshot>
   | ((prev: GreenfieldRunSnapshot) => Partial<GreenfieldRunSnapshot>);
+
+function finalizeDanglingRunningLogEntries(
+  entries: readonly GreenfieldRunLogEntry[],
+  reason: string,
+  runStartedAt?: number | null,
+): GreenfieldRunLogEntry[] {
+  const detail = reason.trim();
+  if (!detail) return [...entries];
+  return entries.map((entry) => {
+    if (entry.status !== "running") return entry;
+    if (runStartedAt != null) {
+      const at = Date.parse(entry.timestamp);
+      if (Number.isFinite(at) && at < runStartedAt) return entry;
+    }
+    return {
+      ...entry,
+      status: "failed" as const,
+      ...(entry.details?.trim() || detail
+        ? { details: entry.details?.trim() || detail }
+        : {}),
+    };
+  });
+}
 
 export function buildFollowUpRunFailurePatch(
   prev: GreenfieldRunSnapshot,

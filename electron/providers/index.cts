@@ -10,10 +10,7 @@ import * as gemini from "./gemini.cjs";
 import * as groq from "./groq.cjs";
 import * as ollama from "./ollama.cjs";
 import * as openrouter from "./openrouter.cjs";
-import { PROVIDER_TIMEOUT_MS, resolveApplyPlanPatchGenerateOpts } from "./timeouts.cjs";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { PROVIDER_TIMEOUT_MS } from "./timeouts.cjs";
 import {
   buildPlanPrompt,
   buildPlanJsonRepairPrompt,
@@ -51,12 +48,12 @@ import {
   type ApplyPlanBatchPatchMeta,
 } from "./applyPlanPatch.cjs";
 import { filterDirectRewriteFiles } from "./applyPlanPrompt.cjs";
+import { hydrateApplyPlanBatchFiles } from "./applyPlanBatchHydrate.cjs";
 import {
   APPLY_PLAN_PATCH_FORMAT_ERROR,
   normalizeApplyPlanPath,
   parseApplyPlanMarkedFiles,
 } from "./markedFileParse.cjs";
-import { isTruncatedHttpJsonBodyError } from "./httpJson.cjs";
 
 /**
  * Provider dispatch (Phase 7). Routing is explicit and strict: a request for a
@@ -96,7 +93,6 @@ import {
   resolvePlannerMaxOutputTokens,
   resolvePlannerRetryMaxOutputTokens,
 } from "./plannerTokenBudget.cjs";
-import { resolvePatchMaxOutputTokens } from "./economyTokenBudget.cjs";
 import {
   isMockProviderEnabled,
   mockApplyPlanBatchPatch,
@@ -682,47 +678,29 @@ export async function runApplyPlanBatchPatch(
   files: readonly PatchTargetFile[],
   meta: ApplyPlanBatchPatchMeta,
 ): Promise<ApplyPlanBatchPatchResult> {
-  try {
-    const logPath = path.join(os.tmpdir(), "bryantlabs-patch-generate.log");
-    fs.appendFileSync(
-      logPath,
-      `${new Date().toISOString()} [patch:batch:enter] provider=${provider} files=${files?.length ?? 0} promptChars=${userPrompt?.length ?? 0}\n`,
-    );
-  } catch {
-    /* ignore */
+  const hydrated = hydrateApplyPlanBatchFiles(files);
+  if (!hydrated.ok) {
+    return {
+      ok: false,
+      provider,
+      model: "",
+      raw: null,
+      latencyMs: 0,
+      error: hydrated.error,
+      missingPaths: hydrated.missingPaths,
+    };
   }
   if (isMockProviderEnabled()) {
-    return mockApplyPlanBatchPatch(provider, userPrompt, files, meta) as ApplyPlanBatchPatchResult;
+    return mockApplyPlanBatchPatch(
+      provider,
+      userPrompt,
+      hydrated.files,
+      meta,
+    ) as ApplyPlanBatchPatchResult;
   }
   const raw = await loadRawSettings();
   const impl = IMPLS[provider];
-  const hydratedFiles: PatchTargetFile[] = [];
-  for (const f of files) {
-    const rel = normalizeApplyPlanPath(f.path);
-    if (f.content && f.content.length > 0) {
-      hydratedFiles.push({ path: rel, content: f.content });
-      continue;
-    }
-    if (f.absPath && typeof f.absPath === "string") {
-      try {
-        const content = fs.readFileSync(f.absPath, "utf8");
-        hydratedFiles.push({ path: rel, content });
-      } catch (err) {
-        return {
-          ok: false,
-          provider,
-          model: "",
-          raw: null,
-          latencyMs: 0,
-          error: `Failed to read ${rel}: ${err instanceof Error ? err.message : String(err)}`,
-          missingPaths: [rel],
-        };
-      }
-      continue;
-    }
-    // Create targets intentionally have empty content.
-    hydratedFiles.push({ path: rel, content: f.content ?? "" });
-  }
+  const hydratedFiles = hydrated.files;
   const batchFiles = meta.directRewrite
     ? filterDirectRewriteFiles(
         hydratedFiles.map((f) => ({ path: f.path, content: f.content })),
@@ -757,146 +735,33 @@ export async function runApplyPlanBatchPatch(
   let totalLatency = 0;
   let repairAttempted = false;
 
-  const patchLog = (msg: string) => {
-    console.log(msg);
-    try {
-      const logPath = path.join(os.tmpdir(), "bryantlabs-patch-generate.log");
-      fs.appendFileSync(logPath, `${new Date().toISOString()} ${msg}\n`);
-    } catch {
-      /* best-effort diagnostics */
-    }
-  };
-
-  patchLog(
-    `[patch:batch:start] ${JSON.stringify({
-      provider,
-      fileCount: batchFiles.length,
-      paths: targetPaths.slice(0, 20),
-      promptChars: userPrompt.length,
-      directRewrite: Boolean(meta.directRewrite),
-    })}`,
-  );
-
   async function generateOnce(opts: {
     mode: "standard" | "repair" | "directRewrite";
     previousModelOutput?: string;
     repairMissingPaths?: readonly string[];
-    files?: readonly PatchTargetFile[];
   }): Promise<ApplyPlanBatchPatchResult> {
-    const activeFiles = opts.files ?? batchFiles;
-    const activePaths = activeFiles.map((f) => normalizeApplyPlanPath(f.path));
-    const buildPrompt = (slim: boolean) =>
-      buildApplyPlanBatchPatchPromptFromMeta(
-        userPrompt,
-        context,
-        activeFiles,
-        {
-          ...meta,
-          targetPaths: activePaths,
-          slimContext: slim || Boolean(meta.slimContext),
-          mode: opts.mode,
-          directRewrite: opts.mode === "directRewrite",
-          ...(opts.previousModelOutput
-            ? { previousModelOutput: opts.previousModelOutput }
-            : {}),
-          ...(opts.repairMissingPaths && opts.repairMissingPaths.length > 0
-            ? { repairMissingPaths: [...opts.repairMissingPaths] }
-            : {}),
-        },
-      );
-    let usedSlim = Boolean(meta.slimContext);
-    patchLog(`[patch:prompt:build:start] slim=${usedSlim} files=${activeFiles.length}`);
-    let prompt = buildPrompt(usedSlim);
-    patchLog(`[patch:prompt:build:done] chars=${prompt.length}`);
-    // Full-file rewrites of polished apps can be large; give single-file edits
-    // the same headroom as multi-file batches so the closing @@END marker is not
-    // truncated (which would yield zero parsed files / "no proposals").
-    const maxOutputTokens = resolvePatchMaxOutputTokens(raw, activeFiles.length);
-    const generateOpts = resolveApplyPlanPatchGenerateOpts(
+    const prompt = buildApplyPlanBatchPatchPromptFromMeta(
       userPrompt,
-      activeFiles.length,
-    );
-    patchLog(
-      `[patch:generate:start] ${JSON.stringify({
-        files: activeFiles.length,
-        timeoutMs: generateOpts.timeoutMs,
-        operation: generateOpts.operation,
-        promptChars: prompt.length,
-        maxOutputTokens,
+      context,
+      batchFiles,
+      {
+        ...meta,
+        targetPaths,
         mode: opts.mode,
-      })}`,
+        directRewrite: opts.mode === "directRewrite",
+        ...(opts.previousModelOutput
+          ? { previousModelOutput: opts.previousModelOutput }
+          : {}),
+        ...(opts.repairMissingPaths && opts.repairMissingPaths.length > 0
+          ? { repairMissingPaths: [...opts.repairMissingPaths] }
+          : {}),
+      },
     );
-    const generateStarted = Date.now();
-    const watchdogMs = Math.min(generateOpts.timeoutMs + 15_000, 195_000);
-    let res: Awaited<ReturnType<NonNullable<typeof impl>["generate"]>>;
-    try {
-      res = await Promise.race([
-        impl!.generate(raw, prompt, maxOutputTokens, generateOpts),
-        new Promise<never>((_, reject) => {
-          setTimeout(() => {
-            reject(
-              new Error(
-                `Patch generate watchdog fired after ${watchdogMs}ms (http timeout ${generateOpts.timeoutMs}ms).`,
-              ),
-            );
-          }, watchdogMs);
-        }),
-      ]);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      patchLog(
-        `[patch:generate:watchdog-or-throw] ${JSON.stringify({
-          wallMs: Date.now() - generateStarted,
-          message: message.slice(0, 300),
-        })}`,
-      );
-      return {
-        ok: false,
-        provider,
-        model: "",
-        raw: null,
-        latencyMs: Date.now() - generateStarted,
-        error: message,
-        missingPaths: activePaths,
-      };
-    }
-    patchLog(
-      `[patch:generate:done] ${JSON.stringify({
-        ok: res.ok,
-        latencyMs: res.latencyMs,
-        wallMs: Date.now() - generateStarted,
-        error: res.error ? String(res.error).slice(0, 200) : null,
-      })}`,
-    );
+    const res = await impl!.generate(raw, prompt, 16384, {
+      timeoutMs: PROVIDER_TIMEOUT_MS.generatePatch,
+      operation: "patch",
+    });
     totalLatency += res.latencyMs;
-    const retrySlim = async (): Promise<boolean> => {
-      if (usedSlim) return false;
-      usedSlim = true;
-      prompt = buildPrompt(true);
-      const retry = await impl!.generate(raw, prompt, maxOutputTokens, generateOpts);
-      totalLatency += retry.latencyMs;
-      res = retry;
-      return true;
-    };
-    if (!res.ok && isTruncatedHttpJsonBodyError(res.error)) {
-      await retrySlim();
-    }
-
-    console.log(
-      `[patch:metrics] ${JSON.stringify({
-        ok: res.ok,
-        provider: res.provider,
-        model: res.model,
-        mode: opts.mode,
-        files: activeFiles.length,
-        promptChars: prompt.length,
-        promptByteLength: Buffer.byteLength(prompt, "utf8"),
-        responseChars: res.text?.length ?? 0,
-        maxOutputTokens,
-        latencyMs: res.latencyMs,
-        ...(res.error ? { error: res.error } : {}),
-      })}`,
-    );
 
     if (!res.ok) {
       return {
@@ -907,40 +772,21 @@ export async function runApplyPlanBatchPatch(
         rawText: res.text,
         latencyMs: totalLatency,
         error: res.error ?? "Provider request failed.",
-        missingPaths: activePaths,
+        missingPaths: targetPaths,
         repairAttempted,
         directRewrite: Boolean(meta.directRewrite),
         lastModelRawText: res.text,
       };
     }
 
-    let parsed = parseApplyPlanBatchPatchResponse(res.text ?? "", activePaths);
-    if (
-      res.ok &&
-      !parsed.ok &&
-      (await retrySlim()) &&
-      res.ok
-    ) {
-      parsed = parseApplyPlanBatchPatchResponse(res.text ?? "", activePaths);
-    }
+    const parsed = parseApplyPlanBatchPatchResponse(res.text, targetPaths);
     const partialOut: Record<string, string> = {};
-    for (const p of activePaths) {
+    for (const p of targetPaths) {
       const content = parsed.files.get(p);
       if (content) partialOut[p] = content;
     }
     const partialFiles =
       Object.keys(partialOut).length > 0 ? partialOut : undefined;
-
-    console.log(
-      `[patch:parse] ${JSON.stringify({
-        ok: parsed.ok,
-        expected: activePaths,
-        parsedFiles: Object.keys(partialOut),
-        missingPaths: parsed.missingPaths,
-        ...(parsed.errorCode ? { errorCode: parsed.errorCode } : {}),
-        ...(parsed.errorMessage ? { errorMessage: parsed.errorMessage } : {}),
-      })}`,
-    );
 
     if (parsed.ok) {
       return {
@@ -973,132 +819,41 @@ export async function runApplyPlanBatchPatch(
     };
   }
 
-  async function generateSequentialPerFile(
-    mode: "standard" | "repair" | "directRewrite",
-  ): Promise<ApplyPlanBatchPatchResult> {
-    const merged: Record<string, string> = {};
-    let lastResult: ApplyPlanBatchPatchResult | null = null;
-    let lastRaw: string | undefined;
-    for (const file of batchFiles) {
-      const res = await generateOnce({ mode, files: [file] });
-      lastResult = res;
-      lastRaw = res.lastModelRawText ?? res.rawText ?? lastRaw;
-      if (res.files) Object.assign(merged, res.files);
-      if (!res.ok) continue;
-    }
-    const mergedPaths = Object.keys(merged);
-    if (mergedPaths.length === targetPaths.length && mergedPaths.length > 0) {
-      return {
-        ok: true,
-        provider: lastResult!.provider,
-        model: lastResult!.model,
-        raw: lastResult!.raw,
-        rawText: lastResult!.rawText,
-        latencyMs: totalLatency,
-        files: merged,
-        repairAttempted,
-        directRewrite: Boolean(meta.directRewrite),
-      };
-    }
-    if (mergedPaths.length > 0) {
-      const missingPaths = targetPaths.filter((p) => merged[p] === undefined);
-      return {
-        ok: false,
-        provider: lastResult?.provider ?? provider,
-        model: lastResult?.model ?? "",
-        raw: lastResult?.raw ?? null,
-        rawText: lastResult?.rawText,
-        latencyMs: totalLatency,
-        error: lastResult?.error ?? "Could not parse Apply Plan patch response.",
-        errorCode: lastResult?.errorCode ?? APPLY_PLAN_PATCH_FORMAT_ERROR,
-        missingPaths,
-        files: merged,
-        repairAttempted,
-        directRewrite: Boolean(meta.directRewrite),
-        lastModelRawText: lastRaw,
-      };
-    }
-    const missingPaths = targetPaths.filter((p) => merged[p] === undefined);
-    return {
-      ok: false,
-      provider: lastResult?.provider ?? provider,
-      model: lastResult?.model ?? "",
-      raw: lastResult?.raw ?? null,
-      rawText: lastResult?.rawText,
-      latencyMs: totalLatency,
-      error: lastResult?.error ?? "Could not parse Apply Plan patch response.",
-      errorCode: lastResult?.errorCode ?? APPLY_PLAN_PATCH_FORMAT_ERROR,
-      missingPaths,
-      ...(mergedPaths.length > 0 ? { files: merged } : {}),
-      repairAttempted,
-      directRewrite: Boolean(meta.directRewrite),
-      lastModelRawText: lastRaw,
-    };
-  }
-
   const initialMode = meta.directRewrite ? "directRewrite" : "standard";
-  const first =
-    batchFiles.length > 1 && !meta.repair
-      ? await generateSequentialPerFile(initialMode)
-      : await generateOnce({ mode: initialMode });
+  const first = await generateOnce({ mode: initialMode });
   if (first.ok) return first;
 
   const lastRaw = first.lastModelRawText ?? first.rawText;
-  const missingForRepair =
-    first.missingPaths && first.missingPaths.length > 0
-      ? [...first.missingPaths]
-      : targetPaths.filter((p) => first.files?.[p] === undefined);
   const canRepair =
     !meta.directRewrite &&
     !meta.repair &&
-    missingForRepair.length > 0 &&
+    Boolean(lastRaw?.trim()) &&
     (first.errorCode === APPLY_PLAN_PATCH_FORMAT_ERROR ||
-      first.errorCode === "MISSING_FILES" ||
-      Boolean(first.files && Object.keys(first.files).length > 0));
+      first.errorCode === "MISSING_FILES");
 
   if (canRepair) {
     repairAttempted = true;
-    const missingFiles = batchFiles.filter((f) =>
-      missingForRepair.includes(normalizeApplyPlanPath(f.path)),
-    );
-    // Retry only the missing files. Do not feed a successful CSS (or other)
-    // response back as "previous model output" — that confuses the repair pass
-    // into skipping App.tsx.
+    const missingForRepair =
+      first.errorCode === "MISSING_FILES" && first.missingPaths?.length
+        ? [...first.missingPaths]
+        : targetPaths;
     const second = await generateOnce({
-      mode: "standard",
-      files: missingFiles.length > 0 ? missingFiles : undefined,
+      mode: "repair",
+      previousModelOutput: lastRaw,
       repairMissingPaths: missingForRepair,
     });
     const mergedFiles =
       first.files || second.files
         ? { ...first.files, ...second.files }
         : undefined;
-    const mergedOk =
-      Boolean(mergedFiles) &&
-      targetPaths.every((p) => mergedFiles?.[p] !== undefined);
     const lastModelRawText =
       second.lastModelRawText ?? second.rawText ?? lastRaw;
-    if (mergedOk && mergedFiles) {
-      return {
-        ...second,
-        ok: true,
-        repairAttempted: true,
-        latencyMs: totalLatency,
-        lastModelRawText,
-        files: mergedFiles,
-        missingPaths: undefined,
-        error: undefined,
-        errorCode: undefined,
-      };
-    }
     return {
       ...second,
-      ok: false,
       repairAttempted: true,
       latencyMs: totalLatency,
       lastModelRawText,
       ...(mergedFiles ? { files: mergedFiles } : {}),
-      missingPaths: targetPaths.filter((p) => mergedFiles?.[p] === undefined),
     };
   }
 

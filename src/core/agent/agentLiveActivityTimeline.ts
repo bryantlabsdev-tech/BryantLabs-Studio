@@ -796,10 +796,14 @@ export function buildAgentRunFinalSummary(input: {
   if (input.card.failureDetails?.rawErrorMessage) {
     errors.push(input.card.failureDetails.rawErrorMessage);
   }
+  const runSucceeded =
+    input.run?.runResult === "success" || input.card.overallStatus === "complete";
   for (const entry of input.entries) {
-    if (entry.status === "failed" && entry.message.trim()) {
-      errors.push(entry.message.trim());
+    if (entry.status !== "failed" || !entry.message.trim()) continue;
+    if (runSucceeded && (entry.stage === "ui_audit" || entry.stage === "ui_repair")) {
+      continue;
     }
+    errors.push(entry.message.trim());
   }
 
   const outcome =

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { EmptyState } from "@/components/EmptyState";
 import { BRYANTLABS_AGENT_DISPLAY_NAME } from "@/core/studioRun/types";
 import { buildAgentReport } from "@/core/agentWorkspace";

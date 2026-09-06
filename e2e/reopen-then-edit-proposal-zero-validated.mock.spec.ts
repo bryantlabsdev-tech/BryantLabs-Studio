@@ -1,9 +1,13 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { test, expect } from "@playwright/test";
 import type { ElectronApplication, Page } from "playwright";
 import {
   dismissBlockingDialogs,
   emptyProjectFixturePath,
   fillAgentPrompt,
+  projectRoot,
   getMainWindow,
   launchStudioApp,
   openExistingProjectAt,
@@ -12,44 +16,87 @@ import {
   sendAgentPrompt,
   waitForComposerReady,
   waitForPatchApplied,
+  assertNoRenderLoopConsoleErrors,
 } from "./helpers/studio";
+
+const TASK_MANAGER_APP = `export default function App() {
+  return (
+    <main className="task-manager">
+      <h1>Tasks</h1>
+      <ul>
+        <li>Sample task</li>
+      </ul>
+      <form>
+        <input aria-label="New task" placeholder="Add a task" />
+        <button type="submit">Add</button>
+      </form>
+    </main>
+  );
+}
+`;
+
+async function seedDisposableTaskManager(): Promise<string> {
+  const dest = await fs.mkdtemp(path.join(os.tmpdir(), "bl-reopen-edit-"));
+  const names = [
+    "package.json",
+    "package-lock.json",
+    "index.html",
+    "vite.config.ts",
+    "tsconfig.json",
+    "src/main.tsx",
+    "src/index.css",
+  ];
+  for (const name of names) {
+    const from = path.join(emptyProjectFixturePath, name);
+    const to = path.join(dest, name);
+    await fs.mkdir(path.dirname(to), { recursive: true });
+    await fs.copyFile(from, to);
+  }
+  await fs.writeFile(path.join(dest, "src/App.tsx"), TASK_MANAGER_APP, "utf8");
+  await fs.symlink(
+    path.join(projectRoot, "node_modules"),
+    path.join(dest, "node_modules"),
+    "dir",
+  );
+  return dest;
+}
 
 test.describe("Reopen lifecycle: Apply Plan should generate proposals", () => {
   let app: ElectronApplication;
   let page: Page;
+  let projectPath: string;
 
   const editPrompt = "Add priority levels and due dates to tasks.";
 
   test.setTimeout(360_000);
 
   test.beforeAll(async () => {
-    // Keep a stable task-manager scaffold for priority/due-date edits.
-    // Do not wipe the fixture — create-then-edit.mock owns empty-folder greenfield.
+    // Disposable seeded copy — never mutate the shared empty-project fixture.
+    projectPath = await seedDisposableTaskManager();
     app = await launchStudioApp({ e2eProject: null });
     page = await getMainWindow(app);
     await dismissBlockingDialogs(page);
 
-    await openExistingProjectAt(page, emptyProjectFixturePath);
+    await openExistingProjectAt(page, projectPath);
     await waitForComposerReady(page);
     await page.locator("#build-prompt").waitFor({ state: "visible", timeout: 30_000 });
   });
 
   test.afterAll(async () => {
     await app.close();
+    if (projectPath) {
+      await fs.rm(projectPath, { recursive: true, force: true }).catch(() => undefined);
+    }
   });
 
   test("create + edit, quit, reopen, edit again (no zero-proposals failure)", async () => {
-    // Ensure follow-up edits auto-apply (no manual patch review needed).
     await page.evaluate(() => {
       localStorage.setItem("bryantlabs.followUpReviewFirst", "0");
     });
 
     const readiness = await page.evaluate(() => window.__studioTestHooks?.getReadinessState?.());
-    // eslint-disable-next-line no-console
-    console.log("[repro:pre_create] projectPath=", readiness?.projectPath, "scanStatus=", readiness?.scanStatus);
-    expect(String(readiness?.projectPath ?? "")).toMatch(/empty-project|fixtures/);
+    expect(String(readiness?.projectPath ?? "")).toContain("bl-reopen-edit-");
 
-    // Successful edit before quitting.
     await fillAgentPrompt(page, editPrompt);
     await sendAgentPrompt(page);
     await dismissBlockingDialogs(page);
@@ -57,33 +104,26 @@ test.describe("Reopen lifecycle: Apply Plan should generate proposals", () => {
     const beforeQuitOutcome = await waitForPatchApplied(page);
     const beforeQuitRun = await page.evaluate(() => window.__studioTestHooks?.getGreenfieldRunSnapshot?.());
 
-    // Console logs are useful when diagnosing rare lifecycle ordering bugs.
-    // eslint-disable-next-line no-console
-    console.log("[repro:before_quit] outcome=", beforeQuitOutcome, "failureRoot=", beforeQuitRun?.failureReport?.rootCauseLine);
-
     expect(beforeQuitOutcome).toBe("patch_applied");
     expect(String(beforeQuitRun?.failureReport?.rootCauseLine ?? "")).not.toMatch(
       /zero valid patch proposals/i,
     );
+    await assertNoRenderLoopConsoleErrors(page);
 
-    // Quit fully (process exit) and reopen Studio.
     await app.close();
 
     app = await launchStudioApp({ e2eProject: null });
     page = await getMainWindow(app);
     await dismissBlockingDialogs(page);
 
-    await openExistingProjectAt(page, emptyProjectFixturePath);
+    await openExistingProjectAt(page, projectPath);
     await waitForComposerReady(page);
 
     const reopenedIndexLabel = await readIndexStatusLabel(page);
     const reopenedIndexedFiles = await readReadyIndexedFileCount(page);
-    const reopenedReadiness = await page.evaluate(() => window.__studioTestHooks?.getReadinessState?.());
+    void reopenedIndexLabel;
+    void reopenedIndexedFiles;
 
-    // eslint-disable-next-line no-console
-    console.log("[repro:after_reopen] scanStatus=", reopenedReadiness?.scanStatus, "indexLabel=", reopenedIndexLabel, "indexedFiles=", reopenedIndexedFiles);
-
-    // Edit again after reopen.
     await page.evaluate(() => {
       localStorage.setItem("bryantlabs.followUpReviewFirst", "0");
     });
@@ -95,27 +135,16 @@ test.describe("Reopen lifecycle: Apply Plan should generate proposals", () => {
     const afterReopenOutcome = await waitForPatchApplied(page);
     const afterReopenRun = await page.evaluate(() => window.__studioTestHooks?.getGreenfieldRunSnapshot?.());
 
-    // eslint-disable-next-line no-console
-    console.log(
-      "[repro:after_reopen] outcome=",
-      afterReopenOutcome,
-      "failureRoot=",
-      afterReopenRun?.failureReport?.rootCauseLine,
-      "failureDetail=",
-      afterReopenRun?.failureReport?.stages?.[0]?.detail,
-    );
-
     expect(afterReopenOutcome).toBe("patch_applied");
     expect(String(afterReopenRun?.failureReport?.rootCauseLine ?? "")).not.toMatch(
       /zero valid patch proposals/i,
     );
 
-    // Second quit/reopen cycle.
     await app.close();
     app = await launchStudioApp({ e2eProject: null });
     page = await getMainWindow(app);
     await dismissBlockingDialogs(page);
-    await openExistingProjectAt(page, emptyProjectFixturePath);
+    await openExistingProjectAt(page, projectPath);
     await waitForComposerReady(page);
 
     await page.evaluate(() => {
@@ -130,18 +159,11 @@ test.describe("Reopen lifecycle: Apply Plan should generate proposals", () => {
     const secondReopenOutcome = await waitForPatchApplied(page);
     const secondReopenRun = await page.evaluate(() => window.__studioTestHooks?.getGreenfieldRunSnapshot?.());
 
-    // eslint-disable-next-line no-console
-    console.log(
-      "[repro:second_reopen] outcome=",
-      secondReopenOutcome,
-      "failureRoot=",
-      secondReopenRun?.failureReport?.rootCauseLine,
-    );
-
     expect(secondReopenOutcome).toBe("patch_applied");
     expect(String(secondReopenRun?.failureReport?.rootCauseLine ?? "")).not.toMatch(
       /zero valid patch proposals/i,
     );
+
+    await assertNoRenderLoopConsoleErrors(page);
   });
 });
-

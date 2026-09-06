@@ -55,6 +55,7 @@ export interface BuildPipelineHost {
   readonly clearRunContextForNewSubmit: () => void;
   readonly startApplyPlan: (opts?: {
     autoContinue?: boolean;
+    prompt?: string;
   }) => Promise<import("@/app/orchestration/applyPlan").ExecuteApplyPlanResult>;
   readonly approveAllPlanApplyFiles: () => void;
   readonly applyApprovedPlanFiles: (opts?: {
@@ -73,6 +74,7 @@ export interface BuildPipelineHost {
     directRewrite: boolean;
     pipelineMode?: boolean;
     autoContinue?: boolean;
+    prompt?: string;
   }) => Promise<import("@/app/orchestration/applyPlan").ExecuteApplyPlanResult>;
   readonly startAutoFixAfterApply: (opts: {
     verification: VerificationResult;

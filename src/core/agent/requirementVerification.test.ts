@@ -265,6 +265,19 @@ describe("requirementExtraction", () => {
     assert.ok(tech.some((item) => /react router/i.test(item.label)));
     assert.ok(tech.some((item) => /localstorage/i.test(item.label)));
   });
+
+  it("retains both halves of a mixed functional+visual follow-up", () => {
+    const extracted = extractPromptRequirements(
+      "Add a high-priority-only filter and visually highlight overdue incomplete tasks.",
+    );
+    const labels = extracted.map((item) => item.label.toLowerCase());
+    assert.ok(extracted.length >= 2, labels.join(" | "));
+    assert.ok(labels.some((label) => /filter/.test(label)), labels.join(" | "));
+    assert.ok(
+      labels.some((label) => /highlight|overdue|visual/.test(label)),
+      labels.join(" | "),
+    );
+  });
 });
 
 describe("requirementVerification", () => {

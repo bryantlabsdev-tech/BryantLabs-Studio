@@ -2,7 +2,7 @@ import {
   applyDeterministicRepairs,
   type ProjectRepairResult,
 } from "@/core/greenfield/deterministicProjectRepairs";
-import { createFilesystemProjectRepairIo } from "@/core/greenfield/projectRepairFilesystemIo";
+import { createFilesystemProjectRepairIo } from "@/core/greenfield/projectRepairIo.fs";
 import { parseTypeScriptDiagnostics } from "@/core/greenfield/tscDiagnostics";
 import type { StressRepairAttempt } from "./types";
 

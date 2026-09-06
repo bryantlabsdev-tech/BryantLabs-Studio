@@ -3,8 +3,11 @@ import { describe, it } from "node:test";
 import { buildUiAuditAdvisoryFixPrompt } from "@/core/agent/uiAuditAdvisoryUx";
 import { recommendationsForUiAuditIssues } from "@/core/agent/uiAuditAdvisoryUx";
 import {
+  hasFunctionalBehaviorRequest,
+  hasVisualStylingRequest,
   isFunctionalFeaturePrompt,
   isGameplayOrLogicPrompt,
+  isMixedFunctionalUiPrompt,
   isUiLayoutPrompt,
   isUiOnlyStylingPrompt,
 } from "@/core/planner/fallback";
@@ -74,31 +77,60 @@ describe("promptClassification", () => {
     assert.equal(classifyFollowUpPromptType(prompt), "ui_layout");
   });
 
-  it("classifies priority and due-date task edits as functional", () => {
+  it("classifies mixed filter + overdue highlight as functional, not styling-only", () => {
     const prompt =
-      "Add priority and due dates to each task, with priority filtering and overdue highlighting.";
+      "Add a high-priority-only filter and visually highlight overdue tasks";
     const lower = prompt.toLowerCase();
-    assert.equal(isFunctionalFeaturePrompt(lower), true);
-    assert.equal(isUiOnlyFollowUpPrompt(prompt), false);
-    assert.equal(classifyFollowUpPromptType(prompt), "functional");
-  });
-
-  it("does not treat a hint-under-field prompt as CSS-only UI (ui is not a substring of hint)", () => {
-    const prompt =
-      "Add a small hint under the add-task field that says Press Enter to add a task.";
-    const lower = prompt.toLowerCase();
-    assert.equal(isUiLayoutPrompt(lower), false);
+    assert.equal(hasFunctionalBehaviorRequest(lower), true);
+    assert.equal(hasVisualStylingRequest(lower), true);
+    assert.equal(isMixedFunctionalUiPrompt(prompt), true);
     assert.equal(isFunctionalFeaturePrompt(lower), true);
     assert.equal(isUiOnlyStylingPrompt(prompt), false);
     assert.equal(isUiOnlyFollowUpPrompt(prompt), false);
     assert.equal(classifyFollowUpPromptType(prompt), "functional");
   });
 
-  it("classifies a footer copy addition as functional, not ui_layout", () => {
-    const prompt = "Add a small footer that says Made with BryantLabs Studio.";
-    const lower = prompt.toLowerCase();
-    assert.equal(isFunctionalFeaturePrompt(lower), true);
-    assert.equal(isUiLayoutPrompt(lower), false);
+  it("classifies search box plus yellow matches as mixed/functional", () => {
+    const prompt = "Add a search box and make matches yellow";
+    assert.equal(isMixedFunctionalUiPrompt(prompt), true);
     assert.equal(isUiOnlyFollowUpPrompt(prompt), false);
+    assert.equal(classifyFollowUpPromptType(prompt), "functional");
+  });
+
+  it("classifies a behavior button plus red styling as mixed/functional", () => {
+    const prompt = "Add a button that clears completed tasks and style it red";
+    assert.equal(isMixedFunctionalUiPrompt(prompt), true);
+    assert.equal(isUiOnlyStylingPrompt(prompt), false);
+    assert.equal(classifyFollowUpPromptType(prompt), "functional");
+  });
+
+  it("classifies restyling an existing button as styling-only", () => {
+    const prompt = "Make the existing button red";
+    assert.equal(isFunctionalFeaturePrompt(prompt.toLowerCase()), false);
+    assert.equal(isMixedFunctionalUiPrompt(prompt), false);
+    assert.equal(isUiOnlyStylingPrompt(prompt), true);
+    assert.equal(isUiOnlyFollowUpPrompt(prompt), true);
+  });
+
+  it("classifies spacing/typography polish as styling-only", () => {
+    const prompt = "Increase spacing and improve typography";
+    assert.equal(isFunctionalFeaturePrompt(prompt.toLowerCase()), false);
+    assert.equal(isUiOnlyStylingPrompt(prompt), true);
+    assert.equal(isUiOnlyFollowUpPrompt(prompt), true);
+  });
+
+  it("classifies filter-by-priority as functional", () => {
+    const prompt = "Filter tasks by priority";
+    assert.equal(isFunctionalFeaturePrompt(prompt.toLowerCase()), true);
+    assert.equal(isMixedFunctionalUiPrompt(prompt), false);
+    assert.equal(isUiOnlyFollowUpPrompt(prompt), false);
+    assert.equal(classifyFollowUpPromptType(prompt), "functional");
+  });
+
+  it("does not let styling words override functional verbs", () => {
+    const prompt =
+      "Add a high-priority-only filter and visually highlight overdue incomplete tasks.";
+    assert.equal(isUiOnlyStylingPrompt(prompt), false);
+    assert.equal(isFunctionalFeaturePrompt(prompt.toLowerCase()), true);
   });
 });

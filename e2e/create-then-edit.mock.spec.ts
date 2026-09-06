@@ -14,6 +14,7 @@ import {
   waitForGreenfieldRunTerminal,
   waitForPatchApplied,
   waitForPostPatchProgress,
+  assertNoRenderLoopConsoleErrors,
 } from "./helpers/studio";
 
 test.describe("Create then edit (mock provider)", () => {
@@ -33,6 +34,7 @@ test.describe("Create then edit (mock provider)", () => {
   });
 
   test.afterAll(async () => {
+    await assertNoRenderLoopConsoleErrors(page);
     await app.close();
     if (tempEmptyProject) {
       await fs.rm(tempEmptyProject, { recursive: true, force: true }).catch(() => undefined);
@@ -43,8 +45,6 @@ test.describe("Create then edit (mock provider)", () => {
     test.setTimeout(240_000);
 
     const readiness = await page.evaluate(() => window.__studioTestHooks?.getReadinessState?.());
-    // eslint-disable-next-line no-console
-    console.log("[create-then-edit:pre_prompt] projectPath=", readiness?.projectPath, "scanStatus=", readiness?.scanStatus);
     expect(String(readiness?.projectPath ?? "")).toContain("bl-create-then-edit-");
     await page.locator("#build-prompt").waitFor({ state: "visible", timeout: 30_000 });
 
@@ -53,16 +53,6 @@ test.describe("Create then edit (mock provider)", () => {
     await sendAgentPrompt(page);
     await dismissBlockingDialogs(page);
 
-    const afterSend = await page.evaluate(() => window.__studioTestHooks?.getReadinessState?.());
-    // eslint-disable-next-line no-console
-    console.log("[create-then-edit:after_send]", {
-      projectPath: afterSend?.projectPath,
-      scanStatus: afterSend?.scanStatus,
-      composerReady: afterSend?.composerReady,
-      composerBlockReason: afterSend?.composerBlockReason,
-      greenfieldRun: afterSend?.greenfieldRun,
-    });
-
     const createOutcome = await waitForGreenfieldRunTerminal(page);
     expect(createOutcome).toBe("success");
 
@@ -70,7 +60,6 @@ test.describe("Create then edit (mock provider)", () => {
       const run = window.__studioTestHooks?.getGreenfieldRunSnapshot?.();
       return {
         runResult: run?.runResult ?? null,
-        setupStatus: run?.setupStatus ?? null,
         setupOk: run?.setupResult?.ok ?? null,
         lastSuccessfulRunAt: run?.lastSuccessfulRunAt ?? null,
         filesWritten: run?.filesWritten?.length ?? 0,
@@ -94,6 +83,32 @@ test.describe("Create then edit (mock provider)", () => {
     await fillAgentPrompt(page, editPrompt);
     await sendAgentPrompt(page);
     await dismissBlockingDialogs(page);
+
+    const settlement = await page.evaluate(() => {
+      const diag = window.__studioTestHooks?.getFollowUpSettlementDiagnostic?.();
+      const run = window.__studioTestHooks?.getGreenfieldRunSnapshot?.();
+      const ready = window.__studioTestHooks?.getReadinessState?.();
+      const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+      return {
+        projectPath: ready?.projectPath ?? null,
+        createPromptLength: diag?.createPromptLength ?? null,
+        followUpPromptLength: diag?.followUpPromptLength ?? null,
+        submitEventId: diag?.submitEventId ?? null,
+        activeRunId: pipeline?.activeAgentRunId ?? null,
+        greenfieldStatus: run?.runResult ?? null,
+        currentActionType: run?.actionType ?? null,
+        selectedRoutingDecision:
+          diag?.selectedRoutingDecision ?? run?.routeDecision?.selectedRoute ?? null,
+        routingReason: diag?.routingReason ?? run?.routeDecision?.selectionReason ?? null,
+        scanStatus: ready?.scanStatus ?? null,
+        generateInvocations: diag?.generateInvocations ?? null,
+        applyPlanInvocations: diag?.applyPlanInvocations ?? null,
+        filesWritten: run?.filesWritten?.length ?? 0,
+      };
+    });
+    expect(settlement.followUpPromptLength).toBe(editPrompt.length);
+    expect(settlement.createPromptLength).toBe(createPrompt.length);
+    expect(settlement.selectedRoutingDecision).not.toBe("greenfield");
 
     const blockMessage = await page.evaluate(() => {
       const state = window.__studioTestHooks?.getPatchPipelineState?.();
@@ -121,5 +136,7 @@ test.describe("Create then edit (mock provider)", () => {
       const applied = await waitForPatchApplied(page);
       expect(["patch_applied", "apply_failed"]).toContain(applied);
     }
+
+    await assertNoRenderLoopConsoleErrors(page);
   });
 });

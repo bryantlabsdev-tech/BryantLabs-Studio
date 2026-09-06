@@ -13,17 +13,18 @@ import {
 } from "@/core/planApply/createFileTargets";
 import { resolvePlanFilePath } from "@/core/planApply/resolve";
 import { isGameplayApplyPrompt } from "@/core/planApply/applyIntent";
-import { isFunctionalFeaturePrompt } from "@/core/planner/fallback";
+import { findPrimaryStylesheets, findReactAppEntry, isFunctionalFeaturePrompt, isMixedFunctionalUiPrompt, normalizeRelPath } from "@/core/planner/fallback";
 import {
   buildGameplayAllowlist,
   buildUiOnlyAllowlist,
   CONFIG_UI_BLOCK_MESSAGE,
   ENTRY_BOOTSTRAP_SKIP_MESSAGE,
+  NON_SOURCE_SKIP_MESSAGE,
   filterPlanApplyTargets,
   isBlockedNonUiTarget,
   isConfigPackageTarget,
   isEntryBootstrapPath,
-  isGameplayPatchTarget,
+  isNonSourceApplyNoise,
   isUiCorePatchTarget,
   isUiOnlyApplyPrompt,
   SELECTION_REASON,
@@ -150,64 +151,12 @@ export function collectPlanApplyTargets(
       if (!resolved || allowPaths.has(resolved.relPath)) continue;
       if (isBlockedNonUiTarget(resolved.relPath)) {
         skipped.push(`${resolved.relPath}: ${CONFIG_UI_BLOCK_MESSAGE}`);
+      } else if (isEntryBootstrapPath(resolved.relPath)) {
+        skipped.push(`${resolved.relPath}: ${ENTRY_BOOTSTRAP_SKIP_MESSAGE}`);
       } else {
         skipped.push(
           `${resolved.relPath}: Not in UI allowlist (src/App.tsx, src/index.css, src/App.css only)`,
         );
-      }
-    }
-
-    return {
-      prompt,
-      summary: aiPlan?.ok && aiPlan.plan ? aiPlan.plan.summary : plan.summary,
-      source: aiPlan?.ok && aiPlan.plan?.files.length ? ("ai" as const) : ("deterministic" as const),
-      targets,
-      skipped,
-    };
-  }
-
-  if (isGameplayApplyPrompt(prompt)) {
-    const planFilesForDiagnostics =
-      aiPlan?.ok && aiPlan.plan?.files.length ? aiPlan.plan.files : plan.files;
-    recordBlockedPlanFiles(planFilesForDiagnostics, scan, skipped);
-
-    const allowlist = buildGameplayAllowlist(scan, promptLower);
-    const allowPaths = new Set(allowlist.map((t) => t.relPath));
-    const allowByPath = new Map(allowlist.map((t) => [t.relPath, t]));
-
-    const plannedPaths = new Set<string>();
-    const addPlannedPath = (path: string) => {
-      const resolved = resolvePlanFilePath(path, scan);
-      if (resolved) plannedPaths.add(resolved.relPath);
-    };
-    if (aiPlan?.ok && aiPlan.plan) {
-      for (const f of aiPlan.plan.files) addPlannedPath(f.path);
-    }
-    for (const f of plan.files) addPlannedPath(f.path);
-
-    const plannedAllowlisted =
-      plannedPaths.size > 0
-        ? [...plannedPaths].filter((relPath) => allowPaths.has(relPath))
-        : [];
-    const targetPaths =
-      plannedAllowlisted.length > 0
-        ? plannedAllowlisted
-        : [...allowPaths].filter((relPath) => isGameplayPatchTarget(relPath));
-
-    const targets: PlanApplyTarget[] = targetPaths
-      .map((relPath) => allowByPath.get(relPath))
-      .filter((candidate): candidate is PlanApplyTargetCandidate => Boolean(candidate))
-      .map((candidate) => targetFromCandidate(candidate, scan));
-
-    for (const f of planFilesForDiagnostics) {
-      const resolved = resolvePlanFilePath(f.path, scan);
-      if (!resolved || allowPaths.has(resolved.relPath)) continue;
-      if (isBlockedNonUiTarget(resolved.relPath)) {
-        skipped.push(`${resolved.relPath}: ${CONFIG_UI_BLOCK_MESSAGE}`);
-      } else if (isEntryBootstrapPath(resolved.relPath)) {
-        skipped.push(`${resolved.relPath}: ${ENTRY_BOOTSTRAP_SKIP_MESSAGE}`);
-      } else {
-        skipped.push(`${resolved.relPath}: Not in gameplay allowlist`);
       }
     }
 
@@ -284,6 +233,14 @@ export function collectPlanApplyTargets(
       skipped.push(`${resolved.relPath}: ${resolved.reason}`);
       continue;
     }
+    if (isEntryBootstrapPath(resolved.relPath)) {
+      skipped.push(`${resolved.relPath}: ${ENTRY_BOOTSTRAP_SKIP_MESSAGE}`);
+      continue;
+    }
+    if (isNonSourceApplyNoise(resolved.relPath)) {
+      skipped.push(`${resolved.relPath}: ${NON_SOURCE_SKIP_MESSAGE}`);
+      continue;
+    }
     if (seen.has(resolved.relPath)) continue;
     seen.add(resolved.relPath);
     candidates.push({
@@ -329,6 +286,57 @@ export function collectPlanApplyTargets(
       (a, b) => (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0),
     )
     .slice(0, MAX_PLAN_APPLY_FILES);
+
+  if (isGameplayApplyPrompt(prompt)) {
+    const seenPaths = new Set(targets.map((t) => t.relPath));
+    for (const allowed of buildGameplayAllowlist(scan, promptLower)) {
+      if (seenPaths.has(allowed.relPath)) continue;
+      seenPaths.add(allowed.relPath);
+      targets.push(targetFromCandidate(allowed, scan));
+    }
+  } else if (isFunctionalFeaturePrompt(promptLower)) {
+    const seenPaths = new Set(targets.map((t) => t.relPath));
+    const app = findReactAppEntry(scan);
+    if (app) {
+        const rel = normalizeRelPath(app.path);
+      if (!seenPaths.has(rel) && !isEntryBootstrapPath(rel)) {
+        seenPaths.add(rel);
+        targets.push(
+          targetFromCandidate(
+            {
+              relPath: rel,
+              absPath: app.absPath,
+              selectionReason: SELECTION_REASON.reactEntry,
+              planReason: "Functional behavior belongs in the React app entry",
+            },
+            scan,
+          ),
+        );
+      }
+    }
+    if (isMixedFunctionalUiPrompt(prompt)) {
+      const sheets = findPrimaryStylesheets(scan);
+      const cssFiles = [sheets.indexCss, sheets.appCss].filter(
+        (file): file is { path: string; absPath: string } => Boolean(file),
+      );
+      for (const css of cssFiles) {
+        const rel = normalizeRelPath(css.path);
+        if (seenPaths.has(rel)) continue;
+        seenPaths.add(rel);
+        targets.push(
+          targetFromCandidate(
+            {
+              relPath: rel,
+              absPath: css.absPath,
+              selectionReason: SELECTION_REASON.primaryStylesheet,
+              planReason: "Visual styling requested alongside functional behavior",
+            },
+            scan,
+          ),
+        );
+      }
+    }
+  }
 
   return { prompt, summary, source, targets, skipped };
 }
@@ -432,12 +440,6 @@ export function buildNarrowedRetryTargets(
     if (ui.length > 0) return ui;
   }
 
-  if (isGameplayApplyPrompt(userPrompt)) {
-    return buildGameplayAllowlist(scan, userPrompt.toLowerCase())
-      .filter((t) => t.relPath === "src/App.tsx" || t.relPath === "src/index.css")
-      .map((c) => targetFromCandidate(c, scan));
-  }
-
   const useAi = Boolean(aiPlan?.ok && aiPlan.plan && aiPlan.plan.files.length > 0);
 
   if (useAi) {
@@ -470,24 +472,25 @@ export function buildNarrowedRetryTargets(
     return smart.files
       .filter((f) => !isEntryBootstrapPath(f.path))
       .map((f) => {
-        const selectionReason = `Retry: smart selection (score ${f.score})`;
-        return {
-          relPath: f.path,
-          absPath: f.absPath,
-          action: "modify" as const,
-          selectionReason,
-          planReason: f.primaryReason,
-          reason: formatApplyTargetReason(selectionReason, f.primaryReason),
-          relevanceScore: f.score,
-          symbolMatches: symbolMatchesForPath(scan, f.absPath),
-        };
-      });
+      const selectionReason = `Retry: smart selection (score ${f.score})`;
+      return {
+        relPath: f.path,
+        absPath: f.absPath,
+        action: "modify" as const,
+        selectionReason,
+        planReason: f.primaryReason,
+        reason: formatApplyTargetReason(selectionReason, f.primaryReason),
+        relevanceScore: f.score,
+        symbolMatches: symbolMatchesForPath(scan, f.absPath),
+      };
+    });
   }
 
   const ranked = [...plan.files]
     .map((f) => {
       const resolved = resolvePlanFilePath(f.path, scan);
       if (!resolved) return null;
+      if (isEntryBootstrapPath(resolved.relPath)) return null;
       return { file: f, resolved };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null)

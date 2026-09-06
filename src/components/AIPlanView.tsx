@@ -4,7 +4,7 @@ import {
   AI_PLAN_REQUIRED_ROOT_KEYS,
   aiPlanFailureTitle,
 } from "@/core/planner/aiPlanSchema";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 
 function basename(p: string): string {
   const n = p.replace(/^\.\//, "").replace(/\\/g, "/");

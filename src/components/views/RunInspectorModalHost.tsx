@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { useAgentRunViewModel } from "@/app/workspace/useAgentRunViewModel";
 import { findAgentRunArtifact } from "@/core/agent/agentRunHistory";
 import { greenfieldSnapshotFromArtifact } from "@/core/agent/artifactObservability";

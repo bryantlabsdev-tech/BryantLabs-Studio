@@ -341,4 +341,94 @@ describe("plan apply target policy", () => {
     assert.ok(paths.includes("src/App.tsx"));
     assert.ok(paths.includes("src/index.css"));
   });
+
+  it("excludes src/main.tsx from Sudoku gameplay hint follow-ups", () => {
+    const gameplayPrompt = "add hints";
+    const scanWithMain = mockScan(["src/App.tsx", "src/index.css", "src/main.tsx"]);
+    const plan = generatePlan(gameplayPrompt, scanWithMain);
+    const aiPlan: AIPlanResult = {
+      ok: true,
+      provider: "anthropic",
+      model: "claude",
+      latencyMs: 1,
+      raw: {},
+      plan: {
+        summary: "Add hint button and hinted cell styling",
+        files: [
+          { path: "src/App.tsx", reason: "Hint handler and UI" },
+          { path: "src/index.css", reason: "Hinted cell styles" },
+          { path: "src/main.tsx", reason: "Bootstrap" },
+        ],
+        reasoning: "",
+        risks: [],
+        confidence: "High",
+      },
+    };
+    const { targets } = collectPlanApplyTargets(
+      plan,
+      aiPlan,
+      scanWithMain,
+      gameplayPrompt,
+    );
+    const paths = targets.map((t) => t.relPath);
+    assert.ok(!paths.includes("src/main.tsx"));
+    assert.ok(paths.includes("src/App.tsx"));
+    assert.ok(paths.includes("src/index.css"));
+  });
+
+  it("keeps App.tsx + CSS for mixed filter/highlight and excludes main.tsx", () => {
+    const mixedPrompt =
+      "Add a high-priority-only filter and visually highlight overdue incomplete tasks.";
+    const scanWithMain = mockScan(["src/App.tsx", "src/index.css", "src/main.tsx"]);
+    const plan = generatePlan(mixedPrompt, scanWithMain);
+    const aiPlan: AIPlanResult = {
+      ok: true,
+      provider: "anthropic",
+      model: "claude",
+      latencyMs: 1,
+      raw: {},
+      plan: {
+        summary: "Highlight overdue tasks",
+        files: [
+          { path: "src/index.css", reason: "Overdue highlight" },
+          { path: "src/main.tsx", reason: "Bootstrap" },
+          { path: ".gitkeep", reason: "Keep folder" },
+        ],
+        reasoning: "",
+        risks: [],
+        confidence: "High",
+      },
+    };
+    const { targets } = collectPlanApplyTargets(plan, aiPlan, scanWithMain, mixedPrompt);
+    const paths = targets.map((t) => t.relPath);
+    assert.ok(paths.includes("src/App.tsx"), paths.join(","));
+    assert.ok(paths.includes("src/index.css"), paths.join(","));
+    assert.ok(!paths.includes("src/main.tsx"));
+    assert.ok(!paths.includes(".gitkeep"));
+  });
+
+  it("does not force CSS for a logic-only filter follow-up", () => {
+    const prompt = "Filter tasks by priority";
+    const scan = mockScan(["src/App.tsx", "src/index.css", "src/main.tsx"]);
+    const plan = generatePlan(prompt, scan);
+    const aiPlan: AIPlanResult = {
+      ok: true,
+      provider: "anthropic",
+      model: "claude",
+      latencyMs: 1,
+      raw: {},
+      plan: {
+        summary: "Priority filter",
+        files: [{ path: "src/App.tsx", reason: "Filter state" }],
+        reasoning: "",
+        risks: [],
+        confidence: "High",
+      },
+    };
+    const { targets } = collectPlanApplyTargets(plan, aiPlan, scan, prompt);
+    const paths = targets.map((t) => t.relPath);
+    assert.ok(paths.includes("src/App.tsx"));
+    assert.ok(!paths.includes("src/main.tsx"));
+    assert.equal(paths.includes("src/index.css"), false);
+  });
 });

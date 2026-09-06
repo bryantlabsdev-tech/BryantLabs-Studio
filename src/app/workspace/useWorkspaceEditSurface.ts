@@ -80,16 +80,11 @@ export function useWorkspaceEditSurface(input: {
     }
   }, []);
 
-  const openFile = useCallback(async (
-    node: FileNode,
-    opts?: { readonly revealEditor?: boolean },
-  ) => {
+  const openFile = useCallback(async (node: FileNode) => {
     const current = inputRef.current;
     if (!current.api || node.type !== "file") return;
     const path = node.path;
-    if (opts?.revealEditor !== false) {
-      current.setCenterTab("editor");
-    }
+    current.setCenterTab("editor");
 
     const cached = current.openFilesByPath[path];
     if (cached) {

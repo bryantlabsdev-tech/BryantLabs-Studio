@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { DiffRowsView } from "@/components/editor/DiffRowsView";
 import { formatAutoFixSummaryCopy } from "@/core/autoFix/summary";
 

@@ -79,19 +79,73 @@ export async function launchStudioApp(opts?: {
     env.VITE_DEV_SERVER_URL = env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
   }
 
-  return electron.launch({
+  launchRenderLoopErrors.length = 0;
+  const app = await electron.launch({
     args: ["."],
     cwd: projectRoot,
     env,
     timeout: 120_000,
   });
+  const captureLaunch = (text: string) => {
+    if (/Maximum update depth exceeded/i.test(text)) {
+      launchRenderLoopErrors.push(text);
+    }
+  };
+  app.on("window", (page) => {
+    installRenderLoopConsoleGuard(page);
+  });
+  try {
+    app.context().on("console", (msg) => captureLaunch(msg.text()));
+  } catch {
+    // Electron context may not expose console until a window exists.
+  }
+  app.process().stdout?.on("data", (buf: Buffer | string) => {
+    captureLaunch(String(buf));
+  });
+  app.process().stderr?.on("data", (buf: Buffer | string) => {
+    captureLaunch(String(buf));
+  });
+  return app;
 }
 
 export async function getMainWindow(app: ElectronApplication): Promise<Page> {
   const page = await app.firstWindow();
+  installRenderLoopConsoleGuard(page);
   await page.waitForLoadState("domcontentloaded");
   await waitForStudioTestHooks(page);
   return page;
+}
+
+const renderLoopErrors = new WeakMap<Page, string[]>();
+const launchRenderLoopErrors: string[] = [];
+
+export function installRenderLoopConsoleGuard(page: Page): void {
+  if (renderLoopErrors.has(page)) return;
+  const errors: string[] = [];
+  renderLoopErrors.set(page, errors);
+  const capture = (text: string) => {
+    if (/Maximum update depth exceeded/i.test(text)) {
+      errors.push(text);
+    }
+  };
+  page.on("console", (msg) => capture(msg.text()));
+  page.on("pageerror", (err) => capture(err.message));
+}
+
+export async function assertNoRenderLoopConsoleErrors(page: Page): Promise<void> {
+  const recorded = await page
+    .evaluate(() => window.__studioMaxUpdateDepthErrors ?? [])
+    .catch(() => [] as string[]);
+  const errors = [
+    ...(renderLoopErrors.get(page) ?? []),
+    ...launchRenderLoopErrors,
+    ...recorded,
+  ];
+  if (errors.length > 0) {
+    throw new Error(
+      `React maximum update depth exceeded (${errors.length} time(s)): ${errors[0]}`,
+    );
+  }
 }
 
 export async function dismissBlockingDialogs(page: Page): Promise<void> {
@@ -513,6 +567,88 @@ export async function waitForPatchApplied(page: Page): Promise<PatchPipelineOutc
           return true;
         }
 
+        return run.runResult === "success" || run.runResult === "failed";
+      },
+      undefined,
+      { timeout: PATCH_PIPELINE_TIMEOUT_MS },
+    );
+  } catch (err) {
+    const debug = await page.evaluate(() => {
+      const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+      const run = window.__studioTestHooks?.getGreenfieldRunSnapshot?.();
+      return {
+        pipeline,
+        runResult: run?.runResult ?? null,
+        entries: run?.entries?.slice(-8) ?? [],
+      };
+    });
+    throw new Error(
+      `Patch apply did not finish within ${PATCH_PIPELINE_TIMEOUT_MS / 1000}s. Debug=${JSON.stringify(debug)}`,
+    );
+  }
+
+  const outcome = await readPatchPipelineOutcome(page);
+  if (outcome === "verification_started" || outcome === "patch_applied") {
+    const verifyOk = await page.evaluate(() => {
+      const run = window.__studioTestHooks?.getGreenfieldRunSnapshot?.();
+      return run?.entries?.some(
+        (e) => e.stage === "verification" && e.status === "success",
+      );
+    });
+    if (verifyOk) return "patch_applied";
+  }
+  if (outcome) return outcome;
+  return "patch_applied";
+}
+
+/** Wait until follow-up patches are applied and verification finishes. */
+export async function waitForPatchApplied(page: Page): Promise<PatchPipelineOutcome> {
+  try {
+    await page.waitForFunction(
+      () => {
+        const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+        if (!pipeline) return false;
+
+        if (
+          pipeline.planApplyPhase === "proposing" ||
+          pipeline.planApplyPhase === "applying" ||
+          pipeline.planApplyPhase === "verifying"
+        ) {
+          return false;
+        }
+        if (pipeline.planApplyError) return true;
+        if (pipeline.buildPhase === "failed") return true;
+        if (pipeline.aiPlanStatus === "error") return true;
+        if (pipeline.planApplyPhase === "done") return true;
+        if (pipeline.planApplyPhase === "waiting_for_review") return true;
+
+        const run = window.__studioTestHooks?.getGreenfieldRunSnapshot?.();
+        if (!run) return false;
+
+        const wroteFiles = run.entries?.some(
+          (e) =>
+            e.stage === "apply_plan" &&
+            e.status === "success" &&
+            /Wrote \d+ file/i.test(e.message),
+        );
+        const verifyDone = run.entries?.some(
+          (e) =>
+            e.stage === "verification" &&
+            (e.status === "success" || e.status === "failed"),
+        );
+        const noRunning = !run.entries?.some((e) => e.status === "running");
+
+        if (wroteFiles && verifyDone && noRunning && !pipeline.buildRunning) {
+          return true;
+        }
+
+        if (
+          pipeline.planApplyPhase === "proposing" ||
+          pipeline.planApplyPhase === "applying" ||
+          pipeline.planApplyPhase === "verifying"
+        ) {
+          return false;
+        }
         return run.runResult === "success" || run.runResult === "failed";
       },
       undefined,

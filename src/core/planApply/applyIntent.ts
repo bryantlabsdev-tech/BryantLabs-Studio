@@ -1,6 +1,7 @@
 import {
   isGameplayOrLogicPrompt,
   isFunctionalFeaturePrompt,
+  isMixedFunctionalUiPrompt,
   isUiOnlyStylingPrompt,
 } from "@/core/planner/fallback";
 
@@ -9,6 +10,7 @@ export type ApplyRoutingIntent = "feature_addition" | "small_ui";
 export type ApplyRoutingReason =
   | "gameplay_keywords"
   | "functional_keywords"
+  | "mixed_functional_ui"
   | "styling_keywords"
   | "default_full_apply";
 
@@ -26,6 +28,13 @@ export function classifyApplyIntent(prompt: string): ApplyIntentClassification {
       intent: "feature_addition",
       reason: "gameplay_keywords",
       gameplay: true,
+    };
+  }
+  if (isMixedFunctionalUiPrompt(prompt)) {
+    return {
+      intent: "feature_addition",
+      reason: "mixed_functional_ui",
+      gameplay: false,
     };
   }
   if (isFunctionalFeaturePrompt(lower)) {

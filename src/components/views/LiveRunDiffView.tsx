@@ -5,7 +5,7 @@ import {
 } from "@/core/agent/artifactDiffView";
 import type { RunFileDiff } from "@/core/agent/runFileDiffs";
 import { RunDiffWorkbenchView } from "@/components/views/RunDiffWorkbenchView";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 
 interface LiveRunDiffViewProps {
   readonly diffs: readonly RunFileDiff[];

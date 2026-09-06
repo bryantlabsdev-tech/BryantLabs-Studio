@@ -136,7 +136,7 @@ function intentsForTool(tool: AgentToolEvent, mem: NarrationMemory): ToolIntents
     case "plan:main":
       return {
         running: mem.explored || mem.projectRead
-          ? ellipsis("I'm working out how the pieces fit together")
+          ? ellipsis("I'm tracing how this feature is connected")
           : ellipsis("I'm finding where this needs to change"),
         done: file
           ? `I found the ${file.replace(/\.\w+$/, "")} implementation.`
@@ -243,9 +243,8 @@ function buildClosingSegments(input: {
   readonly previewReady: boolean;
   readonly skipLeadIn?: boolean;
   readonly patchReviewPending?: boolean;
-  readonly runMode?: "edit" | "consultation";
 }): AgentNarrativeSegment[] {
-  const { summary, previewReady, skipLeadIn = false, patchReviewPending = false, runMode = "edit" } = input;
+  const { summary, previewReady, skipLeadIn = false, patchReviewPending = false } = input;
   const segments: AgentNarrativeSegment[] = [];
 
   if (summary.outcome === "cancelled") {
@@ -264,15 +263,11 @@ function buildClosingSegments(input: {
     if (!skipLeadIn) {
       const reason = summary.errors[0] ?? summary.noChangeExplanation;
       if (reason) {
-        if (runMode === "consultation") {
-          segments.push({ id: "closing:0", text: reason.startsWith("I ") ? reason : `I couldn't finish answering because ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.` });
-        } else {
-          const normalized = reason.startsWith("I ")
-            ? reason
-            : `I couldn't safely apply this edit because ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.`;
-          segments.push({ id: "closing:0", text: normalized });
-        }
-      } else if (runMode !== "consultation") {
+        const normalized = reason.startsWith("I ")
+          ? reason
+          : `I couldn't safely apply this edit because ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.`;
+        segments.push({ id: "closing:0", text: normalized });
+      } else {
         segments.push({
           id: "closing:0",
           text: "I couldn't safely apply this edit because the generated patch wasn't valid.",
@@ -324,8 +319,8 @@ export interface BuildAgentConversationProjectionInput {
   readonly frameworkLabel?: string | null;
   readonly isRunning: boolean;
   readonly waitElapsedMs?: number;
-  readonly runMode?: "edit" | "consultation";
   readonly patchReviewPending?: boolean;
+  readonly runMode?: "edit" | "consultation";
 }
 
 export function buildAgentConversationProjection(
@@ -399,41 +394,12 @@ export function buildAgentConversationProjection(
     applyToolMemory(tool, mem);
   }
 
-  const runSucceeded = input.summary?.outcome === "success";
-  const appliedDespiteNoise =
-    (input.summary?.filesChanged.length ?? 0) > 0 ||
-    activityTools.some(
-      (tool) =>
-        tool.kind === "edit" &&
-        tool.status === "success" &&
-        (Boolean(tool.files?.length) || /updated|edited/i.test(tool.label)),
-    );
-
   for (const tool of failureTools) {
     if (input.patchReviewPending) continue;
-    if (runSucceeded) continue;
-    // Patches already landed — do not narrate a false apply failure from UI audit /
-    // non-required target noise while verification/build continue.
-    if (appliedDespiteNoise) {
-      const label = tool.label.toLowerCase();
-      if (
-        label.includes("ui audit") ||
-        label.includes("generated app ui audit") ||
-        label === AGENT_COPY.failure.default.toLowerCase() ||
-        label.includes("main.tsx") ||
-        label.includes("missing @@file")
-      ) {
-        continue;
-      }
-    }
-    const line =
-      input.runMode === "consultation"
-        ? tool.label.startsWith("I ")
-          ? tool.label
-          : `I couldn't finish answering because ${tool.label.charAt(0).toLowerCase()}${tool.label.slice(1)}.`
-        : tool.label.startsWith("I ")
-          ? tool.label
-          : `I couldn't safely apply this edit because ${tool.label.charAt(0).toLowerCase()}${tool.label.slice(1)}.`;
+    if (input.summary?.outcome === "success") continue;
+    const line = tool.label.startsWith("I ")
+      ? tool.label
+      : `I couldn't safely apply this edit because ${tool.label.charAt(0).toLowerCase()}${tool.label.slice(1)}.`;
     pushSegment(segments, narrated, `thought:${tool.id}`, line);
     if (tool.detail) {
       actions.push({
@@ -452,7 +418,6 @@ export function buildAgentConversationProjection(
       previewReady: input.previewReady ?? false,
       skipLeadIn: failureTools.length > 0 && input.summary.outcome === "failed",
       ...(input.patchReviewPending ? { patchReviewPending: true } : {}),
-      ...(input.runMode ? { runMode: input.runMode } : {}),
     });
     for (const segment of closing) {
       pushSegment(segments, narrated, segment.id, segment.text);

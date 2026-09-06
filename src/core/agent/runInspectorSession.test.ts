@@ -54,6 +54,14 @@ describe("runInspectorSession", () => {
     assert.equal(session.centerInspectorActive, true);
   });
 
+  it("preserves inspector session identity when center inspector is already inactive", () => {
+    const next = reduceRunInspectorSession(EMPTY_RUN_INSPECTOR_SESSION, {
+      type: "center_inspector_active",
+      runId: null,
+    });
+    assert.equal(next, EMPTY_RUN_INSPECTOR_SESSION);
+  });
+
   it("closes modal only via explicit close action", () => {
     const opened = reduceRunInspectorSession(EMPTY_RUN_INSPECTOR_SESSION, {
       type: "open_modal",

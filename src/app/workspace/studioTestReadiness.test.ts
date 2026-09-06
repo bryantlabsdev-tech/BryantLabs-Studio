@@ -24,6 +24,7 @@ describe("studioTestReadiness", () => {
     });
     assert.equal(state.composerReady, false);
     assert.equal(state.scanStatus, "scanning");
+    assert.equal(state.indexedSourceFileCount, 0);
   });
 
   it("marks composer blocked while project scan has not started", () => {

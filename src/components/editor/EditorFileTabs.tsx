@@ -1,4 +1,4 @@
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 
 function tabLabel(path: string): string {
   const segments = path.split(/[/\\]/);

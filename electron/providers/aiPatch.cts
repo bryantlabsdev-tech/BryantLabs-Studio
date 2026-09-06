@@ -51,7 +51,6 @@ export interface PatchSymbol {
 export interface PatchTargetFile {
   path: string;
   content: string;
-  /** When set, Electron main loads content from disk (avoids huge IPC clones). */
   absPath?: string;
 }
 

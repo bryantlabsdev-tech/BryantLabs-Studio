@@ -3,27 +3,52 @@ import { describe, it } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { hydrateApplyPlanBatchFiles } from "./applyPlanBatchHydrate.cjs";
 
-/**
- * Regression: Apply Plan batch IPC must not require full file contents in the
- * invoke payload. Main hydrates from absPath so large structured clones cannot
- * hang Electron before providers:applyPlanBatch runs.
- */
-describe("apply plan batch path hydration contract", () => {
-  it("can read target contents from absPath when content is empty", () => {
+describe("apply plan batch path hydration", () => {
+  it("reads target contents from absPath when content is empty", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bryantlabs-hydrate-"));
-    const absPath = path.join(dir, "Tasks.tsx");
-    const body = "export default function Tasks() { return null; }\n";
-    fs.writeFileSync(absPath, body, "utf8");
-    const payload = [{ path: "src/pages/Tasks.tsx", content: "", absPath }];
-    const hydrated = payload.map((f) => ({
-      path: f.path,
-      content:
-        f.content && f.content.length > 0
-          ? f.content
-          : fs.readFileSync(f.absPath, "utf8"),
-    }));
-    assert.equal(hydrated[0]?.content, body);
-    fs.rmSync(dir, { recursive: true, force: true });
+    try {
+      const absPath = path.join(dir, "Tasks.tsx");
+      const body = "export default function Tasks() { return null; }\n";
+      fs.writeFileSync(absPath, body, "utf8");
+      const result = hydrateApplyPlanBatchFiles([
+        { path: "src/pages/Tasks.tsx", content: "", absPath },
+      ]);
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      assert.equal(result.files[0]?.content, body);
+      assert.equal(result.files[0]?.path, "src/pages/Tasks.tsx");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("hydrates eight metadata-only files from a disposable temp workspace", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bryantlabs-hydrate-8-"));
+    try {
+      const files = Array.from({ length: 8 }, (_, i) => {
+        const rel = `src/f${i}.tsx`;
+        const absPath = path.join(dir, `f${i}.tsx`);
+        fs.writeFileSync(absPath, `export const n${i} = ${i};\n`, "utf8");
+        return { path: rel, content: "", absPath };
+      });
+      const result = hydrateApplyPlanBatchFiles(files);
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      assert.equal(result.files.length, 8);
+      assert.equal(result.files[7]?.content, "export const n7 = 7;\n");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps empty content for create targets without absPath", () => {
+    const result = hydrateApplyPlanBatchFiles([
+      { path: "src/NewFile.tsx", content: "" },
+    ]);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.files[0]?.content, "");
   });
 });

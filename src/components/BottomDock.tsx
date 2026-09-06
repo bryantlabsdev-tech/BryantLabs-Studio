@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import type { DockTab } from "@/core/layout/types";
 import { ProblemsView } from "@/components/views/ProblemsView";
 import { VerificationView } from "@/components/views/VerificationView";

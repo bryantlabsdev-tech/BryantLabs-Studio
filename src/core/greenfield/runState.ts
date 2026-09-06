@@ -83,6 +83,71 @@ export interface GreenfieldRunSnapshot {
   executionMode: import("@/core/agent/executionModeConfirmation").ExecutionModeDiagnostics | null;
 }
 
+const GREENFIELD_RUN_KEYS = [
+  "actionType",
+  "projectPath",
+  "workflow",
+  "verification",
+  "failureReport",
+  "entries",
+  "runStartedAt",
+  "filesWritten",
+  "debug",
+  "generationMetrics",
+  "generatedFiles",
+  "setupResult",
+  "greenfieldRepair",
+  "targetFolder",
+  "provider",
+  "model",
+  "genStatus",
+  "writeStatus",
+  "setupStatus",
+  "writeError",
+  "finalMessage",
+  "runResult",
+  "latestAction",
+  "lastSuccessfulRunAt",
+  "previousSuccessfulRunMessage",
+  "runTimeline",
+  "endedAt",
+  "durationMs",
+  "uiAuditResult",
+  "uiAuditHistory",
+  "appliedFileDiffs",
+  "projectMemoryInjection",
+  "routeDecision",
+] as const satisfies ReadonlyArray<keyof GreenfieldRunSnapshot>;
+
+export function greenfieldRunSnapshotsEqual(
+  a: GreenfieldRunSnapshot,
+  b: GreenfieldRunSnapshot,
+): boolean {
+  for (const key of GREENFIELD_RUN_KEYS) {
+    if (!Object.is(a[key], b[key])) return false;
+  }
+  return true;
+}
+
+export function applyGreenfieldRunUpdate(
+  prev: GreenfieldRunSnapshot,
+  patch:
+    | Partial<GreenfieldRunSnapshot>
+    | ((prev: GreenfieldRunSnapshot) => Partial<GreenfieldRunSnapshot>),
+): GreenfieldRunSnapshot {
+  const resolved = typeof patch === "function" ? patch(prev) : patch;
+  let changed = false;
+  for (const key of Object.keys(resolved) as (keyof GreenfieldRunSnapshot)[]) {
+    if (!Object.is(prev[key], resolved[key])) {
+      changed = true;
+      break;
+    }
+  }
+  if (!changed) return prev;
+  const next = { ...prev, ...resolved };
+  return greenfieldRunSnapshotsEqual(prev, next) ? prev : next;
+}
+
 export function emptyGreenfieldRun(): GreenfieldRunSnapshot {
   return {
     actionType: "idle",

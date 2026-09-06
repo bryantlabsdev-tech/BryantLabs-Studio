@@ -133,7 +133,7 @@ export interface SyncOrchestrationHostsInput {
   readonly setAgentLoopError: AgentOrchestrationHost["setAgentLoopError"];
   readonly setAutoFixSession: AutoFixOrchestrationHost["setAutoFixSession"];
   readonly appendGreenfieldRunLog: FailureReportOrchestrationHost["appendGreenfieldRunLog"];
-  readonly updateGreenfieldRun: FailureReportOrchestrationHost["updateGreenfieldRun"];
+  readonly updateGreenfieldRun: BuildPipelineHost["updateGreenfieldRun"];
   readonly beginStudioAction: BuildPipelineHost["beginStudioAction"];
   readonly finishStudioAction: BuildPipelineHost["finishStudioAction"];
   readonly publishFailureReport: ApplyPlanOrchestrationHost["publishFailureReport"];

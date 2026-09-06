@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { EmptyState } from "@/components/EmptyState";
 import { formatDuration } from "@/core/analytics/costEstimates";
 import { formatPlannerOutputSummary } from "@/core/pipeline/plannerOutput";

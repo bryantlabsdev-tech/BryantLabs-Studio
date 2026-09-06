@@ -64,6 +64,15 @@ import { runGreenfieldGenerateWithReliability } from "@/core/greenfield/generate
 import { emitGreenfieldConsoleEvent } from "@/core/console/greenfieldConsoleEvents";
 import { beginRunTimeline, recordRunTimelineStage } from "@/core/agent/runTimeline";
 import { logPromptSubmission } from "@/core/agent/promptSubmission";
+import {
+  shouldAutoStartEmbeddedGreenfield,
+  shouldResetGreenfieldAutoStartLatch,
+} from "@/core/agent/greenfieldAutoStart";
+import {
+  createFinalizationWorkKey,
+  runCreateFinalizationWorkOnce,
+} from "@/core/agent/greenfieldCreateFinalization";
+import { incrementGenerateInvocations } from "@/core/agent/followUpSettlementDiagnostics";
 /**
  * New App wizard (Phase 10). Greenfield generation from an empty folder —
  * not agent mode. Human approves before any write; auto-repair may run on TS/build failure.
@@ -178,7 +187,6 @@ export function NewAppView({
     ) => Promise<void>
   >(async () => {});
   const autoStartedRef = useRef(false);
-  const autoStartKeyRef = useRef("");
   const autoPipelineTriggeredRef = useRef(false);
   const recoveryStartedRef = useRef(false);
   const lastGreenfieldActivityRef = useRef<string | null>(null);
@@ -212,26 +220,26 @@ export function NewAppView({
     if (!embedded) return;
     const target = initialFolder ?? (project ? { path: project.path, name: project.name } : null);
     if (!target?.path) return;
-    setFolder((prev) => {
-      if (prev?.path === target.path) return prev;
-      return prev ?? target;
-    });
-    if (greenfieldRun.targetFolder !== target.path) {
-      updateGreenfieldRun({ targetFolder: target.path });
-    }
-  }, [
-    embedded,
-    initialFolder?.path,
-    initialFolder?.name,
-    project?.path,
-    project?.name,
-    greenfieldRun.targetFolder,
-    updateGreenfieldRun,
-  ]);
+    setFolder((prev) => prev ?? target);
+    updateGreenfieldRun({ targetFolder: target.path });
+  }, [embedded, initialFolder, project?.path, project?.name, updateGreenfieldRun]);
 
   useEffect(() => {
-    if (!embedded || !autoStartGeneration || autoStartedRef.current) return;
-    if (genStatus === "running" || generateLockRef.current) return;
+    if (
+      !shouldAutoStartEmbeddedGreenfield({
+        embedded,
+        autoStartGeneration,
+        alreadyStarted: autoStartedRef.current,
+        genStatus,
+        generateLocked: generateLockRef.current,
+        promptLength: prompt.trim().length,
+        folderPresent: Boolean(folder),
+        greenfieldRecovery,
+        runResult: greenfieldRun.runResult,
+      })
+    ) {
+      return;
+    }
     if (!folder || !settings || !prompt.trim()) return;
     if (!isProviderReady(settings)) {
       onSubmissionError?.("Connect an AI provider in Settings before generating.");
@@ -244,6 +252,7 @@ export function NewAppView({
     }
     const fn = generateFnRef.current;
     if (!fn) return;
+    autoStartedRef.current = true;
     void fn();
   }, [
     embedded,
@@ -254,25 +263,41 @@ export function NewAppView({
     agentRunBlockReason,
     onSubmissionError,
     genStatus,
+    greenfieldRecovery,
+    greenfieldRun.runResult,
   ]);
 
   useEffect(() => {
     if (initialPrompt?.trim()) {
-      setPrompt((prev) => (prev === initialPrompt.trim() ? prev : initialPrompt.trim()));
+      setPrompt(initialPrompt.trim());
     }
   }, [initialPrompt]);
 
   useEffect(() => {
     if (!embedded || !autoStartGeneration) return;
-    const key = `${initialFolder?.path ?? ""}::${(initialPrompt ?? "").trim()}`;
-    if (autoStartKeyRef.current === key) return;
-    autoStartKeyRef.current = key;
+    if (
+      !shouldResetGreenfieldAutoStartLatch({
+        alreadyStarted: autoStartedRef.current,
+        genStatus,
+        runResult: greenfieldRun.runResult,
+      })
+    ) {
+      return;
+    }
     autoStartedRef.current = false;
     autoPipelineTriggeredRef.current = false;
     if (greenfieldRecovery) {
       recoveryStartedRef.current = false;
     }
-  }, [embedded, autoStartGeneration, greenfieldRecovery, initialPrompt, initialFolder?.path]);
+  }, [
+    embedded,
+    autoStartGeneration,
+    greenfieldRecovery,
+    initialPrompt,
+    initialFolder?.path,
+    genStatus,
+    greenfieldRun.runResult,
+  ]);
 
   useEffect(() => {
     if (!embedded || !greenfieldRecovery || recoveryStartedRef.current) return;
@@ -418,9 +443,9 @@ export function NewAppView({
     setFolder((prev) => prev ?? { path: target, name });
 
     if (greenfieldRun.setupResult) {
-      setSetupResult((prev) => prev ?? greenfieldRun.setupResult ?? prev);
+      setSetupResult(greenfieldRun.setupResult);
       if (greenfieldRun.setupResult.ok) {
-        setSetupStatus((prev) => (prev === "done" ? prev : "done"));
+        setSetupStatus("done");
       } else if (greenfieldRun.setupStatus === "repair_needed") {
         setSetupStatus("repair_needed");
       } else {
@@ -574,6 +599,7 @@ export function NewAppView({
     }
     generateLockRef.current = true;
     autoStartedRef.current = true;
+    incrementGenerateInvocations();
     cancelledRef.current = false;
     const requestStartedAt = new Date().toISOString();
     const requestStartMs = Date.now();
@@ -945,7 +971,13 @@ export function NewAppView({
   ) => {
     const writeTarget = targetFolder ?? folder;
     if (!writeTarget) return;
-
+    return runCreateFinalizationWorkOnce(
+      createFinalizationWorkKey(
+        "preview",
+        writeTarget.path,
+        opts?.setupOnly ? "setup-only" : "write-setup",
+      ),
+      async () => {
     let writtenFilesForSetup: readonly string[] = [];
 
     if (opts?.setupOnly) {
@@ -1399,13 +1431,12 @@ export function NewAppView({
             uiOutcome.uiAuditHistory,
             greenfieldRun.runStartedAt,
             uiOutcome.repaired,
-            uiOutcome.setup,
           );
           setFinalMessage(uiOutcome.finalMessage);
           if (embedded) {
             finishEmbedded(
               buildEmbeddedSuccessInput(
-                uiOutcome.setup,
+                setup,
                 writtenFilesForSetup,
                 true,
                 true,
@@ -1426,8 +1457,6 @@ export function NewAppView({
 
       updateGreenfieldRun({
         runResult: "success",
-        setupStatus: "done",
-        setupResult: uiOutcome.setup,
         failureReport: null,
         lastSuccessfulRunAt: Date.now(),
         finalMessage: uiOutcome.finalMessage,
@@ -1442,7 +1471,7 @@ export function NewAppView({
       if (embedded) {
         finishEmbedded(
           buildEmbeddedSuccessInput(
-            uiOutcome.setup,
+            setup,
             writtenFilesForSetup,
             true,
             uiOutcome.audit.ok || uiOutcome.audit.skipped,
@@ -1483,6 +1512,8 @@ export function NewAppView({
       });
       setFinalMessage(failMsg);
     }
+      },
+    );
   };
   writeAndSetupRef.current = writeAndSetup;
 

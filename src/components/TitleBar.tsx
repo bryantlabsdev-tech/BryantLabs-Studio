@@ -1,6 +1,6 @@
 import { BrandLogo } from "@/components/BrandLogo";
 import { APP_INFO } from "@/core/appInfo";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { OpenProjectButton } from "@/components/OpenProjectButton";
 import { ProviderStatusPill } from "@/components/ProviderStatusPill";
 

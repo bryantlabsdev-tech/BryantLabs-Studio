@@ -1,4 +1,4 @@
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 
 /**
  * Compact indicator of incremental project index state.

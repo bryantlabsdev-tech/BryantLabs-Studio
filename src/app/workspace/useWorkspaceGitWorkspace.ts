@@ -1,6 +1,9 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { BryantLabsApi } from "@/types";
-import type { SessionMemorySnapshot } from "@/core/sessionMemory/types";
+import {
+  applySessionMemoryBranch,
+  type SessionMemorySnapshot,
+} from "@/core/sessionMemory";
 import type { GitStatusSnapshot } from "@/core/git/types";
 
 export function useWorkspaceGitWorkspace(input: {
@@ -17,64 +20,68 @@ export function useWorkspaceGitWorkspace(input: {
   readonly setGitDiffError: React.Dispatch<React.SetStateAction<string | null>>;
   readonly setSessionMemory: React.Dispatch<React.SetStateAction<SessionMemorySnapshot>>;
 }) {
+  const inputRef = useRef(input);
+  inputRef.current = input;
+
   const refreshGitStatus = useCallback(async () => {
-    if (!input.api?.getGitStatus) {
-      input.setGitStatus(null);
+    const current = inputRef.current;
+    if (!current.api?.getGitStatus) {
+      current.setGitStatus(null);
       return;
     }
-    input.setGitStatusLoading(true);
-    input.setGitActionError(null);
+    current.setGitStatusLoading(true);
+    current.setGitActionError(null);
     try {
-      const snapshot = await input.api.getGitStatus();
-      input.setGitStatus(snapshot);
+      const snapshot = await current.api.getGitStatus();
+      current.setGitStatus(snapshot);
       if (snapshot?.branch) {
-        input.setSessionMemory((prev) =>
-          prev.projectPath ? { ...prev, branch: snapshot.branch } : prev,
-        );
+        const branch = snapshot.branch;
+        current.setSessionMemory((prev) => applySessionMemoryBranch(prev, branch));
       }
     } catch {
-      input.setGitActionError("Could not load git status.");
-      input.setGitStatus(null);
+      current.setGitActionError("Could not load git status.");
+      current.setGitStatus(null);
     } finally {
-      input.setGitStatusLoading(false);
+      current.setGitStatusLoading(false);
     }
-  }, [input]);
+  }, []);
 
   const selectGitPath = useCallback((relPath: string | null) => {
-    input.setSelectedGitPath(relPath);
-  }, [input]);
+    inputRef.current.setSelectedGitPath(relPath);
+  }, []);
 
   useEffect(() => {
-    if (!input.api?.getGitDiffContents || !input.selectedGitPath) {
-      input.setGitDiff(null);
-      input.setGitDiffError(null);
-      input.setGitDiffLoading(false);
+    const current = inputRef.current;
+    if (!current.api?.getGitDiffContents || !input.selectedGitPath) {
+      current.setGitDiff(null);
+      current.setGitDiffError(null);
+      current.setGitDiffLoading(false);
       return;
     }
     let cancelled = false;
-    input.setGitDiffLoading(true);
-    input.setGitDiffError(null);
-    void input.api
+    current.setGitDiffLoading(true);
+    current.setGitDiffError(null);
+    void current.api
       .getGitDiffContents(input.selectedGitPath)
       .then((result) => {
         if (cancelled) return;
         if (result.error) {
-          input.setGitDiff(null);
-          input.setGitDiffError(result.error);
+          current.setGitDiff(null);
+          current.setGitDiffError(result.error);
         } else {
-          input.setGitDiff({
+          current.setGitDiff({
             original: result.original,
             modified: result.modified,
           });
-          input.setGitDiffError(null);
+          current.setGitDiffError(null);
         }
-        input.setGitDiffLoading(false);
+        current.setGitDiffLoading(false);
       })
       .catch(() => {
         if (cancelled) return;
-        input.setGitDiffError("Could not load diff.");
-        input.setGitDiff(null);
-        input.setGitDiffLoading(false);
+        current.setGitDiffError("Could not load diff.");
+        current.setGitDiff(null);
+        current.setGitDiffLoading(false);
       });
     return () => {
       cancelled = true;
@@ -83,74 +90,78 @@ export function useWorkspaceGitWorkspace(input: {
 
   const gitStage = useCallback(
     async (paths: string[]) => {
-      if (!input.api?.gitStage) {
+      const current = inputRef.current;
+      if (!current.api?.gitStage) {
         return { ok: false, reason: "Git is unavailable." };
       }
-      input.setGitActionError(null);
-      const result = await input.api.gitStage(paths);
+      current.setGitActionError(null);
+      const result = await current.api.gitStage(paths);
       if (!result.ok) {
-        input.setGitActionError(result.reason ?? "Stage failed.");
+        current.setGitActionError(result.reason ?? "Stage failed.");
         return result;
       }
       await refreshGitStatus();
       return result;
     },
-    [input, refreshGitStatus],
+    [refreshGitStatus],
   );
 
   const gitUnstage = useCallback(
     async (paths: string[]) => {
-      if (!input.api?.gitUnstage) {
+      const current = inputRef.current;
+      if (!current.api?.gitUnstage) {
         return { ok: false, reason: "Git is unavailable." };
       }
-      input.setGitActionError(null);
-      const result = await input.api.gitUnstage(paths);
+      current.setGitActionError(null);
+      const result = await current.api.gitUnstage(paths);
       if (!result.ok) {
-        input.setGitActionError(result.reason ?? "Unstage failed.");
+        current.setGitActionError(result.reason ?? "Unstage failed.");
         return result;
       }
       await refreshGitStatus();
       return result;
     },
-    [input, refreshGitStatus],
+    [refreshGitStatus],
   );
 
   const gitRestore = useCallback(
     async (paths: string[]) => {
-      if (!input.api?.gitRestore) {
+      const current = inputRef.current;
+      if (!current.api?.gitRestore) {
         return { ok: false, reason: "Git is unavailable." };
       }
-      input.setGitActionError(null);
-      const result = await input.api.gitRestore(paths);
+      current.setGitActionError(null);
+      const result = await current.api.gitRestore(paths);
       if (!result.ok) {
-        input.setGitActionError(result.reason ?? "Restore failed.");
+        current.setGitActionError(result.reason ?? "Restore failed.");
         return result;
       }
-      if (input.selectedGitPath && paths.includes(input.selectedGitPath)) {
-        input.setSelectedGitPath(null);
-        input.setGitDiff(null);
+      if (current.selectedGitPath && paths.includes(current.selectedGitPath)) {
+        current.setSelectedGitPath(null);
+        current.setGitDiff(null);
       }
       await refreshGitStatus();
       return result;
     },
-    [input, refreshGitStatus],
+    [refreshGitStatus],
   );
 
   const gitCommit = useCallback(
     async (message: string) => {
-      if (!input.api?.gitCommit) {
+      const current = inputRef.current;
+      if (!current.api?.gitCommit) {
         return { ok: false, reason: "Git is unavailable." };
       }
-      input.setGitActionError(null);
-      const result = await input.api.gitCommit(message);
+      current.setGitActionError(null);
+      const result = await current.api.gitCommit(message);
       if (!result.ok) {
-        input.setGitActionError(result.reason ?? "Commit failed.");
+        current.setGitActionError(result.reason ?? "Commit failed.");
         return result;
       }
       await refreshGitStatus();
       return result;
     },
-    [input, refreshGitStatus],
+    [refreshGitStatus],
   );
 
   return {

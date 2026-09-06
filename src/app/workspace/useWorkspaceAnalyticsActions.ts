@@ -1,8 +1,8 @@
 import { useCallback } from "react";
 import {
+  analyticsDedupeKey,
   appendAnalyticsRecord,
   buildAnalyticsRecord,
-  analyticsRecordKey,
   emptyRunAnalyticsAccumulator,
   findAnalyticsRecord,
 } from "@/core/analytics";
@@ -30,6 +30,8 @@ export function useWorkspaceAnalyticsActions(input: {
       message: string,
       detail?: string,
     ) => {
+      const dedupeKey = analyticsDedupeKey(snapshot, ok);
+      if (input.lastRecordedAnalyticsKeyRef.current === dedupeKey) return;
       const record = buildAnalyticsRecord({
         snapshot,
         ok,
@@ -37,11 +39,9 @@ export function useWorkspaceAnalyticsActions(input: {
         ...(detail ? { detail } : {}),
         runAnalytics: input.currentRunAnalyticsRef.current,
       });
-      input.currentRunAnalyticsRef.current = emptyRunAnalyticsAccumulator();
       if (!record) return;
-      const key = analyticsRecordKey(record);
-      if (input.lastRecordedAnalyticsKeyRef.current === key) return;
-      input.lastRecordedAnalyticsKeyRef.current = key;
+      input.lastRecordedAnalyticsKeyRef.current = dedupeKey;
+      input.currentRunAnalyticsRef.current = emptyRunAnalyticsAccumulator();
       input.setAnalyticsHistory(appendAnalyticsRecord(record));
     },
     [

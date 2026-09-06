@@ -1,8 +1,4 @@
 import {
-  runFollowUpUiAuditAfterPreview,
-  verificationToSetupResult,
-} from "@/app/orchestration/followUpVerifyRepairOrchestration";
-import {
   cancelAllPostApplyUiAudits,
   cancelPostApplyUiAuditsForProject,
   getActivePostApplyUiAuditCount,
@@ -190,59 +186,5 @@ describe("post-apply UI audit lifecycle", () => {
     assert.equal(run.runResult, "success");
     assert.equal(run.finalMessage, "ok");
     assert.equal(getActivePostApplyUiAuditCount(), 0);
-  });
-
-  it("runFollowUpUiAuditAfterPreview stays ok/advisory when UI audit fails", async () => {
-    const logs: string[] = [];
-    let run: GreenfieldRunSnapshot = {
-      ...emptyGreenfieldRun(),
-      runResult: "success",
-      finalMessage: "Applied",
-    };
-
-    const outcome = await runFollowUpUiAuditAfterPreview(
-      {
-        api: {
-          readFile: async () => ({
-            content: "export default function App(){return null}",
-            language: "tsx",
-            readable: true,
-          }),
-          greenfieldUiAudit: async () => ({
-            ok: false as const,
-            error: "boom",
-          }),
-        } as never,
-        appendGreenfieldRunLog: (_s, status, message) => {
-          logs.push(`${status}:${message}`);
-        },
-        updateGreenfieldRun: (patch) => {
-          run = { ...run, ...patch };
-        },
-        requestPreviewTab: () => undefined,
-        setAppPreview: () => undefined,
-      },
-      {
-        folderPath: "/tmp/p",
-        previewUrl: "http://127.0.0.1:5174/",
-        userPrompt: "Add overdue highlight",
-        verification: passedVerification(),
-      },
-    );
-
-    assert.equal(outcome.ok, true);
-    assert.equal(outcome.advisory, true);
-    assert.equal(run.runResult, "success");
-    assert.equal(run.finalMessage, "Applied");
-    assert.ok(logs.every((l) => !l.startsWith("failed:")));
-  });
-});
-
-describe("verificationToSetupResult", () => {
-  it("maps verification into setup", () => {
-    const setup = verificationToSetupResult(passedVerification());
-    assert.equal(setup.ok, true);
-    assert.equal(setup.typecheck?.ok, true);
-    assert.equal(setup.build?.ok, true);
   });
 });

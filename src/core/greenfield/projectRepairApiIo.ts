@@ -2,8 +2,7 @@ import type { BryantLabsApi } from "@/types";
 import type { ProjectRepairIO } from "@/core/greenfield/projectRepairTypes";
 
 function projectAbsPath(projectRoot: string, relPath: string): string {
-  const root = projectRoot.replace(/\/$/, "");
-  return relPath.startsWith("/") ? relPath : `${root}/${relPath}`;
+  return `${projectRoot.replace(/\/$/, "")}/${relPath}`;
 }
 
 async function loadApiSourceMap(api: BryantLabsApi, projectRoot: string): Promise<Map<string, string>> {
@@ -63,7 +62,6 @@ async function writeApiProjectFile(
   }
 }
 
-/** Renderer-safe repair IO — file access and typecheck go through BryantLabsApi (IPC). */
 export function createApiProjectRepairIo(
   api: BryantLabsApi,
   projectRoot: string,

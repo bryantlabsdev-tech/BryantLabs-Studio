@@ -1,4 +1,4 @@
-import { isFunctionalFeaturePrompt, isGameplayOrLogicPrompt } from "@/core/planner/fallback";
+import { isFunctionalFeaturePrompt, isGameplayOrLogicPrompt, hasVisualStylingRequest } from "@/core/planner/fallback";
 import { normalizeApplyPlanPath } from "@/core/planApply/markedFileParse";
 import { isEntryBootstrapPath } from "@/core/planApply/targetPolicy";
 import type { PlanApplyFileEntry } from "@/core/planApply/types";
@@ -32,10 +32,12 @@ export function promptRequiresAppImplementation(prompt: string): boolean {
 
 /** Follow-up that needs coordinated TSX + CSS changes (state + appearance). */
 export function promptRequiresCoordinatedTsxAndCss(prompt: string): boolean {
-  const lower = prompt.trim().toLowerCase();
   if (!promptRequiresAppImplementation(prompt)) return false;
-  return /\b(css|style|styles|stylesheet|highlight|overdue|color|theme|layout|visual|priority|due date|due dates|badge)\b/.test(
-    lower,
+  const lower = prompt.toLowerCase();
+  return (
+    hasVisualStylingRequest(lower) ||
+    /\bpriorit(?:y|ies|ization)\b/.test(lower) ||
+    /\bdue dates?\b/.test(lower)
   );
 }
 

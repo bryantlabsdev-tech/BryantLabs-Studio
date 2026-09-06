@@ -234,7 +234,7 @@ export interface WorkspaceState {
   readonly planApplyReviewing: boolean;
   readonly planApplyError: string | null;
   /** Propose patches for each plan file and open diff review. */
-  startApplyPlan(opts?: { autoContinue?: boolean }): Promise<ExecuteApplyPlanResult>;
+  startApplyPlan(opts?: { autoContinue?: boolean; prompt?: string }): Promise<ExecuteApplyPlanResult>;
   /** Shorter @@FILE-only rewrite after format repair failed. */
   runApplyPlanDirectRewrite(): Promise<void>;
   cancelApplyPlan(): void;
@@ -439,7 +439,11 @@ export interface WorkspaceState {
   toggleDock(): void;
   openDock(): void;
   readonly greenfieldRun: GreenfieldRunSnapshot;
-  updateGreenfieldRun(patch: Partial<GreenfieldRunSnapshot>): void;
+  updateGreenfieldRun(
+    patch:
+      | Partial<GreenfieldRunSnapshot>
+      | ((prev: GreenfieldRunSnapshot) => Partial<GreenfieldRunSnapshot>),
+  ): void;
   resetGreenfieldRun(): void;
   /** Clear stale locks, cancel in-flight work, and reset run history selection. */
   resetAgentRunState(): void;

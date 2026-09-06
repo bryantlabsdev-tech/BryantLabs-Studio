@@ -7,6 +7,9 @@ export function closeStaleGreenfieldRunningEntries(
   entries: readonly GreenfieldRunLogEntry[],
   closeAs: "success" | "failed" = "success",
 ): GreenfieldRunLogEntry[] {
+  if (!entries.some((entry) => entry.status === "running")) {
+    return entries as GreenfieldRunLogEntry[];
+  }
   return entries.map((entry) =>
     entry.status === "running" ? { ...entry, status: closeAs } : entry,
   );

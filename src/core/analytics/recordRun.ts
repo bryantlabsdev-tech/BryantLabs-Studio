@@ -221,9 +221,19 @@ export function buildAnalyticsRecord(opts: {
   };
 }
 
-/** Stable per completed run so remounts/re-renders do not append duplicate records. */
 export function analyticsRecordKey(record: StudioAnalyticsRecord): string {
-  const startedAt =
-    record.durationMs != null ? record.at - record.durationMs : record.at;
-  return `${record.projectPath ?? "none"}-${record.actionType}-${startedAt}-${record.status}`;
+  return `${record.projectPath ?? "none"}-${record.actionType}-${record.status}`;
+}
+
+export function analyticsDedupeKey(
+  snapshot: GreenfieldRunSnapshot,
+  ok: boolean,
+): string {
+  return [
+    snapshot.projectPath ?? "none",
+    snapshot.actionType,
+    String(snapshot.runStartedAt ?? "na"),
+    snapshot.runResult,
+    ok ? "ok" : "fail",
+  ].join("\0");
 }

@@ -49,11 +49,11 @@ export function mergeAppPreviewState(
     port: state.port ?? prev.port,
   };
   if (
-    prev.url === next.url &&
-    prev.running === next.running &&
-    prev.root === next.root &&
-    prev.lastSuccessfulPreviewAt === next.lastSuccessfulPreviewAt &&
-    prev.port === next.port
+    next.url === prev.url &&
+    next.running === prev.running &&
+    next.root === prev.root &&
+    next.lastSuccessfulPreviewAt === prev.lastSuccessfulPreviewAt &&
+    next.port === prev.port
   ) {
     return prev;
   }

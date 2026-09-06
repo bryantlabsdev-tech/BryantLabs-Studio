@@ -25,16 +25,45 @@ export type FollowUpSubmitAction =
       readonly kind: "agent_loop";
       readonly greenfieldBlockedByRoute: boolean;
     }
-  | {
-      readonly kind: "consultation";
-      readonly promptIntent: import("@/core/agent/agentIntentRouter").AgentPromptIntent;
-      readonly mixedEdit: boolean;
-    }
-  | {
-      readonly kind: "run_command";
-      readonly promptIntent: import("@/core/agent/agentIntentRouter").AgentPromptIntent;
-    }
-  | { readonly kind: "blocked_scan"; readonly reason: string };
+  | { readonly kind: "blocked_scan"; readonly reason: string }
+  | { readonly kind: "wait_for_rescan"; readonly reason: string };
+
+export interface FollowUpSubmitHandlers {
+  readonly startGreenfield: (prompt: string) => void;
+  readonly startBuildLoop: (prompt: string) => void;
+  readonly startAgent: (prompt: string) => void;
+  readonly requestRescan: () => void;
+  readonly block: (reason: string) => void;
+}
+
+/** Dispatch a resolved follow-up action. Greenfield is never started for edit routes. */
+export function executeFollowUpSubmitAction(
+  action: FollowUpSubmitAction,
+  prompt: string,
+  handlers: FollowUpSubmitHandlers,
+): void {
+  switch (action.kind) {
+    case "greenfield":
+    case "greenfield_recovery":
+      handlers.startGreenfield(prompt);
+      return;
+    case "build_loop":
+      handlers.startBuildLoop(prompt);
+      return;
+    case "agent_loop":
+      handlers.startAgent(prompt);
+      return;
+    case "wait_for_rescan":
+      handlers.requestRescan();
+      return;
+    case "blocked_scan":
+      handlers.block(action.reason);
+      return;
+    case "no_project":
+      handlers.block("Open a project folder before requesting changes.");
+      return;
+  }
+}
 
 export function routeExecutionFromDecision(
   decision: AgentRouteDecisionTrace | null | undefined,
@@ -44,13 +73,6 @@ export function routeExecutionFromDecision(
   if (decision.selectedRoute === "greenfield") return "greenfield";
   if (decision.selectedRoute === "greenfield_recovery") return "greenfield_recovery";
   if (decision.selectedRoute === "build_loop") return "build_loop";
-  if (
-    decision.selectedRoute === "consultation" ||
-    decision.selectedRoute === "mixed_confirm"
-  ) {
-    return decision.selectedRoute === "mixed_confirm" ? "mixed_confirm" : "consultation";
-  }
-  if (decision.selectedRoute === "run_command") return "run_command";
   return fallback;
 }
 
@@ -85,14 +107,14 @@ export function isProjectIndexReadyForEdit(input: {
 export function resolveFollowUpSubmitAction(input: {
   readonly hasProject: boolean;
   readonly routeExecution: AgentExecutionKind;
-  readonly routePromptIntent?: import("@/core/agent/agentIntentRouter").AgentPromptIntent;
-  readonly routeMixedEdit?: boolean;
   readonly emptyProjectFolder: boolean;
   readonly scan: ProjectScan | null;
   readonly scanStatus: AgentScanStatus;
   readonly fallbackSourceFileCount?: number;
   readonly filesWritten?: readonly string[];
-  /** When omitted, reads `readUseAgentLoopForEdits()` (default off — structured build_loop). */
+  readonly projectSourceFilesExistOnDisk?: boolean;
+  readonly previousSuccessfulRun?: boolean;
+  /** When omitted, reads `readUseAgentLoopForEdits()` (default on). */
   readonly useAgentLoopForEdits?: boolean;
 }): FollowUpSubmitAction {
   if (!input.hasProject) {
@@ -100,6 +122,17 @@ export function resolveFollowUpSubmitAction(input: {
   }
 
   if (input.routeExecution === "blocked") {
+    if (
+      (input.scanStatus === "scanning" || input.scanStatus === "idle") &&
+      (input.projectSourceFilesExistOnDisk ||
+        input.previousSuccessfulRun ||
+        (input.filesWritten?.length ?? 0) > 0)
+    ) {
+      return {
+        kind: "wait_for_rescan",
+        reason: "Waiting for project scan to finish…",
+      };
+    }
     return {
       kind: "blocked_scan",
       reason: "Prompt could not be routed.",
@@ -107,29 +140,22 @@ export function resolveFollowUpSubmitAction(input: {
   }
 
   if (input.routeExecution === "greenfield") {
+    if (
+      input.projectSourceFilesExistOnDisk ||
+      input.previousSuccessfulRun ||
+      (input.fallbackSourceFileCount ?? 0) > 0 ||
+      (input.filesWritten?.length ?? 0) > 0
+    ) {
+      return {
+        kind: "wait_for_rescan",
+        reason: "Waiting for project scan to finish…",
+      };
+    }
     return { kind: "greenfield" };
   }
 
   if (input.routeExecution === "greenfield_recovery") {
     return { kind: "greenfield_recovery" };
-  }
-
-  if (
-    input.routeExecution === "consultation" ||
-    input.routeExecution === "mixed_confirm"
-  ) {
-    return {
-      kind: "consultation",
-      promptIntent: input.routePromptIntent ?? "ask",
-      mixedEdit: input.routeMixedEdit ?? input.routeExecution === "mixed_confirm",
-    };
-  }
-
-  if (input.routeExecution === "run_command") {
-    return {
-      kind: "run_command",
-      promptIntent: input.routePromptIntent ?? "run",
-    };
   }
 
   const greenfieldBlockedByRoute = input.emptyProjectFolder;

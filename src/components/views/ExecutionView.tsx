@@ -1,4 +1,4 @@
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { EmptyState } from "@/components/EmptyState";
 import {
   formatExecutionDiagnosticsSummary,

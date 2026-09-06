@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
+import {
+  readFollowUpReviewFirst,
+  writeFollowUpReviewFirst,
+} from "@/core/build/followUpPrefs";
 import type { CenterTab, RailTool } from "@/core/layout/types";
 
 interface CommandItem {
@@ -45,14 +49,8 @@ export function CommandPalette() {
     return [
       tab("preview", "Open Preview"),
       tab("diff", "Open Diff"),
-      go("git", "Open Source Control", "Stage, diff, commit"),
       tab("studioLog", "Open Studio Log"),
       tab("summary", "Open Summary"),
-      tab("inspector", "Open Run Trace", "Trace, diffs, and run metrics"),
-      tab("pipelineInspector", "Open Pipeline Diagnostics", "Per-stage pipeline debugging"),
-      tab("metrics", "Open Run Metrics"),
-      tab("memory", "Open Project Intelligence"),
-      tab("generated", "Open Generated Files"),
       {
         id: "runs:search",
         label: "Search runs",
@@ -69,6 +67,17 @@ export function CommandPalette() {
         hint: "Fix TypeScript/build after greenfield setup",
         section: "daily",
         run: () => void triggerGreenfieldRepair(),
+      },
+      {
+        id: "review:toggle",
+        label: readFollowUpReviewFirst() ? "Turn off review first" : "Turn on review first",
+        hint: "Pause to review diffs before applying",
+        section: "daily",
+        run: () => {
+          const next = !readFollowUpReviewFirst();
+          writeFollowUpReviewFirst(next);
+          window.dispatchEvent(new CustomEvent("bryantlabs:toggle-review-first"));
+        },
       },
       go("providers", "Open Settings", "AI providers & API keys"),
       {
@@ -102,7 +111,7 @@ export function CommandPalette() {
       go("files", "Files", "Project explorer"),
       go("search", "Search", "Search in project"),
       go("plan", "Plan", "Manual plan composer"),
-      go("pipeline", "Multi-Agent Pipeline", "Planner → Coder → Repair orchestration"),
+      go("pipeline", "Pipeline", "Multi-agent pipeline"),
       go("execution", "Execution", "Multi-file execution"),
       go("insights", "Insights", "Project insights"),
       go("memory", "Memory", "Agent memory"),
@@ -113,13 +122,6 @@ export function CommandPalette() {
       go("agent", "Autonomous Agent"),
       tab("editor", "Open Editor", undefined),
       tab("execution", "Open Execution Dashboard", undefined),
-      {
-        id: "nav:quick-open",
-        label: "Go to File",
-        hint: "⌘P quick open",
-        section: "daily",
-        run: () => window.dispatchEvent(new CustomEvent("bryantlabs:open-go-to-file")),
-      },
     ];
   }, [
     setRailTool,

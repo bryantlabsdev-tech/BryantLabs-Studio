@@ -2,7 +2,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { FileTree } from "@/components/FileTree";
 import { OpenProjectButton } from "@/components/OpenProjectButton";
 import { FolderOpenIcon } from "@/components/icons";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 
 /**
  * Sidebar "Files" view: project file tree with click-to-open in the editor.

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { EmptyState } from "@/components/EmptyState";
 import type { MemoryTimelineEntry } from "@/core/sessionMemory/types";
 import type { ProjectMemory } from "@/core/projectMemory/types";

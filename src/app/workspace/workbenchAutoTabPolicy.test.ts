@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  countEdgeTriggeredTabCommits,
+  countLegacyAlwaysOnTabCommits,
   evaluateWorkbenchAutoTab,
   INITIAL_WORKBENCH_AUTO_TAB_STATE,
   type WorkbenchAutoTabSignals,
@@ -12,6 +14,7 @@ function signals(
   return {
     previewTabNonce: 0,
     reviewingPendingPatch: false,
+    planApplyReadyForReview: false,
     aiPatchForEditor: false,
     aiPatchApplied: false,
     ...overrides,
@@ -19,6 +22,33 @@ function signals(
 }
 
 describe("workbenchAutoTabPolicy", () => {
+  it("legacy always-on Preview+Diff effects exceed React max update depth", () => {
+    const legacy = countLegacyAlwaysOnTabCommits(
+      signals({ previewTabNonce: 1, planApplyReadyForReview: true }),
+    );
+    assert.equal(legacy.exceededMaxDepth, true);
+    assert.ok(legacy.commits > 50);
+  });
+
+  it("edge-triggered policy writes a tab once then stabilizes under the same signals", () => {
+    const overlapping = signals({
+      previewTabNonce: 1,
+      planApplyReadyForReview: true,
+    });
+    const edge = countEdgeTriggeredTabCommits(overlapping);
+    assert.equal(edge.exceededMaxDepth, false);
+    assert.equal(edge.writes, 1);
+
+    const started = evaluateWorkbenchAutoTab(
+      INITIAL_WORKBENCH_AUTO_TAB_STATE,
+      overlapping,
+    );
+    assert.equal(started.tabToSet, "diff");
+
+    const again = evaluateWorkbenchAutoTab(started.nextState, overlapping);
+    assert.equal(again.tabToSet, null);
+  });
+
   it("auto-reveals Diff once when a legacy pending-patch review starts", () => {
     const started = evaluateWorkbenchAutoTab(
       INITIAL_WORKBENCH_AUTO_TAB_STATE,
@@ -51,12 +81,6 @@ describe("workbenchAutoTabPolicy", () => {
       signals({ reviewingPendingPatch: true, previewTabNonce: 1 }),
     );
     assert.equal(userLeftForEditor.tabToSet, null);
-
-    const loadingTick = evaluateWorkbenchAutoTab(
-      userLeftForEditor.nextState,
-      signals({ reviewingPendingPatch: true, previewTabNonce: 1 }),
-    );
-    assert.equal(loadingTick.tabToSet, null);
   });
 
   it("does not yank back to Preview just because a run later goes idle", () => {
@@ -85,19 +109,5 @@ describe("workbenchAutoTabPolicy", () => {
       signals({ aiPatchApplied: true }),
     );
     assert.equal(stillApplied.tabToSet, null);
-  });
-
-  it("auto-reveals Diff once for an inline AI patch, then leaves later tab clicks alone", () => {
-    const first = evaluateWorkbenchAutoTab(
-      INITIAL_WORKBENCH_AUTO_TAB_STATE,
-      signals({ aiPatchForEditor: true }),
-    );
-    assert.equal(first.tabToSet, "diff");
-
-    const later = evaluateWorkbenchAutoTab(
-      first.nextState,
-      signals({ aiPatchForEditor: true }),
-    );
-    assert.equal(later.tabToSet, null);
   });
 });

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { EditKind } from "@/core/editor";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 
 const KINDS: ReadonlyArray<{ id: EditKind; label: string }> = [
   { id: "prepend-comment", label: "Add comment at top" },

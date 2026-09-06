@@ -1,4 +1,4 @@
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { OpenProjectButton } from "@/components/OpenProjectButton";
 
 /**

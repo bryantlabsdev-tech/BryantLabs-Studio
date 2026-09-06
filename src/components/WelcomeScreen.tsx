@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { WELCOME_EXAMPLE_PROMPTS } from "@/core/onboarding/examplePrompts";
 import {
   shouldShowWelcomeScreen,

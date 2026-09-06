@@ -37,7 +37,14 @@ function planFilesForPrompt(userPrompt: string): AIPlan["files"] {
   if (lower.includes("timer")) {
     return [{ path: "src/App.tsx", reason: "Add timer UI and state" }];
   }
-  if (/\b(blue|style|css|premium|theme|layout)\b/.test(lower)) {
+  if (
+    /\b(priority|due date|due dates|overdue|filter|clear completed|confirm)\b/.test(
+      lower,
+    )
+  ) {
+    return [{ path: "src/App.tsx", reason: "Priority and due-date task fields" }];
+  }
+  if (/\b(blue|style|css|premium|theme|layout|dark mode|visually)\b/.test(lower)) {
     return [
       { path: "src/App.tsx", reason: "UI structure" },
       { path: "src/index.css", reason: "Visual styling" },
@@ -198,7 +205,7 @@ function patchAppTsx(content: string, promptLower: string): string {
       `${marker}\nexport function App()`,
     );
   }
-  if (promptLower.includes("blue") || promptLower.includes("dark mode")) {
+  if (promptLower.includes("blue") || promptLower.includes("dark mode") || promptLower.includes("visually")) {
     if (content.includes('className="blue-theme"') || content.includes("dark-mode-toggle")) {
       return `${content.trimEnd()}\nexport const MOCK_THEME_BUMP = true;\n`;
     }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { EmptyState } from "@/components/EmptyState";
 import { MonacoDiffView } from "@/components/editor/MonacoDiffView";
 import type { GitFileEntry } from "@/core/git/types";

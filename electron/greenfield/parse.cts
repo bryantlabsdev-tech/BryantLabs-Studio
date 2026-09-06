@@ -2,6 +2,17 @@ import { GREENFIELD_PATHS, type GreenfieldPath } from "./paths.cjs";
 
 const REQUIRED_SET = new Set<string>(GREENFIELD_PATHS);
 
+export const GREENFIELD_MISSING_REQUIRED_FILES =
+  "GREENFIELD_MISSING_REQUIRED_FILES" as const;
+export const GREENFIELD_UNEXPECTED_FILE_PATHS =
+  "GREENFIELD_UNEXPECTED_FILE_PATHS" as const;
+export const GREENFIELD_INCOMPLETE_PARSE = "GREENFIELD_INCOMPLETE_PARSE" as const;
+
+export type GreenfieldParseErrorCode =
+  | typeof GREENFIELD_MISSING_REQUIRED_FILES
+  | typeof GREENFIELD_UNEXPECTED_FILE_PATHS
+  | typeof GREENFIELD_INCOMPLETE_PARSE;
+
 export interface GeneratedFile {
   path: GreenfieldPath;
   content: string;
@@ -21,6 +32,8 @@ export interface GreenfieldParseResult {
   partialFiles?: GeneratedFile[];
   diagnostics: GreenfieldParseDiagnostics;
   errorMessage?: string;
+  errorCode?: GreenfieldParseErrorCode;
+  errorCodes?: readonly GreenfieldParseErrorCode[];
 }
 
 /** Normalize a path segment from a marker for comparison. */
@@ -107,27 +120,59 @@ function trimContent(text: string): string {
   return text.replace(/^\r?\n/, "").replace(/\r?\n$/, "");
 }
 
-function formatParseError(diagnostics: GreenfieldParseDiagnostics): string {
+function formatParseError(diagnostics: GreenfieldParseDiagnostics): {
+  message: string;
+  errorCode: GreenfieldParseErrorCode;
+  errorCodes: GreenfieldParseErrorCode[];
+} {
   const parsed = diagnostics.parsedFiles.length;
   const expected = GREENFIELD_PATHS.length;
+  const codes: GreenfieldParseErrorCode[] = [];
   const parts: string[] = [];
-  if (diagnostics.missingFiles.length > 0 || parsed < expected) {
+
+  const incomplete =
+    parsed < expected || diagnostics.missingFiles.length > 0;
+  if (incomplete) {
+    codes.push(GREENFIELD_INCOMPLETE_PARSE);
     parts.push(
       `Greenfield parse incomplete: parsed ${parsed}/${expected} expected files. Missing: [${diagnostics.missingFiles.join(", ")}].`,
     );
-    if (diagnostics.missingFiles.length > 0) {
-      parts.push(
-        `Missing required files: ${diagnostics.missingFiles.join(", ")}`,
-      );
-    }
   }
-  if (diagnostics.unexpectedFiles.length > 0) {
+  if (diagnostics.missingFiles.length > 0) {
+    codes.push(GREENFIELD_MISSING_REQUIRED_FILES);
     parts.push(
-      `Unexpected file paths: ${diagnostics.unexpectedFiles.join(", ")}`,
+      `Missing required files: ${diagnostics.missingFiles.join(", ")}`,
     );
   }
-  if (parts.length > 0) return parts.join(". ");
-  return `Greenfield parse incomplete: parsed ${parsed}/${expected} expected files.`;
+  if (diagnostics.unexpectedFiles.length > 0) {
+    codes.push(GREENFIELD_UNEXPECTED_FILE_PATHS);
+    const unexpected = `Unexpected file paths: ${diagnostics.unexpectedFiles.join(", ")}`;
+    parts.push(
+      incomplete
+        ? unexpected
+        : `${unexpected}. parsed ${parsed}/${expected} expected files`,
+    );
+  }
+
+  const errorCode: GreenfieldParseErrorCode =
+    diagnostics.unexpectedFiles.length > 0 && diagnostics.missingFiles.length === 0
+      ? GREENFIELD_UNEXPECTED_FILE_PATHS
+      : parsed > 0 && diagnostics.missingFiles.length > 0
+        ? GREENFIELD_INCOMPLETE_PARSE
+        : diagnostics.missingFiles.length > 0
+          ? GREENFIELD_MISSING_REQUIRED_FILES
+          : diagnostics.unexpectedFiles.length > 0
+            ? GREENFIELD_UNEXPECTED_FILE_PATHS
+            : GREENFIELD_INCOMPLETE_PARSE;
+
+  if (parts.length > 0) {
+    return { message: parts.join(". "), errorCode, errorCodes: codes };
+  }
+  return {
+    message: `Greenfield parse incomplete: parsed ${parsed}/${expected} expected files.`,
+    errorCode: GREENFIELD_INCOMPLETE_PARSE,
+    errorCodes: [GREENFIELD_INCOMPLETE_PARSE],
+  };
 }
 
 export function parseGreenfieldResponseDetailed(
@@ -186,11 +231,14 @@ export function parseGreenfieldResponseDetailed(
     content: byPath.get(path)!,
   }));
 
+  const parseError = formatParseError(diagnostics);
   return {
     ok: false,
     partialFiles,
     diagnostics,
-    errorMessage: formatParseError(diagnostics),
+    errorMessage: parseError.message,
+    errorCode: parseError.errorCode,
+    errorCodes: parseError.errorCodes,
   };
 }
 

@@ -4,7 +4,7 @@ import { ContextInspectorView } from "@/components/views/ContextInspectorView";
 import { MemoryView } from "@/components/views/MemoryView";
 import { GitView } from "@/components/views/GitView";
 import { RepositoryView } from "@/components/views/RepositoryView";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import type { InsightsTab } from "@/core/layout/types";
 
 const TABS: ReadonlyArray<{ id: InsightsTab; label: string }> = [

@@ -74,6 +74,19 @@ describe("coordinated follow-up completion", () => {
     assert.equal(result.incomplete, false);
   });
 
+  it("does not fail a batch when an optional unchanged target has no diff", () => {
+    const result = evaluateIncompleteCoordinatedApply({
+      prompt: "Add a Clear Completed button with a confirmation step.",
+      targetPaths: ["src/App.tsx", "src/index.css"],
+      files: [
+        file("src/App.tsx", "ready", true),
+        file("src/index.css", "ready", false),
+      ],
+    });
+    assert.equal(result.incomplete, false);
+    assert.deepEqual(result.missing, []);
+  });
+
   it("requires App.tsx for a hint-under-field follow-up even when CSS applied", () => {
     const prompt =
       "Add a small hint under the add-task field that says Press Enter to add a task.";
@@ -145,5 +158,28 @@ describe("coordinated follow-up completion", () => {
     assert.ok(!result.missing.includes("src/main.tsx"));
     assert.ok(!result.missing.includes(".gitkeep"));
     assert.ok(!(result.message ?? "").includes("main.tsx"));
+  });
+
+  it("refuses CSS-only patches for mixed filter + overdue highlight", () => {
+    const prompt =
+      "Add a high-priority-only filter and visually highlight overdue incomplete tasks.";
+    assert.equal(promptRequiresAppImplementation(prompt), true);
+    assert.equal(promptRequiresCoordinatedTsxAndCss(prompt), true);
+    const incomplete = evaluateIncompleteCoordinatedApply({
+      prompt,
+      targetPaths: ["src/App.tsx", "src/index.css", "src/main.tsx"],
+      files: [
+        file("src/index.css", "ready", true),
+        file("src/App.tsx", "error", false, "Missing @@FILE block for src/App.tsx"),
+      ],
+    });
+    assert.equal(incomplete.incomplete, true);
+    assert.deepEqual(incomplete.missing, ["src/App.tsx"]);
+    const complete = evaluateIncompleteCoordinatedApply({
+      prompt,
+      targetPaths: ["src/App.tsx", "src/index.css"],
+      files: [file("src/App.tsx", "ready", true), file("src/index.css", "ready", true)],
+    });
+    assert.equal(complete.incomplete, false);
   });
 });

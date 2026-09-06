@@ -1,4 +1,9 @@
 import { normalizeApplyPlanPath } from "@/core/planApply/markedFileParse";
+import {
+  hasVisualStylingRequest,
+  isFunctionalFeaturePrompt,
+  isMixedFunctionalUiPrompt,
+} from "@/core/planner/fallback";
 
 export type ApplyPlanPromptMode = "standard" | "repair" | "directRewrite";
 
@@ -23,6 +28,32 @@ export interface BuildApplyPlanBatchPromptInput {
   /** UI-only edit: summarize App.tsx as class names when true. */
   readonly uiEditMode?: boolean;
   readonly appClassNames?: readonly string[];
+}
+
+/** Explicit coverage so mixed functional+visual requests are not CSS-only. */
+export function buildApplyPlanRequirementCoverage(userPrompt: string): string | null {
+  const lower = userPrompt.toLowerCase();
+  if (!isFunctionalFeaturePrompt(lower)) return null;
+  const lines = [
+    "REQUIREMENT COVERAGE — implement every item. Do not return a CSS-only patch when behavior must change.",
+  ];
+  if (/\bfilters?\b|\bfiltering\b/.test(lower)) {
+    lines.push("- Implement filter state, control, and behavior in application source.");
+  }
+  if (/\bsearch/.test(lower)) {
+    lines.push("- Implement search matching behavior, not appearance alone.");
+  }
+  if (/\b(clear completed|button that|confirmation)\b/.test(lower)) {
+    lines.push("- Implement the control's behavior (state, handlers, dialog), not style-only.");
+  }
+  if (/\boverdue\b/.test(lower)) {
+    lines.push("- Implement overdue detection for incomplete items in application logic.");
+  }
+  if (isMixedFunctionalUiPrompt(userPrompt) || hasVisualStylingRequest(lower)) {
+    lines.push("- Add the requested visual styling (class names and/or stylesheet).");
+  }
+  lines.push("- Preserve existing features.");
+  return lines.join("\n");
 }
 
 /** Exact output contract — duplicated at top and bottom of every Apply Plan patch prompt. */
@@ -143,6 +174,11 @@ export function buildApplyPlanBatchPatchPrompt(
     "Plan summary:",
     input.planSummary,
   ];
+
+  const coverage = buildApplyPlanRequirementCoverage(input.userPrompt);
+  if (coverage) {
+    middle.push("", coverage);
+  }
 
   if (input.projectHint?.trim()) {
     middle.push("", "Project:", input.projectHint.trim());

@@ -29,7 +29,22 @@ interface StoredConsoleData {
   readonly runs: PersistedConsoleRun[];
 }
 
-export type ExecutionLogListener = (state: ExecutionLogState) => void;
+export function executionLogStatesEqual(
+  a: ExecutionLogState,
+  b: ExecutionLogState,
+): boolean {
+  return (
+    a.enabled === b.enabled &&
+    a.projectPath === b.projectPath &&
+    a.activeRunId === b.activeRunId &&
+    a.selectedRunId === b.selectedRunId &&
+    a.entries === b.entries &&
+    a.graph === b.graph &&
+    a.failureDiagnostic === b.failureDiagnostic &&
+    a.metadata === b.metadata &&
+    a.runHistory === b.runHistory
+  );
+}
 
 export interface ExecutionLogState {
   readonly enabled: boolean;
@@ -127,9 +142,12 @@ function createRunId(): string {
   return `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+export type ExecutionLogListener = (state: ExecutionLogState) => void;
+
 export class ExecutionLogService {
   private listeners = new Set<ExecutionLogListener>();
   private unsubscribeBus: (() => void) | null = null;
+  private tickTimer: ReturnType<typeof setInterval> | null = null;
   private projectPath: string | null = null;
   private enabled = readDeveloperConsoleEnabled();
   private activeRunId: string | null = null;
@@ -139,7 +157,10 @@ export class ExecutionLogService {
   private graph: ExecutionGraphNode[] = emptyGraphNodes();
   private failureDiagnostic: ConsoleFailureDiagnostic | null = null;
   private runHistory: PersistedConsoleRun[] = [];
-  private tickTimer: ReturnType<typeof setInterval> | null = null;
+  private lastHistoryKey = "";
+  private lastHistory: PersistedConsoleRun[] = [];
+  private lastState: ExecutionLogState | null = null;
+  private lastNotified: ExecutionLogState | null = null;
 
   constructor() {
     this.runHistory = readStorage().runs;
@@ -167,7 +188,7 @@ export class ExecutionLogService {
   }
 
   getState(): ExecutionLogState {
-    return {
+    const next: ExecutionLogState = {
       enabled: this.enabled,
       projectPath: this.projectPath,
       activeRunId: this.activeRunId,
@@ -178,15 +199,22 @@ export class ExecutionLogService {
       failureDiagnostic: this.failureDiagnostic,
       runHistory: this.filteredHistory(),
     };
+    if (this.lastState && executionLogStatesEqual(this.lastState, next)) {
+      return this.lastState;
+    }
+    this.lastState = next;
+    return next;
   }
 
   setEnabled(enabled: boolean): void {
+    if (this.enabled === enabled) return;
     this.enabled = enabled;
     writeDeveloperConsoleEnabled(enabled);
     this.emitState();
   }
 
   setProjectPath(path: string | null): void {
+    if (path === this.projectPath) return;
     this.projectPath = path;
     if (!this.selectedRunId || !this.activeRunId) {
       this.entries = [];
@@ -230,30 +258,36 @@ export class ExecutionLogService {
   }
 
   private filteredHistory(): PersistedConsoleRun[] {
-    if (!this.projectPath) return this.runHistory.slice(0, MAX_RUNS_PER_PROJECT);
-    return this.runHistory
-      .filter((r) => r.projectPath === this.projectPath)
-      .slice(0, MAX_RUNS_PER_PROJECT);
+    const key = `${this.projectPath ?? ""}:${this.runHistory.length}:${this.runHistory[0]?.id ?? ""}`;
+    if (key === this.lastHistoryKey) return this.lastHistory;
+    const next = this.projectPath
+      ? this.runHistory
+          .filter((r) => r.projectPath === this.projectPath)
+          .slice(0, MAX_RUNS_PER_PROJECT)
+      : this.runHistory.slice(0, MAX_RUNS_PER_PROJECT);
+    this.lastHistoryKey = key;
+    this.lastHistory = next;
+    return next;
   }
 
   private computeMetadata(): ConsoleRunMetadata {
     const startedAt = this.metadata.startedAt;
-    const elapsedMs =
-      startedAt != null
-        ? Date.now() - startedAt
-        : 0;
+    if (this.metadata.status !== "running" || startedAt == null) {
+      return this.metadata;
+    }
+    const elapsedMs = Date.now() - startedAt;
+    if (elapsedMs === this.metadata.elapsedMs) return this.metadata;
     return {
       ...this.metadata,
       runId: this.activeRunId ?? this.metadata.runId,
-      elapsedMs:
-        this.metadata.status === "running" && startedAt != null
-          ? elapsedMs
-          : this.metadata.elapsedMs,
+      elapsedMs,
     };
   }
 
   private emitState(): void {
     const state = this.getState();
+    if (state === this.lastNotified) return;
+    this.lastNotified = state;
     for (const listener of this.listeners) {
       listener(state);
     }
@@ -370,6 +404,7 @@ export class ExecutionLogService {
     };
     const without = this.runHistory.filter((r) => r.id !== this.activeRunId);
     this.runHistory = [snapshot, ...without].slice(0, MAX_RUNS_PER_PROJECT * 4);
+    this.lastHistoryKey = "";
     writeStorage(this.runHistory);
   }
 

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 import { isAgentWorkflowBusy } from "@/core/agent/agentRunMutex";
 import { APP_INFO } from "@/core/appInfo";
 

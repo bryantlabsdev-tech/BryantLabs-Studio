@@ -38,8 +38,6 @@ import {
 import type { PlanApplySession } from "@/core/planApply";
 import type { BuildPipelineHost, BuildStatusInput } from "@/app/orchestration/types";
 import { recordFollowUpRunFailure } from "@/app/orchestration/followUpRunFailure";
-import { mergeActiveEditorReferencedContents } from "@/core/context/activeEditorContext";
-import { sealSupersededRunningLogEntries } from "@/core/greenfield/runState";
 
 export function computeBuildStatus(input: BuildStatusInput): BuildLoopStatus {
   const phase = deriveBuildPhase({
@@ -87,11 +85,6 @@ async function executeSingleAgentFollowUp(
     semanticBoostPaths,
   });
   host.editExplorationContentsRef.current = explored;
-  host.editExplorationContentsRef.current = mergeActiveEditorReferencedContents(
-    host.editExplorationContentsRef.current,
-    host.activeEditorContextRef.current,
-    trimmed,
-  );
   if (explored.length > 0) {
     host.appendGreenfieldRunLog(
       "pipeline",
@@ -138,11 +131,7 @@ async function executeSingleAgentFollowUp(
   }
   const autoContinue =
     shouldAutoContinueFollowUpApply(trimmed) || !readFollowUpReviewFirst();
-  const applyResult = await host.startApplyPlan({ autoContinue });
-  if (applyResult.featureAlreadySatisfied) {
-    recordRunTimelineStage("patch_generated", "feature_already_present");
-    return null;
-  }
+  const applyResult = await host.startApplyPlan({ autoContinue, prompt: trimmed });
   if (applyResult.waitingForReview) {
     recordRunTimelineStage("waiting_for_review", `${applyResult.validReady} file(s)`);
     host.releaseBuildRunForReview?.();
@@ -229,7 +218,6 @@ export async function runSingleAgentBuildLoop(
   }
 
   host.clearRunContextForNewSubmit();
-  host.resetAiCallTracker?.();
 
   const runBlockReason = host.getAgentRunBlockReason();
   if (runBlockReason) {
@@ -261,18 +249,14 @@ export async function runSingleAgentBuildLoop(
     logProviderSelected(settings, stage, "settings");
   }
   const plannerRouting = resolveStageRouting(settings, "planner");
-  const runStartedAt = Date.now();
   host.updateGreenfieldRun({
     actionType: "apply_plan",
     projectPath: host.project.path,
     runResult: "running",
-    runStartedAt,
+    runStartedAt: Date.now(),
     endedAt: null,
     durationMs: null,
     appliedFileDiffs: [],
-    failureReport: null,
-    entries: sealSupersededRunningLogEntries(host.greenfieldRun.entries, runStartedAt),
-    workflow: { ...(host.greenfieldRun?.workflow ?? {}), errors: [] },
     provider: plannerRouting?.provider ?? settings.provider,
     model:
       plannerRouting?.model ?? modelForProvider(settings, settings.provider),
@@ -355,20 +339,13 @@ export async function resumeBuildReviewOrchestration(
   const phase = planApplySession.phase;
 
   if (phase === "review" || phase === "waiting_for_review") {
-    const simulated = planApplySession.files.every((file) => file.selectionReason === "e2e");
-    if (!readFollowUpReviewFirst() && !simulated) {
-      await callbacks.continueBuildAfterReview();
-    }
     return;
   }
 
   if (phase === "proposing") {
     callbacks.setBuildRunning(true);
     try {
-      await host.executeApplyPlan({
-        directRewrite: false,
-        autoContinue: !readFollowUpReviewFirst(),
-      });
+      await host.executeApplyPlan({ directRewrite: false });
     } catch (err) {
       callbacks.setBuildError(
         err instanceof Error ? err.message : "Build resume failed during propose.",

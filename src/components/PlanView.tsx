@@ -1,5 +1,5 @@
 import type { Plan } from "@/core/planner";
-import { useWorkspace } from "@/app/WorkspaceProvider";
+import { useWorkspace } from "@/app/workspaceContext";
 
 interface PlanViewProps {
   plan: Plan;
