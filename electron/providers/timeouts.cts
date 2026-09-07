@@ -44,11 +44,56 @@ export interface ProviderGenerateOptions {
 
 export const DEFAULT_GENERATE_TIMEOUT_MS = PROVIDER_TIMEOUT_MS.generateTest;
 
-/** User-facing message when fetchJson aborts at timeoutMs. */
+/** Mirrors httpJson FIRST_BYTE_TIMEOUT_MS — keep in sync. */
+export const PROVIDER_FIRST_BYTE_TIMEOUT_MS = 60_000;
+
+export type ProviderTimeoutKind = "first_byte" | "total";
+
+export function firstByteTimeoutMessage(firstByteMs = PROVIDER_FIRST_BYTE_TIMEOUT_MS): string {
+  return `No first byte received within ${Math.round(firstByteMs / 1000)} seconds`;
+}
+
+export function totalTimeoutMessage(timeoutMs: number): string {
+  return `Total request exceeded ${Math.round(timeoutMs / 1000)} seconds`;
+}
+
+export function classifyFetchTimeoutKind(err: unknown): ProviderTimeoutKind | null {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  if (/first-byte timeout/i.test(msg) || /no first byte received/i.test(msg)) {
+    return "first_byte";
+  }
+  if (/total timeout/i.test(msg) || /total request exceeded/i.test(msg)) {
+    return "total";
+  }
+  if (isFetchTimeoutError(err)) return "total";
+  return null;
+}
+
+/**
+ * Identical HTTP retries are for truncated JSON bodies only.
+ * First-byte / total timeouts must not duplicate the renderer retry layer.
+ */
+export function shouldRetryIdenticalHttpOnTransportError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  if (classifyFetchTimeoutKind(err) != null) return false;
+  return /request body is not valid json|unexpected end of data|malformed request body|invalid json.*body/i.test(
+    msg,
+  );
+}
+
+/** User-facing message when fetchJson aborts. Distinguishes first-byte vs total. */
 export function formatProviderTimeoutError(
   operation: ProviderGenerateOperation | undefined,
   timeoutMs: number,
+  err?: unknown,
 ): string {
+  const kind = classifyFetchTimeoutKind(err);
+  if (kind === "first_byte") {
+    return firstByteTimeoutMessage(PROVIDER_FIRST_BYTE_TIMEOUT_MS);
+  }
+  if (kind === "total") {
+    return totalTimeoutMessage(timeoutMs);
+  }
   const seconds = Math.round(timeoutMs / 1000);
   switch (operation) {
     case "greenfield":
@@ -73,7 +118,9 @@ export function isFetchTimeoutError(err: unknown): boolean {
   return (
     err.name === "AbortError" ||
     /operation was aborted/i.test(err.message) ||
-    /aborted/i.test(err.message)
+    /aborted/i.test(err.message) ||
+    /no first byte received/i.test(err.message) ||
+    /total request exceeded/i.test(err.message)
   );
 }
 

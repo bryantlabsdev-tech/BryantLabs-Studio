@@ -8,6 +8,8 @@ import {
   redactProviderSecrets,
   isProviderInCooldown,
   clearProviderCooldown,
+  storedKeyDoesNotAuthorizeProvider,
+  isAuthorizedFallbackProvider,
 } from "@/core/providers/reliability";
 import { parseOllamaTagNames } from "@/core/providers/ollamaModels";
 import { normalizeProviderSettings } from "@/core/providers/orchestration";
@@ -43,6 +45,17 @@ function baseSettings(patch: Partial<ProviderSettings> = {}): ProviderSettings {
 }
 
 describe("provider reliability", () => {
+  it("classifies first-byte and total timeout messages", () => {
+    assert.equal(
+      classifyReliabilityFromError("No first byte received within 60 seconds"),
+      "timeout",
+    );
+    assert.equal(
+      classifyReliabilityFromError("Total request exceeded 180 seconds"),
+      "timeout",
+    );
+  });
+
   it("classifies missing key", () => {
     assert.equal(
       classifyReliabilityFromError("No Gemini API key is stored. Add one in settings."),
@@ -108,6 +121,30 @@ describe("provider reliability", () => {
     assert.ok(failure.suggestedFallbacks.includes("openrouter"));
     assert.ok(failure.suggestedFallbacks.includes("groq"));
     assert.ok(failure.suggestedFallbacks.includes("anthropic"));
+  });
+
+  it("never treats a stored key as authorization for a disabled provider", () => {
+    const settings = baseSettings({
+      providerEnabled: {
+        gemini: false,
+        anthropic: true,
+        openrouter: false,
+        groq: false,
+        ollama: false,
+      },
+    });
+    assert.equal(storedKeyDoesNotAuthorizeProvider(settings, "gemini"), true);
+    assert.equal(isAuthorizedFallbackProvider(settings, "gemini"), false);
+    const req = buildFallbackRequestV2({
+      settings,
+      stage: "coder",
+      failedProvider: "anthropic",
+      failedModel: "claude-opus-4-6",
+      error: "No first byte received within 60 seconds",
+    });
+    assert.ok(req);
+    assert.equal(req.options.length, 0);
+    assert.ok(!req.options.some((o) => o.provider === "gemini"));
   });
 
   it("offers fallback options on recoverable failure", () => {

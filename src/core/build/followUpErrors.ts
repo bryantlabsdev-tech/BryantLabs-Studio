@@ -73,6 +73,14 @@ export function formatFollowUpErrorHeadline(
   },
 ): string {
   const msg = error.trim();
+  const reportLine = context?.failureReport?.rootCauseLine?.trim() ?? "";
+  const exactTimeout = [msg, reportLine].find(
+    (line) =>
+      /no first byte received within \d+ seconds/i.test(line) ||
+      /total request exceeded \d+ seconds/i.test(line),
+  );
+  if (exactTimeout) return exactTimeout;
+
   const providerName = context?.provider
     ? PROVIDER_DISPLAY_LABELS[context.provider]
     : "The AI provider";
@@ -151,6 +159,7 @@ function extractTsFile(text: string): string | null {
 
 export type FollowUpRecoveryActionV2 =
   | { kind: "retry" }
+  | { kind: "retry_later" }
   | { kind: "greenfield_recovery"; prompt: string }
   | { kind: "stronger_model"; step: StrongerModelStep }
   | { kind: "switch_provider"; provider: ProviderId; label: string }
@@ -176,8 +185,10 @@ export function suggestFollowUpRecoveryV2(
     return actions;
   }
 
-  const actions: FollowUpRecoveryActionV2[] = [{ kind: "retry" }];
   const provider = failedProvider ?? settings.provider;
+  const fallbacks = buildSuggestedFallbacks(provider, settings);
+  const actions: FollowUpRecoveryActionV2[] =
+    fallbacks.length === 0 ? [{ kind: "retry_later" }] : [{ kind: "retry" }];
 
   if (shouldOfferStrongerModel(error)) {
     const stronger = suggestStrongerModelStep(provider, modelForFailed(settings, provider), settings);
@@ -189,7 +200,6 @@ export function suggestFollowUpRecoveryV2(
     }
   }
 
-  const fallbacks = buildSuggestedFallbacks(provider, settings);
   for (const fb of fallbacks.slice(0, 2)) {
     actions.push({
       kind: "switch_provider",

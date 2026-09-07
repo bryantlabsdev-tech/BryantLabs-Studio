@@ -27,7 +27,7 @@ function mapGenerateError(
   timeoutMs: number,
 ): string {
   if (isFetchTimeoutError(err)) {
-    return formatProviderTimeoutError(operation, timeoutMs);
+    return formatProviderTimeoutError(operation, timeoutMs, err);
   }
   return err instanceof Error ? err.message : "Groq request failed.";
 }

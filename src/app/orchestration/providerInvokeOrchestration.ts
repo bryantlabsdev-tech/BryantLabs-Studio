@@ -72,9 +72,12 @@ export function logProviderReliabilityOrchestration(
     const status =
       event.status === "success" ||
       event.status === "online" ||
-      event.status === "checked"
+      event.status === "checked" ||
+      event.status === "selected"
         ? "success"
-        : event.status === "started" || event.status === "offered"
+        : event.status === "started" ||
+            event.status === "offered" ||
+            event.status === "retrying"
           ? "running"
           : "failed";
     host.appendGreenfieldRunLog(

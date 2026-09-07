@@ -854,54 +854,6 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(
-    "providers:applyPlanBatchJson",
-    async (_event, payloadJson: unknown) => {
-      if (typeof payloadJson !== "string" || payloadJson.length === 0) {
-        return {
-          ok: false,
-          provider: "anthropic",
-          model: "",
-          raw: null,
-          latencyMs: 0,
-          error: "Apply Plan payload missing or not a JSON string.",
-          missingPaths: [],
-        };
-      }
-      let parsed: {
-        provider?: ProviderId;
-        prompt?: string;
-        context?: PlanContext;
-        files?: PatchTargetFile[];
-        meta?: { planSummary: string; targetPaths: string[]; repair?: boolean };
-      };
-      try {
-        parsed = JSON.parse(payloadJson) as typeof parsed;
-      } catch (err) {
-        return {
-          ok: false,
-          provider: "anthropic",
-          model: "",
-          raw: null,
-          latencyMs: 0,
-          error: `Invalid Apply Plan JSON payload: ${err instanceof Error ? err.message : String(err)}`,
-          missingPaths: [],
-        };
-      }
-      const provider = parsed.provider ?? "anthropic";
-      const prompt = typeof parsed.prompt === "string" ? parsed.prompt : "";
-      const files = Array.isArray(parsed.files) ? parsed.files : [];
-      const context = (parsed.context ?? {}) as PlanContext;
-      const meta =
-        parsed.meta &&
-        typeof parsed.meta.planSummary === "string" &&
-        Array.isArray(parsed.meta.targetPaths)
-          ? parsed.meta
-          : { planSummary: "", targetPaths: [] };
-      return runApplyPlanBatchPatch(provider, prompt, context, files, meta);
-    },
-  );
-
-  ipcMain.handle(
     "providers:applyPlanBatch",
     async (
       _event,

@@ -4,6 +4,7 @@ import {
   formatProviderTimeoutError,
   isFetchTimeoutError,
   resolveGenerateTimeout,
+  shouldRetryIdenticalHttpOnTransportError,
   type ProviderGenerateOptions,
 } from "./timeouts.cjs";
 import {
@@ -310,7 +311,7 @@ function mapGenerateError(
   timeoutMs: number,
 ): string {
   if (isFetchTimeoutError(err)) {
-    return formatProviderTimeoutError(operation, timeoutMs);
+    return formatProviderTimeoutError(operation, timeoutMs, err);
   }
   return err instanceof Error ? err.message : "Anthropic request failed.";
 }
@@ -497,7 +498,7 @@ export async function generate(
     };
   } catch (err) {
     const transportMsg = err instanceof Error ? err.message : String(err);
-    if (isTruncatedHttpJsonBodyError(transportMsg) || isFetchTimeoutError(err)) {
+    if (shouldRetryIdenticalHttpOnTransportError(err) || isTruncatedHttpJsonBodyError(transportMsg)) {
       try {
         const res = await createMessage(
           model,

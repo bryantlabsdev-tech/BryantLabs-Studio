@@ -77,7 +77,7 @@ describe("providerEnablement", () => {
     assert.ok(switches.length >= 2);
   });
 
-  it("excludes disabled providers from fallback chains", () => {
+  it("excludes disabled providers from fallback chains even when keys exist", () => {
     const settings = baseSettings({ backupProvider: "groq" });
     const fallbacks = buildSuggestedFallbacks("gemini", settings);
     assert.ok(!fallbacks.includes("openrouter"));

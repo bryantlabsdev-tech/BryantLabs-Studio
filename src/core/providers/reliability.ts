@@ -58,7 +58,10 @@ const INVALID_KEY_RE =
   /invalid api key|invalid.?key|401|403|unauthorized|authentication|permission denied/i;
 const MODEL_MISSING_RE =
   /not installed|model_missing|not found|ollama pull|selected model/i;
-const TIMEOUT_RE = /timed out|timeout|abort/i;
+const TIMEOUT_RE =
+  /timed out|timeout|abort|no first byte received|total request exceeded/i;
+const FIRST_BYTE_TIMEOUT_RE = /no first byte received within \d+ seconds/i;
+const TOTAL_TIMEOUT_RE = /total request exceeded \d+ seconds/i;
 const NO_JSON_RE =
   /no json returned|no json|parse.*json|invalid json|json syntax|schema validation|not valid json/i;
 const HIGH_DEMAND_RE =
@@ -111,6 +114,36 @@ export function reliabilityStatusLabel(status: ProviderReliabilityStatus): strin
     default:
       return "Unknown error";
   }
+}
+
+export function isProviderTimeoutError(error: string | undefined | null): boolean {
+  const msg = (error ?? "").trim();
+  return FIRST_BYTE_TIMEOUT_RE.test(msg) || TOTAL_TIMEOUT_RE.test(msg) || TIMEOUT_RE.test(msg);
+}
+
+export function isFirstByteTimeoutError(error: string | undefined | null): boolean {
+  return FIRST_BYTE_TIMEOUT_RE.test((error ?? "").trim());
+}
+
+export function isTotalTimeoutError(error: string | undefined | null): boolean {
+  return TOTAL_TIMEOUT_RE.test((error ?? "").trim());
+}
+
+/** At most one explicit same-provider retry after a failed attempt. */
+export const MAX_SAME_PROVIDER_USER_RETRIES = 1;
+
+export function boundFallbackOffer(
+  request: ProviderFallbackRequestV2,
+  sameProviderRetriesUsed: number,
+): ProviderFallbackRequestV2 {
+  const allowRetry =
+    request.allowRetry && sameProviderRetriesUsed < MAX_SAME_PROVIDER_USER_RETRIES;
+  const options = request.options.filter((o) => o.provider !== request.failedProvider);
+  return { ...request, allowRetry, options };
+}
+
+export function shouldPromptProviderFallback(request: ProviderFallbackRequestV2): boolean {
+  return request.allowRetry || request.options.length > 0;
 }
 
 export function isRequestTooLargeError(error: string | undefined | null): boolean {
@@ -266,6 +299,21 @@ function isProviderUsable(id: ProviderId, settings: ProviderSettings): boolean {
   return providerHasApiKey(settings, id);
 }
 
+/** A stored key is not authorization. Disabled providers are never usable. */
+export function storedKeyDoesNotAuthorizeProvider(
+  settings: ProviderSettings,
+  id: ProviderId,
+): boolean {
+  return providerHasApiKey(settings, id) && !isProviderEnabled(settings, id);
+}
+
+export function isAuthorizedFallbackProvider(
+  settings: ProviderSettings,
+  id: ProviderId,
+): boolean {
+  return isProviderUsable(id, settings);
+}
+
 export function buildSuggestedFallbacks(
   failedProvider: ProviderId,
   settings: ProviderSettings,
@@ -338,6 +386,9 @@ export function reliabilityUserMessage(
     case "model_missing":
       return "The selected model is not available on this provider.";
     case "timeout":
+      if (technical && (FIRST_BYTE_TIMEOUT_RE.test(technical) || TOTAL_TIMEOUT_RE.test(technical))) {
+        return technical.trim();
+      }
       return "The provider request timed out.";
     case "safety_blocked":
       return "The provider blocked the request for safety reasons.";

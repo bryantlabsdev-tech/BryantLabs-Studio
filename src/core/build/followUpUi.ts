@@ -5,6 +5,7 @@ import {
   buildSuggestedFallbacks,
   classifyReliabilityFromError,
 } from "@/core/providers/reliability";
+import { isProviderEnabled } from "@/core/providers/providerEnablement";
 import { PROVIDER_DISPLAY_LABELS } from "@/core/providers/providerStatus";
 import type { ProviderId, ProviderSettings } from "@/core/providers/types";
 
@@ -147,6 +148,13 @@ export function formatUserFacingBuildError(
   const msg = error.trim();
   if (!msg) return "Something went wrong. Try again or switch provider.";
 
+  if (/no first byte received within \d+ seconds/i.test(msg)) {
+    return msg;
+  }
+  if (/total request exceeded \d+ seconds/i.test(msg)) {
+    return msg;
+  }
+
   if (/zero valid patch proposals/i.test(msg)) {
     const provider = context?.provider
       ? PROVIDER_DISPLAY_LABELS[context.provider]
@@ -206,6 +214,7 @@ export function formatUserFacingBuildError(
 
 export type FollowUpRecoveryAction =
   | { kind: "retry" }
+  | { kind: "retry_later" }
   | { kind: "switch_provider"; provider: ProviderId; label: string }
   | { kind: "open_providers" }
   | { kind: "cheaper_model" };
@@ -215,10 +224,11 @@ export function suggestFollowUpRecoveryActions(
   settings: ProviderSettings,
   failedProvider?: ProviderId,
 ): FollowUpRecoveryAction[] {
-  const actions: FollowUpRecoveryAction[] = [{ kind: "retry" }];
   const provider = failedProvider ?? settings.provider;
-
   const fallbacks = buildSuggestedFallbacks(provider, settings);
+  const actions: FollowUpRecoveryAction[] =
+    fallbacks.length === 0 ? [{ kind: "retry_later" }] : [{ kind: "retry" }];
+
   for (const fb of fallbacks.slice(0, 2)) {
     const label =
       fb === "anthropic"
@@ -236,10 +246,15 @@ export function suggestFollowUpRecoveryActions(
   if (
     provider !== "groq" &&
     provider !== "gemini" &&
+    isProviderEnabled(settings, "groq") &&
     settings.hasGroqKey
   ) {
     actions.push({ kind: "cheaper_model" });
-  } else if (provider !== "gemini" && settings.hasGeminiKey) {
+  } else if (
+    provider !== "gemini" &&
+    isProviderEnabled(settings, "gemini") &&
+    settings.hasGeminiKey
+  ) {
     actions.push({ kind: "cheaper_model" });
   }
 

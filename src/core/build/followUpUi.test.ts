@@ -4,7 +4,9 @@ import {
   formatFollowUpLogMessage,
   formatUserFacingBuildError,
   resolveFollowUpDisplayPhase,
+  suggestFollowUpRecoveryActions,
 } from "@/core/build/followUpUi";
+import { normalizeProviderSettings } from "@/core/providers/orchestration";
 import type { GreenfieldRunLogEntry } from "@/core/greenfield/runLog";
 
 function log(
@@ -69,5 +71,56 @@ describe("followUpUi", () => {
       ),
       /setup did not finish/i,
     );
+    assert.equal(
+      formatUserFacingBuildError("No first byte received within 60 seconds"),
+      "No first byte received within 60 seconds",
+    );
+    assert.equal(
+      formatUserFacingBuildError("Total request exceeded 180 seconds"),
+      "Total request exceeded 180 seconds",
+    );
+  });
+
+  it("does not offer switch-provider or cheaper-model in Anthropic-only mode", () => {
+    const settings = normalizeProviderSettings({
+      provider: "anthropic",
+      geminiModel: "gemini-2.5-pro",
+      ollamaModel: "qwen2.5-coder:7b",
+      ollamaBaseUrl: "http://localhost:11434",
+      anthropicModel: "claude-opus-4-6",
+      groqModel: "llama-3.3-70b-versatile",
+      openrouterModel: "anthropic/claude-sonnet-4",
+      hasGeminiKey: true,
+      hasAnthropicKey: true,
+      hasGroqKey: true,
+      hasOpenRouterKey: true,
+      autoFixMode: "ask",
+      agentMode: "single",
+      plannerProvider: "anthropic",
+      plannerModel: "",
+      coderProvider: "anthropic",
+      coderModel: "",
+      repairProvider: "anthropic",
+      repairModel: "",
+      maxAiCalls: 8,
+      maxRepairAttempts: 1,
+      stopOnProviderLimit: true,
+      askBeforeFallback: true,
+      providerEnabled: {
+        gemini: false,
+        anthropic: true,
+        openrouter: false,
+        groq: false,
+        ollama: false,
+      },
+    });
+    const actions = suggestFollowUpRecoveryActions(
+      "No first byte received within 60 seconds",
+      settings,
+      "anthropic",
+    );
+    assert.ok(actions.some((a) => a.kind === "retry_later"));
+    assert.ok(!actions.some((a) => a.kind === "switch_provider"));
+    assert.ok(!actions.some((a) => a.kind === "cheaper_model"));
   });
 });

@@ -575,7 +575,7 @@ export function BuildView() {
       dispatchPrompt(action.prompt);
       return;
     }
-    if (action.kind === "retry") {
+    if (action.kind === "retry" || action.kind === "retry_later") {
       const retryPrompt = prompt.trim();
       if (retryPrompt.length >= 4) dispatchPrompt(retryPrompt);
       else dispatchPrompt();

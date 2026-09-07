@@ -9,6 +9,7 @@ interface FollowUpErrorBannerProps {
 
 function actionLabel(action: FollowUpRecoveryActionV2): string {
   if (action.kind === "retry") return "Retry";
+  if (action.kind === "retry_later") return "Retry Later";
   if (action.kind === "greenfield_recovery") return "Retry setup recovery";
   if (action.kind === "stronger_model") return action.step.label;
   if (action.kind === "switch_provider") return action.label;
@@ -23,6 +24,7 @@ function actionLabel(action: FollowUpRecoveryActionV2): string {
 function actionVariant(action: FollowUpRecoveryActionV2): "primary" | "default" {
   if (
     action.kind === "retry" ||
+    action.kind === "retry_later" ||
     action.kind === "greenfield_recovery" ||
     action.kind === "open_diagnostic_report"
   ) {
@@ -59,7 +61,7 @@ export function FollowUpErrorBanner({
 
   const orderedActions = [...actions].sort((a, b) => {
     const priority = (action: FollowUpRecoveryActionV2) => {
-      if (action.kind === "retry" || action.kind === "greenfield_recovery") return 0;
+      if (action.kind === "retry" || action.kind === "retry_later" || action.kind === "greenfield_recovery") return 0;
       if (action.kind === "stronger_model") return 1;
       if (action.kind === "open_diagnostic_report") return 2;
       if (action.kind === "inspect_run") return 3;

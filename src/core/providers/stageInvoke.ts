@@ -18,6 +18,9 @@ import {
   reliabilityStatusLabel,
   shouldCountTowardCircuitBreaker,
   isRequestTooLargeError,
+  boundFallbackOffer,
+  shouldPromptProviderFallback,
+  MAX_SAME_PROVIDER_USER_RETRIES,
 } from "@/core/providers/reliability";
 import {
   logProviderCircuitOpen,
@@ -48,6 +51,10 @@ import {
 } from "@/core/providers/aiCallBudgetDiagnostics";
 import type { AiCallGatePurpose } from "@/core/providers/costControls";
 import { retryBlockedDueToBudgetReason } from "@/core/providers/greenfieldCallBudget";
+import {
+  buildSanitizedTimeoutAttempt,
+  formatSanitizedTimeoutAttempt,
+} from "@/core/providers/timeoutAttemptDiagnostics";
 
 export interface StageProviderResult {
   readonly ok?: boolean;
@@ -215,6 +222,7 @@ export async function invokeStageProvider<T extends StageProviderResult>(opts: {
     ...(opts.promptPayload ? { promptText: opts.promptPayload } : {}),
   });
   const baseRecordPurpose: AiCallGatePurpose = opts.recordPurpose ?? "primary";
+  let sameProviderUserRetries = 0;
 
   while (true) {
     const model = modelForStageProvider(opts.settings, opts.stage, provider);
@@ -436,7 +444,7 @@ export async function invokeStageProvider<T extends StageProviderResult>(opts: {
             result.apiKeyPresent != null ? `apiKeyPresent=${result.apiKeyPresent}` : null,
             `durationMs=${durationMs}`,
             `message=${failure.technicalMessage}`,
-            result.responseBody
+            result.responseBody && failure.status !== "timeout"
               ? `body=${truncateResponseBody(result.responseBody)}`
               : null,
           ]
@@ -448,7 +456,27 @@ export async function invokeStageProvider<T extends StageProviderResult>(opts: {
         status: failure?.status ?? "unknown_error",
         message: `${opts.stage} · ${usedProvider} · ${usedModel}`,
         provider: usedProvider,
-        ...(errorDetails ? { details: errorDetails } : {}),
+        details: [
+          errorDetails,
+          formatSanitizedTimeoutAttempt(
+            buildSanitizedTimeoutAttempt({
+              attempt: smartAttempt + 1 + sameProviderUserRetries,
+              provider: usedProvider,
+              model: usedModel,
+              elapsedMs: durationMs,
+              ...(result.error ? { error: result.error } : {}),
+              httpStatus: result.httpStatus ?? null,
+              responseByteLength:
+                failure?.status === "timeout"
+                  ? 0
+                  : typeof result.responseBody === "string"
+                    ? result.responseBody.length
+                    : 0,
+            }),
+          ),
+        ]
+          .filter(Boolean)
+          .join("\n"),
       });
 
       if (failure?.status === "insufficient_credits") {
@@ -511,19 +539,36 @@ export async function invokeStageProvider<T extends StageProviderResult>(opts: {
     });
     if (!fallbackReq) return finalResult;
 
+    const bounded = boundFallbackOffer(fallbackReq, sameProviderUserRetries);
+    if (!shouldPromptProviderFallback(bounded)) {
+      return finalResult;
+    }
+
     const resolved = await resolveFallbackChoice(
       opts,
-      fallbackReq,
+      bounded,
       finalResult.provider ?? provider,
     );
-    if (resolved === null) return null;
+    if (resolved === null) return finalResult;
     if (resolved === "retry") {
+      if (sameProviderUserRetries >= MAX_SAME_PROVIDER_USER_RETRIES) {
+        return finalResult;
+      }
+      sameProviderUserRetries += 1;
       clearProviderCooldown(finalResult.provider ?? provider);
       provider = finalResult.provider ?? provider;
       continue;
     }
+    if (resolved === (finalResult.provider ?? provider)) {
+      if (sameProviderUserRetries >= MAX_SAME_PROVIDER_USER_RETRIES) {
+        return finalResult;
+      }
+      sameProviderUserRetries += 1;
+      provider = resolved;
+      continue;
+    }
     provider = resolved;
-    logProviderSelected(opts.settings, opts.stage, "fallback");
+    sameProviderUserRetries = 0;
   }
 }
 
@@ -576,17 +621,38 @@ async function resolveFallbackChoice(
       message: failedProvider,
       provider: failedProvider,
     });
-    opts.onBudgetExceeded("Greenfield generation cancelled — provider fallback declined.");
     return null;
   }
   if (choice === "retry") {
     opts.onReliabilityLog?.({
-      kind: "provider_fallback",
-      status: "selected",
-      message: `${failedProvider} (retry)`,
+      kind: "provider_retry",
+      status: "retrying",
+      message: `${failedProvider} (same-provider retry)`,
+      provider: failedProvider,
+      details: "Explicit retry of the same provider — not a fallback",
+    });
+    return "retry";
+  }
+
+  if (choice === failedProvider) {
+    opts.onReliabilityLog?.({
+      kind: "provider_retry",
+      status: "retrying",
+      message: `${failedProvider} (same-provider retry)`,
       provider: failedProvider,
     });
     return "retry";
+  }
+
+  if (!fallbackReq.options.some((option) => option.provider === choice)) {
+    opts.onReliabilityLog?.({
+      kind: "provider_fallback",
+      status: "cancelled",
+      message: failedProvider,
+      provider: failedProvider,
+      details: "Ignored unauthorized or disabled fallback provider",
+    });
+    return null;
   }
 
   const toModel = modelForProvider(opts.settings, choice);
@@ -601,6 +667,7 @@ async function resolveFallbackChoice(
     status: "selected",
     message: choice,
     provider: choice,
+    details: `Fallback provider ${choice} · ${toModel}`,
   });
   return choice;
 }

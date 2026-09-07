@@ -27,7 +27,13 @@ export function ProviderFallbackDialog({
           <strong>Reason:</strong> {reliabilityStatusLabel(request.failure.status)}
         </p>
         <p className="provider-fallback__error">{failureHeadline(request.failure)}</p>
-        <p className="plan__muted">Choose fallback:</p>
+        <p className="plan__muted">
+          {request.options.length > 0
+            ? "Choose another provider, or retry the same provider once."
+            : request.allowRetry
+              ? "Retry the same provider once, or cancel."
+              : "No alternate provider is configured."}
+        </p>
         <div className="provider-fallback__actions">
           {request.options.map((option) => (
             <button

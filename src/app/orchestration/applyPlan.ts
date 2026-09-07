@@ -42,7 +42,7 @@ import {
   normalizeProviderSettings,
   resolveStageRouting,
 } from "@/core/providers/orchestration";
-import { isRequestTooLargeError } from "@/core/providers/reliability";
+import { isRequestTooLargeError, isProviderTimeoutError } from "@/core/providers/reliability";
 import type { ProviderId, ProviderSettings } from "@/core/providers/types";
 import { activeProviderModel } from "@/core/studioRun/types";
 import {
@@ -1074,7 +1074,12 @@ async function executeApplyPlanOrchestrationBody(
       (f.status === "error" || f.status === "pending"),
   );
 
-  if (!directRewrite && validReady === 0 && hasRetryableFailures) {
+  if (
+    !directRewrite &&
+    validReady === 0 &&
+    hasRetryableFailures &&
+    !isProviderTimeoutError(lastBatchResult?.error)
+  ) {
     const retryTargets = buildNarrowedRetryTargets(
       plan,
       resolved.aiPlan,
@@ -1192,11 +1197,13 @@ async function executeApplyPlanOrchestrationBody(
               "Route selection likely wrong: previous greenfield run failed before build completed. Submit the same prompt again to enter greenfield_recovery instead of apply_plan.",
           }
         : {}),
-      ...(formatError
-        ? {
-            rootCauseLine: buildApplyPlanPatchFormatRootCause(patchTargetPaths),
-          }
-        : {}),
+      ...(isProviderTimeoutError(lastBatchResult?.error)
+        ? { rootCauseLine: String(lastBatchResult?.error).trim() }
+        : formatError
+          ? {
+              rootCauseLine: buildApplyPlanPatchFormatRootCause(patchTargetPaths),
+            }
+          : {}),
       ...(lastRaw?.trim() ? { rawModelOutput: lastRaw } : {}),
     });
     const diagDetail = diagnostics.map((d) => `${d.path}: ${d.reason}`).join("; ");

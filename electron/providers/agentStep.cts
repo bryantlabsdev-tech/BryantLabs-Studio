@@ -148,7 +148,7 @@ async function runGeminiAgentStep(
     };
   } catch (err) {
     const message = isFetchTimeoutError(err)
-      ? formatProviderTimeoutError("test", DEFAULT_GENERATE_TIMEOUT_MS)
+      ? formatProviderTimeoutError("test", DEFAULT_GENERATE_TIMEOUT_MS, err)
       : err instanceof Error
         ? err.message
         : "Gemini agent step failed.";
@@ -280,7 +280,7 @@ async function runOpenAiAgentStep(
     };
   } catch (err) {
     const message = isFetchTimeoutError(err)
-      ? formatProviderTimeoutError("test", DEFAULT_GENERATE_TIMEOUT_MS)
+      ? formatProviderTimeoutError("test", DEFAULT_GENERATE_TIMEOUT_MS, err)
       : err instanceof Error
         ? err.message
         : `${provider} agent step failed.`;

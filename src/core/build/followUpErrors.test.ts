@@ -70,4 +70,43 @@ describe("followUpErrors", () => {
     );
     assert.ok(!actions.some((a) => a.kind === "retry"));
   });
+
+  it("offers Retry Later and no switch-provider when only Anthropic is enabled", () => {
+    const settings = testSettings({
+      provider: "anthropic",
+      hasGeminiKey: true,
+      hasGroqKey: true,
+      hasOpenRouterKey: true,
+      providerEnabled: {
+        gemini: false,
+        anthropic: true,
+        openrouter: false,
+        groq: false,
+        ollama: false,
+      },
+    });
+    const actions = suggestFollowUpRecoveryV2(
+      "No first byte received within 60 seconds",
+      settings,
+      "anthropic",
+    );
+    assert.ok(actions.some((a) => a.kind === "retry_later"));
+    assert.ok(!actions.some((a) => a.kind === "switch_provider"));
+  });
+
+  it("keeps first-byte timeout text in the headline", () => {
+    const err = collectFollowUpError({
+      buildError: null,
+      planApplyError: "Apply Plan produced zero valid patch proposals.",
+      pipelineError: null,
+      failureReport: {
+        rootStage: "patch_propose",
+        rootCauseLine: "No first byte received within 60 seconds",
+        stages: [],
+      },
+      provider: "anthropic",
+      model: "claude-opus-4-6",
+    });
+    assert.equal(err?.headline, "No first byte received within 60 seconds");
+  });
 });

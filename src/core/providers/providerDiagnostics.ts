@@ -198,19 +198,35 @@ export function logProviderFallback(opts: {
 }
 
 export function logProviderError(ctx: ProviderErrorContext): ProviderFailure {
-  const line = formatProviderErrorLog(ctx);
-  console.error(line);
   const message =
     ctx.sdkMessage?.trim() ||
     ctx.responseBody?.trim() ||
     "Provider request failed";
-  return buildProviderFailure({
+  const failure = buildProviderFailure({
     provider: ctx.provider,
     model: ctx.model,
     error: message,
     settings: ctx.settings,
     ...(ctx.httpStatus != null ? { httpStatus: ctx.httpStatus } : {}),
   });
+  if (failure.status === "timeout") {
+    console.log(
+      [
+        `[provider:timeout]`,
+        `reason=${failure.status}`,
+        `message=${redactProviderSecrets(failure.userMessage)}`,
+        `provider=${ctx.provider}`,
+        `model=${ctx.model}`,
+        `stage=${ctx.stage}`,
+        ctx.durationMs != null ? `durationMs=${ctx.durationMs}` : null,
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
+    return failure;
+  }
+  console.error(formatProviderErrorLog(ctx));
+  return failure;
 }
 
 export function formatConnectionFailureMessage(
