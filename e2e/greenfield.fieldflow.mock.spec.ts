@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import type { ElectronApplication, Page } from "playwright";
 import {
+  closeStudioApp,
   dismissBlockingDialogs,
   fillAgentPrompt,
   getMainWindow,
@@ -9,7 +10,7 @@ import {
 } from "./helpers/studio";
 
 test.describe("FieldFlow greenfield (mock provider)", () => {
-  let app: ElectronApplication;
+  let app: ElectronApplication | undefined;
   let page: Page;
 
   test.beforeAll(async () => {
@@ -19,7 +20,7 @@ test.describe("FieldFlow greenfield (mock provider)", () => {
   });
 
   test.afterAll(async () => {
-    await app.close();
+    await closeStudioApp(app);
   });
 
   test("accepts FieldFlow multi-page prompt in agent composer", async () => {

@@ -4,6 +4,7 @@ import path from "node:path";
 import { test, expect } from "@playwright/test";
 import type { ElectronApplication, Page } from "playwright";
 import {
+  closeStudioApp,
   dismissBlockingDialogs,
   emptyProjectFixturePath,
   fillAgentPrompt,
@@ -62,7 +63,7 @@ async function seedDisposableTaskManager(): Promise<string> {
 }
 
 test.describe("Reopen lifecycle: Apply Plan should generate proposals", () => {
-  let app: ElectronApplication;
+  let app: ElectronApplication | undefined;
   let page: Page;
   let projectPath: string;
 
@@ -83,7 +84,7 @@ test.describe("Reopen lifecycle: Apply Plan should generate proposals", () => {
   });
 
   test.afterAll(async () => {
-    await app.close();
+    await closeStudioApp(app);
     if (projectPath) {
       await fs.rm(projectPath, { recursive: true, force: true }).catch(() => undefined);
     }
@@ -110,7 +111,7 @@ test.describe("Reopen lifecycle: Apply Plan should generate proposals", () => {
     );
     await assertNoRenderLoopConsoleErrors(page);
 
-    await app.close();
+    await closeStudioApp(app);
 
     app = await launchStudioApp({ e2eProject: null });
     page = await getMainWindow(app);
@@ -140,7 +141,7 @@ test.describe("Reopen lifecycle: Apply Plan should generate proposals", () => {
       /zero valid patch proposals/i,
     );
 
-    await app.close();
+    await closeStudioApp(app);
     app = await launchStudioApp({ e2eProject: null });
     page = await getMainWindow(app);
     await dismissBlockingDialogs(page);

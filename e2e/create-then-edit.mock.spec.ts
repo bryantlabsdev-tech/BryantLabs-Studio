@@ -4,6 +4,7 @@ import path from "node:path";
 import { test, expect } from "@playwright/test";
 import type { ElectronApplication, Page } from "playwright";
 import {
+  closeStudioApp,
   dismissBlockingDialogs,
   fillAgentPrompt,
   getMainWindow,
@@ -18,8 +19,8 @@ import {
 } from "./helpers/studio";
 
 test.describe("Create then edit (mock provider)", () => {
-  let app: ElectronApplication;
-  let page: Page;
+  let app: ElectronApplication | undefined;
+  let page: Page | undefined;
   let tempEmptyProject: string;
 
   test.beforeAll(async () => {
@@ -34,10 +35,13 @@ test.describe("Create then edit (mock provider)", () => {
   });
 
   test.afterAll(async () => {
-    await assertNoRenderLoopConsoleErrors(page);
-    await app.close();
-    if (tempEmptyProject) {
-      await fs.rm(tempEmptyProject, { recursive: true, force: true }).catch(() => undefined);
+    try {
+      if (page) await assertNoRenderLoopConsoleErrors(page);
+    } finally {
+      await closeStudioApp(app);
+      if (tempEmptyProject) {
+        await fs.rm(tempEmptyProject, { recursive: true, force: true }).catch(() => undefined);
+      }
     }
   });
 

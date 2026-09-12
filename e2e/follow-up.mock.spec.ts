@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import type { ElectronApplication, Page } from "playwright";
 import {
+  closeStudioApp,
   dismissBlockingDialogs,
   fillAgentPrompt,
   getMainWindow,
@@ -18,8 +19,8 @@ import {
 } from "./helpers/studio";
 
 test.describe("Follow-up edit (mock provider)", () => {
-  let app: ElectronApplication;
-  let page: Page;
+  let app: ElectronApplication | undefined;
+  let page: Page | undefined;
 
   test.beforeAll(async () => {
     app = await launchStudioApp();
@@ -28,8 +29,11 @@ test.describe("Follow-up edit (mock provider)", () => {
   });
 
   test.afterAll(async () => {
-    await assertNoRenderLoopConsoleErrors(page);
-    await app.close();
+    try {
+      if (page) await assertNoRenderLoopConsoleErrors(page);
+    } finally {
+      await closeStudioApp(app);
+    }
   });
 
   test("accepts follow-up prompt in agent chat", async () => {
@@ -42,8 +46,8 @@ test.describe("Follow-up edit (mock provider)", () => {
 });
 
 test.describe("Follow-up review (mock provider)", () => {
-  let app: ElectronApplication;
-  let page: Page;
+  let app: ElectronApplication | undefined;
+  let page: Page | undefined;
 
   test.beforeAll(async () => {
     app = await launchStudioApp();
@@ -59,8 +63,11 @@ test.describe("Follow-up review (mock provider)", () => {
   });
 
   test.afterAll(async () => {
-    await assertNoRenderLoopConsoleErrors(page);
-    await app.close();
+    try {
+      if (page) await assertNoRenderLoopConsoleErrors(page);
+    } finally {
+      await closeStudioApp(app);
+    }
   });
 
   test("simulated review chip opens workbench review panel", async () => {

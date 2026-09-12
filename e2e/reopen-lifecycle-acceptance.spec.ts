@@ -5,11 +5,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  closeStudioApp,
   dismissBlockingDialogs,
   fillAgentPrompt,
   getMainWindow,
   projectRoot,
   sendAgentPrompt,
+  trackRootPid,
   waitForComposerReady,
   waitForStudioTestHooks,
 } from "./helpers/studio";
@@ -58,6 +60,11 @@ test.describe("Real-provider reopen lifecycle acceptance", () => {
 
   test.setTimeout(20 * 60_000);
 
+  let app: ElectronApplication | undefined;
+  test.afterAll(async () => {
+    await closeStudioApp(app);
+  });
+
   test("create, edit, quit/reopen, edit with stage deadlines", async () => {
     expect(projectRoot).toBe("/Users/ferrisb/Desktop/Bryantlabs Studio FIXED");
     await fs.mkdir(ARTIFACT_DIR, { recursive: true });
@@ -69,7 +76,7 @@ test.describe("Real-provider reopen lifecycle acceptance", () => {
     );
 
     // Failed-stage first: provider must respond within 60s (health).
-    let app = await runStage("app_launch", DEADLINE.appLaunch, async () => {
+    app = await runStage("app_launch", DEADLINE.appLaunch, async () => {
       const launched = await launchRealStudio(userDataDir);
       return launched;
     });
@@ -146,7 +153,7 @@ test.describe("Real-provider reopen lifecycle acceptance", () => {
     expect(edit1Diag.previewUrl).toBeTruthy();
     await dismissBlockingDialogs(page);
 
-    await app.close();
+    await closeStudioApp(app);
 
     app = await runStage("app_relaunch", DEADLINE.appLaunch, async () =>
       launchRealStudio(userDataDir),
@@ -201,7 +208,7 @@ test.describe("Real-provider reopen lifecycle acceptance", () => {
       fullPage: true,
     });
 
-    await app.close();
+    await closeStudioApp(app);
 
     // Second complete quit/reopen → third edit
     app = await runStage("app_relaunch_2", DEADLINE.appLaunch, async () =>
@@ -245,7 +252,7 @@ test.describe("Real-provider reopen lifecycle acceptance", () => {
     });
 
     await saveJson("00-stage-timings.json", { projectDir, stages: stageLog });
-    await app.close();
+    await closeStudioApp(app);
   });
 });
 
@@ -321,12 +328,14 @@ async function launchRealStudio(userDataDir: string): Promise<ElectronApplicatio
   } else {
     env.VITE_DEV_SERVER_URL = env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
   }
-  return electron.launch({
+  const app = await electron.launch({
     args: ["."],
     cwd: projectRoot,
     env,
     timeout: DEADLINE.appLaunch,
   });
+  trackRootPid(app.process()?.pid);
+  return app;
 }
 
 async function stubOpenFolderDialog(

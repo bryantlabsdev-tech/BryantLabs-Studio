@@ -1,13 +1,14 @@
 import { test, expect } from "@playwright/test";
 import type { ElectronApplication, Page } from "playwright";
 import {
+  closeStudioApp,
   getMainWindow,
   launchStudioApp,
   waitForAgentReady,
   waitForPreviewPanelUrl,
 } from "./helpers/studio";
 
-let app: ElectronApplication;
+let app: ElectronApplication | undefined;
 let page: Page;
 
 test.describe("Preview verification", () => {
@@ -18,7 +19,7 @@ test.describe("Preview verification", () => {
   });
 
   test.afterAll(async () => {
-    await app.close();
+    await closeStudioApp(app);
   });
 
   test("preview panel shows running URL from test hook", async () => {

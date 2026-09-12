@@ -10,11 +10,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  closeStudioApp,
   dismissBlockingDialogs,
   fillAgentPrompt,
   getMainWindow,
   projectRoot,
   sendAgentPrompt,
+  trackRootPid,
   waitForComposerReady,
   waitForStudioTestHooks,
 } from "./helpers/studio";
@@ -109,6 +111,11 @@ test.describe("Northstar large-project real acceptance", () => {
   );
   test.setTimeout(55 * 60_000);
 
+  let app: ElectronApplication | undefined;
+  test.afterAll(async () => {
+    await closeStudioApp(app);
+  });
+
   test("create Northstar, Kanban expansion, quit/reopen edit", async () => {
     expect(projectRoot).toBe("/Users/ferrisb/Desktop/Bryantlabs Studio FIXED");
     await fs.mkdir(ARTIFACT_DIR, { recursive: true });
@@ -126,7 +133,7 @@ test.describe("Northstar large-project real acceptance", () => {
     await saveJson("00-paths.json", { projectDir, userDataDir });
 
     const consoleErrors: string[] = [];
-    let app = await runStage("app_launch", DEADLINE.appLaunch, () =>
+    app = await runStage("app_launch", DEADLINE.appLaunch, () =>
       launchRealStudio(userDataDir),
     );
     let page = await getMainWindow(app);
@@ -364,7 +371,7 @@ test.describe("Northstar large-project real acceptance", () => {
     await kanbanPreview.close().catch(() => undefined);
 
     // ——— QUIT / REOPEN ———
-    await app.close();
+    await closeStudioApp(app);
     app = await runStage("app_relaunch", DEADLINE.appLaunch, () =>
       launchRealStudio(userDataDir),
     );
@@ -455,7 +462,7 @@ test.describe("Northstar large-project real acceptance", () => {
     });
     await saveJson("00-stage-timings.json", { stages: stageLog, timing });
 
-    await app.close();
+    await closeStudioApp(app);
   });
 });
 
@@ -513,12 +520,14 @@ async function launchRealStudio(userDataDir: string): Promise<ElectronApplicatio
   env.VITE_BRYANTLABS_E2E = "1";
   env.BRYANTLABS_E2E_USER_DATA = userDataDir;
   env.VITE_DEV_SERVER_URL = env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
-  return electron.launch({
+  const app = await electron.launch({
     args: ["."],
     cwd: projectRoot,
     env,
     timeout: DEADLINE.appLaunch,
   });
+  trackRootPid(app.process()?.pid);
+  return app;
 }
 
 async function stubOpenFolderDialog(

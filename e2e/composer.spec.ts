@@ -4,13 +4,14 @@ import {
   composerExample,
   fillAgentPrompt,
   getMainWindow,
+  closeStudioApp,
   launchStudioApp,
   sendAgentPrompt,
   waitForAgentReady,
   dismissBlockingDialogs,
 } from "./helpers/studio";
 
-let app: ElectronApplication;
+let app: ElectronApplication | undefined;
 let page: Page;
 
 test.describe("Composer UI", () => {
@@ -21,7 +22,7 @@ test.describe("Composer UI", () => {
   });
 
   test.afterAll(async () => {
-    await app.close();
+    await closeStudioApp(app);
   });
 
   test("shows agent composer with follow-up examples", async () => {

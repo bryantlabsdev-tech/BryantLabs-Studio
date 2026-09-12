@@ -6,11 +6,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  closeStudioApp,
   dismissBlockingDialogs,
   fillAgentPrompt,
   getMainWindow,
   projectRoot,
   sendAgentPrompt,
+  trackRootPid,
   waitForComposerReady,
   waitForPatchApplied,
   waitForStudioTestHooks,
@@ -43,6 +45,11 @@ test.describe("Fresh filter + overdue acceptance (real provider)", () => {
 
   test.setTimeout(8 * 60_000);
 
+  let app: ElectronApplication | undefined;
+  test.afterAll(async () => {
+    await closeStudioApp(app);
+  });
+
   test("apply high-priority filter + overdue highlight through Electron UI", async () => {
     expect(projectRoot).toBe("/Users/ferrisb/Desktop/Bryantlabs Studio FIXED");
     await fs.mkdir(ARTIFACT_DIR, { recursive: true });
@@ -72,7 +79,7 @@ test.describe("Fresh filter + overdue acceptance (real provider)", () => {
       path.join(userDataDir, "provider-settings.json"),
     );
 
-    const app = await launchRealStudio(userDataDir);
+    app = await launchRealStudio(userDataDir);
     const page = await getMainWindow(app);
     await dismissBlockingDialogs(page);
     await waitForStudioTestHooks(page);
@@ -228,7 +235,7 @@ test.describe("Fresh filter + overdue acceptance (real provider)", () => {
     }
     expect(run?.runResult).toBe("success");
 
-    await app.close();
+    await closeStudioApp(app);
   });
 });
 
@@ -258,12 +265,14 @@ async function launchRealStudio(userDataDir: string): Promise<ElectronApplicatio
   } else {
     env.VITE_DEV_SERVER_URL = env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
   }
-  return electron.launch({
+  const app = await electron.launch({
     args: ["."],
     cwd: projectRoot,
     env,
     timeout: DEADLINE.appLaunch,
   });
+  trackRootPid(app.process()?.pid);
+  return app;
 }
 
 async function openPreview(page: Page): Promise<void> {

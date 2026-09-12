@@ -2,6 +2,7 @@ import path from "node:path";
 import { test, expect } from "@playwright/test";
 import type { ElectronApplication, Page } from "playwright";
 import {
+  closeStudioApp,
   dismissBlockingDialogs,
   getMainWindow,
   launchStudioApp,
@@ -53,7 +54,7 @@ async function readRunInspectorOverlayStyles(page: Page): Promise<ComputedOverla
   });
 }
 
-let app: ElectronApplication;
+let app: ElectronApplication | undefined;
 let page: Page;
 
 test.describe("Run Inspector overlay opacity", () => {
@@ -67,7 +68,7 @@ test.describe("Run Inspector overlay opacity", () => {
   });
 
   test.afterAll(async () => {
-    await app.close();
+    await closeStudioApp(app);
   });
 
   test.beforeEach(async () => {

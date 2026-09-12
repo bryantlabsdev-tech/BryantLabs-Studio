@@ -10,11 +10,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  closeStudioApp,
   dismissBlockingDialogs,
   fillAgentPrompt,
   getMainWindow,
   projectRoot,
   sendAgentPrompt,
+  trackRootPid,
   waitForComposerReady,
   waitForPatchApplied,
   waitForStudioTestHooks,
@@ -43,6 +45,11 @@ test.describe("Quit/reopen clear-completed acceptance", () => {
   test.skip(!ACCEPTANCE_REAL, "Set BRYANTLABS_ACCEPTANCE_REAL=1");
   test.setTimeout(10 * 60_000);
 
+  let app: ElectronApplication | undefined;
+  test.afterAll(async () => {
+    await closeStudioApp(app);
+  });
+
   test("quit, reopen project, apply clear-completed edit successfully", async () => {
     expect(projectRoot).toBe("/Users/ferrisb/Desktop/Bryantlabs Studio FIXED");
     await fs.mkdir(ARTIFACT_DIR, { recursive: true });
@@ -67,7 +74,7 @@ test.describe("Quit/reopen clear-completed acceptance", () => {
     );
 
     // 1) Launch, open project, then quit completely.
-    let app = await launchRealStudio(userDataDir);
+    app = await launchRealStudio(userDataDir);
     let page = await getMainWindow(app);
     await dismissBlockingDialogs(page);
     await waitForStudioTestHooks(page);
@@ -80,7 +87,7 @@ test.describe("Quit/reopen clear-completed acceptance", () => {
       path: path.join(ARTIFACT_DIR, "02-before-quit.png"),
       fullPage: true,
     });
-    await app.close();
+    await closeStudioApp(app);
 
     // 2) Reopen Studio + same project.
     app = await launchRealStudio(userDataDir);
@@ -330,7 +337,7 @@ test.describe("Quit/reopen clear-completed acceptance", () => {
     expect(finalSnap.active).toBe(false);
     expect(finalSnap.buildRunning).toBe(false);
 
-    await app.close();
+    await closeStudioApp(app);
   });
 });
 
@@ -356,12 +363,14 @@ async function launchRealStudio(userDataDir: string): Promise<ElectronApplicatio
   env.VITE_BRYANTLABS_E2E = "1";
   env.BRYANTLABS_E2E_USER_DATA = userDataDir;
   env.VITE_DEV_SERVER_URL = env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
-  return electron.launch({
+  const app = await electron.launch({
     args: ["."],
     cwd: projectRoot,
     env,
     timeout: DEADLINE.appLaunch,
   });
+  trackRootPid(app.process()?.pid);
+  return app;
 }
 
 async function maybeAcceptReview(page: Page): Promise<void> {

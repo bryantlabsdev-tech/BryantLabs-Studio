@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import type { ElectronApplication, Page } from "playwright";
 import {
+  closeStudioApp,
   emptyProjectFixturePath,
   getMainWindow,
   launchStudioApp,
@@ -13,7 +14,7 @@ import {
   resetEmptyProjectFixture,
 } from "./helpers/studio";
 
-let app: ElectronApplication;
+let app: ElectronApplication | undefined;
 let page: Page;
 
 test.describe("Greenfield create (mock provider)", () => {
@@ -27,7 +28,7 @@ test.describe("Greenfield create (mock provider)", () => {
   });
 
   test.afterAll(async () => {
-    await app.close();
+    await closeStudioApp(app);
   });
 
   test("mock greenfield completes without typecheck script failure", async () => {

@@ -4,6 +4,7 @@ import os from "node:os";
 import { test, expect } from "@playwright/test";
 import type { ElectronApplication, Page } from "playwright";
 import {
+  closeStudioApp,
   getMainWindow,
   launchStudioApp,
   dismissBlockingDialogs,
@@ -12,7 +13,7 @@ import {
 
 const screenshotDir = path.join(projectRoot, "docs/onboarding");
 
-let app: ElectronApplication;
+let app: ElectronApplication | undefined;
 let page: Page;
 let userDataDir: string;
 
@@ -32,7 +33,7 @@ test.describe("First-run onboarding", () => {
   });
 
   test.afterAll(async () => {
-    await app.close();
+    await closeStudioApp(app);
   });
 
   test("welcome screen orients new users", async () => {
