@@ -193,6 +193,16 @@ describe("classifyStudioIntent", () => {
     assert.equal(looksLikeEditExistingProjectPrompt(SUDOKU_UPGRADE_PROMPT), true);
     assert.equal(looksLikeEditExistingProjectPrompt("Fix TypeScript errors"), false);
     assert.equal(looksLikeEditExistingProjectPrompt("Build a Sudoku app"), false);
+    assert.equal(
+      looksLikeEditExistingProjectPrompt(
+        "Highlight low-stock products on the products page.",
+      ),
+      true,
+    );
+    assert.equal(
+      looksLikeEditExistingProjectPrompt("Show me how the products page works"),
+      false,
+    );
   });
 
   it("routes upgrade on open project with sources to follow-up (not greenfield)", () => {

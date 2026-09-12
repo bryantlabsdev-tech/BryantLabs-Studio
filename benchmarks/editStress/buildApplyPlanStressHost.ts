@@ -10,6 +10,7 @@ import type { Plan } from "@/core/planner";
 import { emptySessionMemory } from "@/core/sessionMemory/store";
 import { emptyAgentWorkspaceSession } from "@/core/agentWorkspace/store";
 import { mockApplyPlanBatchPatch } from "@/core/test/mockApplyPlanPatch";
+import { join } from "node:path";
 import {
   liveApplyPlanBatchPatch,
   type LiveGeminiPatchConfig,
@@ -144,6 +145,36 @@ export function buildApplyPlanStressHarness(input: {
       input.liveGemini
         ? liveApplyPlanBatchPatch(input.liveGemini, prompt, context, files, meta)
         : mockApplyPlanBatchPatch(prompt, files),
+    proposeApplyPlanPatchesJson: async (payloadJson: string) => {
+      const payload = JSON.parse(payloadJson) as {
+        prompt: string;
+        context: Parameters<typeof liveApplyPlanBatchPatch>[2];
+        files: readonly { path: string; content?: string; absPath?: string }[];
+        meta: Parameters<typeof liveApplyPlanBatchPatch>[4];
+      };
+      const files = [];
+      for (const file of payload.files) {
+        let content = file.content ?? "";
+        if (!content) {
+          const abs = file.absPath || join(input.workspace.root, file.path);
+          try {
+            content = await readWorkspaceFile(abs);
+          } catch {
+            content = "";
+          }
+        }
+        files.push({ path: file.path, content });
+      }
+      return input.liveGemini
+        ? liveApplyPlanBatchPatch(
+            input.liveGemini,
+            payload.prompt,
+            payload.context,
+            files,
+            payload.meta,
+          )
+        : mockApplyPlanBatchPatch(payload.prompt, files);
+    },
     verify: async () => {
       if (input.skipVerify) return mockVerificationOk();
       if (input.verify) return input.verify();

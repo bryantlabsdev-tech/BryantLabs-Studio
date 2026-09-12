@@ -199,4 +199,47 @@ describe("routeAgentPrompt intent routing", () => {
     assert.equal(route.execution, "build_loop");
     assert.equal(route.intent, "repair");
   });
+
+  it("routes UI mutation commands targeting a page or component to build_loop", () => {
+    for (const prompt of [
+      "Highlight low-stock products on the products page.",
+      "Display low-stock badges on the products page.",
+      "Show low-stock warnings on the alerts page.",
+      "Add a filter to the products page.",
+      "Update the header component.",
+      "Change the dashboard page title.",
+    ]) {
+      const classified = classifyAgentPromptIntent(prompt);
+      assert.equal(classified.intent, "edit", prompt);
+      const route = routeAgentPrompt({
+        prompt,
+        projectOpen: true,
+        scan,
+        scanStatus: "done",
+      });
+      assert.equal(route.execution, "build_loop", prompt);
+    }
+  });
+
+  it("keeps questions and advice about UI as consultation", () => {
+    for (const prompt of [
+      "What does the products page do?",
+      "How should I highlight low-stock products?",
+      "Should we show low-stock warnings on the products page?",
+      "Explain how the products page works",
+      "Show me how the products page works",
+      "Can you explain the products component?",
+    ]) {
+      const classified = classifyAgentPromptIntent(prompt);
+      assert.equal(intentIsConsultation(classified.intent), true, prompt);
+      assert.equal(intentEntersApplyPlan(classified.intent), false, prompt);
+      const route = routeAgentPrompt({
+        prompt,
+        projectOpen: true,
+        scan,
+        scanStatus: "done",
+      });
+      assert.equal(route.execution, "consultation", prompt);
+    }
+  });
 });
