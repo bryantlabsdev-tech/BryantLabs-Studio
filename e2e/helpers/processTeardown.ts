@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 export const CLOSE_GRACE_MS = 750;
+export const CLOSE_SETTLE_MS = 400;
 export const TERM_GRACE_MS = 400;
 
 export function isPidAlive(pid: number): boolean {
@@ -177,21 +178,27 @@ export function untrackRootPid(pid: number | undefined): void {
   if (pid != null) trackedRootPids.delete(pid);
 }
 
+export function beginClose(
+  close: () => Promise<void>,
+): Promise<boolean> {
+  return Promise.resolve()
+    .then(() => close())
+    .then(() => true)
+    .catch(() => false);
+}
+
 export async function closeWithGrace(
   close: () => Promise<void>,
   graceMs: number = CLOSE_GRACE_MS,
 ): Promise<boolean> {
-  let finished = false;
-  const pending = Promise.resolve()
-    .then(() => close())
-    .then(() => {
-      finished = true;
-    })
-    .catch(() => {
-      finished = false;
-    });
-  await Promise.race([pending, delay(graceMs)]);
-  return finished;
+  return Promise.race([beginClose(close), delay(graceMs).then(() => false)]);
+}
+
+async function settleClose(
+  pending: Promise<boolean>,
+  settleMs: number,
+): Promise<boolean> {
+  return Promise.race([pending, delay(settleMs).then(() => false)]);
 }
 
 export interface StudioAppLike {
@@ -214,20 +221,32 @@ function safePid(app: StudioAppLike): number | undefined {
  */
 export async function teardownStudioApp(
   app: StudioAppLike | null | undefined,
-  opts?: { closeGraceMs?: number; termGraceMs?: number },
+  opts?: { closeGraceMs?: number; closeSettleMs?: number; termGraceMs?: number },
 ): Promise<void> {
   const pid = app ? safePid(app) : undefined;
   if (pid) trackRootPid(pid);
   const snapshot = pid ? [...expandTrackedPids([pid])] : [];
-
-  if (app != null && !closedApps.has(app)) {
-    closedApps.add(app);
-    await closeWithGrace(() => app.close(), opts?.closeGraceMs ?? CLOSE_GRACE_MS);
-  }
+  // Promote current descendants so a later reparent (Linux init) still dies.
+  for (const child of snapshot) trackRootPid(child);
 
   const roots = new Set<number>(snapshot);
   if (pid) roots.add(pid);
   for (const tracked of trackedRootPids) roots.add(tracked);
+
+  if (app != null && !closedApps.has(app)) {
+    closedApps.add(app);
+    const closePromise = beginClose(() => app.close());
+    const graceful = await Promise.race([
+      closePromise,
+      delay(opts?.closeGraceMs ?? CLOSE_GRACE_MS).then(() => false),
+    ]);
+
+    if (!graceful) {
+      await terminateTrackedPids(roots, { termGraceMs: opts?.termGraceMs });
+    }
+
+    await settleClose(closePromise, opts?.closeSettleMs ?? CLOSE_SETTLE_MS);
+  }
 
   await terminateTrackedPids(roots, { termGraceMs: opts?.termGraceMs });
   for (const root of roots) untrackRootPid(root);

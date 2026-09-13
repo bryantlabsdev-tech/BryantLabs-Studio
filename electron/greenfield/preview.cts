@@ -3,6 +3,7 @@ import * as http from "node:http";
 import {
   buildSpawnDiagnostics,
   logSpawnDiagnostics,
+  parseDirectSpawnCommand,
   resolveShellCommand,
   resolveSpawnCwdSync,
   spawnProcessEnv,
@@ -290,6 +291,7 @@ export async function startPreview(root: string): Promise<PreviewStartResult> {
   const port = picked.port;
   previewPort = port;
   const command = resolveShellCommand(previewCommand(port));
+  const { file, args } = parseDirectSpawnCommand(command);
   const { cwd: spawnRoot, exists: rootExists } = resolveSpawnCwdSync(root);
   const diagnostics = buildSpawnDiagnostics({ command, cwd: spawnRoot });
   logSpawnDiagnostics(diagnostics, "greenfield:preview");
@@ -306,9 +308,10 @@ export async function startPreview(root: string): Promise<PreviewStartResult> {
       NO_COLOR: "1",
     });
 
-    const child = spawn(command, {
+    // Spawn npm/vite directly (no shell) so the tracked PID is the real
+    // preview process. Killing that PID then reaches Vite and its children.
+    const child = spawn(file, args, {
       cwd: rootExists ? spawnRoot : root,
-      shell: true,
       env,
       windowsHide: true,
     });

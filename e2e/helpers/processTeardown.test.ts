@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { describe, it } from "node:test";
 import {
+  closeWithGrace,
   collectProcessTree,
   isPidAlive,
   teardownStudioApp,
   terminateProcessTree,
+  trackRootPid,
   waitForPidExit,
 } from "./processTeardown.ts";
 
@@ -112,5 +114,97 @@ describe("e2e process teardown", () => {
     } finally {
       parent.kill();
     }
+  });
+
+  it("kills a reparented preview child after the wrapper exits", async () => {
+    const wrapper = spawnHang(`
+      const { spawn } = require('node:child_process');
+      const child = spawn(process.execPath, ['-e', ${JSON.stringify(HANG)}], { stdio: 'ignore' });
+      if (!child.pid) process.exit(1);
+      setInterval(() => {}, 1e9);
+    `);
+    try {
+      await new Promise((r) => setTimeout(r, 80));
+      const tree = collectProcessTree(wrapper.pid);
+      const previewPid = tree.find((pid) => pid !== wrapper.pid);
+      assert.ok(previewPid, "expected preview descendant");
+      trackRootPid(previewPid);
+
+      try {
+        process.kill(wrapper.pid, "SIGKILL");
+      } catch {
+        // ignore
+      }
+      await waitForPidExit(wrapper.pid, 1_000);
+      assert.equal(isPidAlive(previewPid), true, "child should survive wrapper exit");
+
+      const fakeApp = {
+        close: async () => {},
+        process: () => ({ pid: wrapper.pid }),
+      };
+      await teardownStudioApp(fakeApp, { closeGraceMs: 50, closeSettleMs: 50, termGraceMs: 80 });
+      assert.equal(isPidAlive(previewPid), false, "reparented preview child survived");
+    } finally {
+      wrapper.kill();
+    }
+  });
+
+  it("lets a graceful Electron close finish without falling back", async () => {
+    let closedAt = 0;
+    const fakeApp = {
+      close: async () => {
+        await new Promise((r) => setTimeout(r, 40));
+        closedAt = Date.now();
+      },
+      process: () => ({ pid: undefined }),
+    };
+    const started = Date.now();
+    await teardownStudioApp(fakeApp, {
+      closeGraceMs: 500,
+      closeSettleMs: 100,
+      termGraceMs: 20,
+    });
+    assert.ok(closedAt > 0, "close() should resolve");
+    assert.ok(closedAt - started >= 35);
+    assert.ok(Date.now() - started < 2_000);
+    await teardownStudioApp(fakeApp, { closeGraceMs: 20, closeSettleMs: 20, termGraceMs: 20 });
+  });
+
+  it("bounded fallback terminates a stuck app without a 120s wait", async () => {
+    const stuck = spawnHang(IGNORE_TERM);
+    try {
+      let closeCalls = 0;
+      const fakeApp = {
+        close: () =>
+          new Promise<void>(() => {
+            closeCalls += 1;
+          }),
+        process: () => ({ pid: stuck.pid }),
+      };
+      const started = Date.now();
+      await teardownStudioApp(fakeApp, {
+        closeGraceMs: 80,
+        closeSettleMs: 80,
+        termGraceMs: 80,
+      });
+      assert.equal(closeCalls, 1);
+      assert.equal(isPidAlive(stuck.pid), false);
+      assert.ok(Date.now() - started < 2_000);
+      await teardownStudioApp(fakeApp, {
+        closeGraceMs: 20,
+        closeSettleMs: 20,
+        termGraceMs: 20,
+      });
+      assert.equal(closeCalls, 1);
+    } finally {
+      stuck.kill();
+    }
+  });
+
+  it("closeWithGrace reports success when close finishes in time", async () => {
+    const finished = await closeWithGrace(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    }, 200);
+    assert.equal(finished, true);
   });
 });

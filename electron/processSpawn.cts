@@ -122,6 +122,19 @@ export function resolveShellCommand(command: string): string {
   return trimmed;
 }
 
+/** Split a resolved command into argv so callers can spawn without a shell. */
+export function parseDirectSpawnCommand(command: string): {
+  file: string;
+  args: string[];
+} {
+  const parts = command.trim().split(/\s+/).filter(Boolean);
+  let file = parts[0] ?? "npm";
+  if (process.platform === "win32" && (file === "npm" || file === "npx")) {
+    file = `${file}.cmd`;
+  }
+  return { file, args: parts.slice(1) };
+}
+
 export function resolveSpawnCwdSync(
   preferred: string | null | undefined,
   fallback?: string | null,
