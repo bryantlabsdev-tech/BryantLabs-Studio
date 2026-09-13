@@ -162,6 +162,19 @@ describe("writeGreenfieldFiles", () => {
     assert.equal(pagesLog?.ok, true);
   });
 
+  it("writes public assets into nested public/", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "bl-gf-public-"));
+    const files = [
+      ...sampleFiles(),
+      { path: "public/logo.svg", content: "<svg xmlns='http://www.w3.org/2000/svg'/>" },
+    ];
+    const result = await writeGreenfieldFiles(root, files, { mode: "workspace" });
+    assert.equal(result.ok, true);
+    assert.equal(result.written.includes("public/logo.svg"), true);
+    const logo = await fs.readFile(path.join(root, "public/logo.svg"), "utf8");
+    assert.match(logo, /svg/);
+  });
+
   it("rejects disallowed path traversal like ../evil.ts", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "bl-gf-traversal-"));
     const files = [

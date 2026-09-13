@@ -377,4 +377,69 @@ export default function App(){return <Routes><Route path="/" element={<Layout/>}
     );
     assert.ok(result.projectFiles?.some((f) => f.path === "src/pages/Dashboard.tsx"));
   });
+
+  it("keeps nested FieldFlow fixture extras including public assets", async () => {
+    const settings = await mockSettings();
+    const token = "BRYANTLABS_E2E_FIXTURE:fieldflow-multipage";
+    const rawText = [
+      marker("src/types.ts", "export type Job = { id: string };"),
+      marker(
+        "src/components/Layout.tsx",
+        "export function Layout(){ return <div><aside /><main /></div>; }",
+      ),
+      marker(
+        "src/components/Sidebar.tsx",
+        'export function Sidebar(){ return <nav><a href="/">Dashboard</a><a href="/jobs">Jobs</a></nav>; }',
+      ),
+      marker(
+        "src/hooks/useLocalStorage.ts",
+        "export function useLocalStorage<T>(k:string,i:T){ return [i,()=>{}] as const; }",
+      ),
+      marker(
+        "src/pages/Dashboard.tsx",
+        "export default function Dashboard(){ return <div>FieldFlow Dashboard</div>; }",
+      ),
+      marker("src/pages/Jobs.tsx", "export default function Jobs(){ return <div>Jobs</div>; }"),
+      marker(
+        "src/components/jobs/JobDetail.tsx",
+        "export default function JobDetail(){ return <div>Job</div>; }",
+      ),
+      marker("public/logo.svg", "<svg xmlns='http://www.w3.org/2000/svg' />"),
+      marker(
+        "src/App.tsx",
+        `import { Routes, Route } from "react-router-dom";
+import { Layout } from "./components/Layout";
+import Dashboard from "./pages/Dashboard";
+import Jobs from "./pages/Jobs";
+export default function App(){
+  return <Routes><Route path="/" element={<Layout/>}><Route index element={<Dashboard/>}/><Route path="jobs" element={<Jobs/>}/></Route></Routes>;
+}`,
+      ),
+      `<!-- ${token} -->`,
+    ].join("\n");
+    const host: GreenfieldGenerateReliabilityHost = {
+      api: {
+        greenfieldGenerateRaw: async () => ({
+          ok: true,
+          provider: "gemini",
+          model: "m",
+          latencyMs: 1,
+          rawText,
+        }),
+      } as never,
+      settings,
+      invokeGreenfieldCall: async (_s, _t, call) => call("gemini") as never,
+      invokeGreenfieldRawCall: async (_s, _t, call) => call("gemini") as never,
+      canMakeAiCall: () => ({ ok: true }),
+    };
+
+    const result = await runMultiPhaseGreenfieldGenerate(
+      host,
+      `Build FieldFlow with React Router and localStorage persistence.\n${token}\nPages:\n- Dashboard\n- Jobs`,
+    );
+    assert.equal(result.ok, true);
+    assert.ok(result.projectFiles?.some((f) => f.path === "src/components/jobs/JobDetail.tsx"));
+    assert.ok(result.projectFiles?.some((f) => f.path === "public/logo.svg"));
+  });
 });
+

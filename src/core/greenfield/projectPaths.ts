@@ -8,10 +8,15 @@ const ALLOWED_ROOT = new Set<string>([...GREENFIELD_FILE_PATHS]);
 const SRC_FILE_RE =
   /^src\/[a-zA-Z0-9][a-zA-Z0-9/_-]*\.(tsx|ts|css|json)$/;
 
+const PUBLIC_FILE_RE =
+  /^public\/[a-zA-Z0-9][a-zA-Z0-9._/-]*\.(svg|png|ico|webmanifest|txt|json)$/;
+
 export function isAllowedGreenfieldProjectPath(path: string): boolean {
+  if (path.includes("..") || path.includes("\\") || path.includes("\0")) return false;
   if (ALLOWED_ROOT.has(path)) return true;
   if (path === "postcss.config.js" || path === "tailwind.config.js") return true;
-  return SRC_FILE_RE.test(path);
+  if (SRC_FILE_RE.test(path)) return true;
+  return PUBLIC_FILE_RE.test(path);
 }
 
 export function assertAllowedProjectPaths(paths: readonly string[]): string[] {

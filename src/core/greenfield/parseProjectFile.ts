@@ -52,6 +52,39 @@ export function parseTargetFilesFromResponse(
   return { files, missing };
 }
 
+/** Parse every allowed @@FILE block, including nested directories and public assets. */
+export function parseAllowedProjectFilesFromResponse(
+  rawText: string,
+): GreenfieldProjectFile[] {
+  const files: GreenfieldProjectFile[] = [];
+  const startToken = "@@FILE:";
+  let cursor = 0;
+  while (cursor < rawText.length) {
+    const startIdx = rawText.indexOf(startToken, cursor);
+    if (startIdx === -1) break;
+    const pathStart = startIdx + startToken.length;
+    const pathEnd = rawText.indexOf("@@", pathStart);
+    if (pathEnd === -1) break;
+    const relPath = rawText.slice(pathStart, pathEnd).trim();
+    const afterMarker = rawText[pathEnd + 2] === "\n" ? pathEnd + 3 : pathEnd + 2;
+    const endToken = `@@END:${relPath}@@`;
+    const endIdx = rawText.indexOf(endToken, afterMarker);
+    if (endIdx === -1) {
+      cursor = pathEnd + 2;
+      continue;
+    }
+    cursor = endIdx + endToken.length;
+    if (!isAllowedGreenfieldProjectPath(relPath)) continue;
+    let content = rawText.slice(afterMarker, endIdx).trim();
+    if (!content) continue;
+    content = stripMarkerArtifactsFromContent(content);
+    content = repairTruncatedLines(content).content;
+    if (!content.trim()) continue;
+    files.push({ path: relPath as GreenfieldProjectFile["path"], content });
+  }
+  return files;
+}
+
 export function mergeProjectFiles(
   base: readonly GreenfieldProjectFile[],
   incoming: readonly GreenfieldProjectFile[],

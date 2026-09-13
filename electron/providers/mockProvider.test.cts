@@ -56,4 +56,30 @@ describe("mock provider", () => {
       /calculator-display/,
     );
   });
+
+  it("returns the FieldFlow multi-page fixture only for the test-only selector", () => {
+    const generic = mockGreenfieldGenerate(
+      "anthropic",
+      "Build FieldFlow — a multi-page SaaS dashboard with leads, jobs, and settings.",
+    );
+    assert.equal(generic.ok, true);
+    assert.equal(generic.files?.length, 7);
+    assert.equal(generic.files?.some((f) => f.path === "public/logo.svg"), false);
+
+    const fixture = mockGreenfieldGenerate(
+      "anthropic",
+      "Build FieldFlow. BRYANTLABS_E2E_FIXTURE:fieldflow-multipage",
+    );
+    assert.equal(fixture.ok, true);
+    assert.ok((fixture.files?.length ?? 0) > 7);
+    assert.ok(fixture.files?.some((f) => f.path === "src/pages/Dashboard.tsx"));
+    assert.ok(fixture.files?.some((f) => f.path === "src/pages/Jobs.tsx"));
+    assert.ok(fixture.files?.some((f) => f.path === "src/components/jobs/JobDetail.tsx"));
+    assert.ok(fixture.files?.some((f) => f.path === "public/logo.svg"));
+    assert.match(fixture.rawText ?? "", /BRYANTLABS_E2E_FIXTURE:fieldflow-multipage/);
+    assert.match(
+      fixture.files?.find((f) => f.path === "src/App.tsx")?.content ?? "",
+      /jobs\/:jobId/,
+    );
+  });
 });
