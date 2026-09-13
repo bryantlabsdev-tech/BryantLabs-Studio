@@ -29,6 +29,14 @@ import {
   normalizePreviewUrl,
   previewUrlForPort,
 } from "./previewUrlParse.cjs";
+import {
+  beginProviderRequest,
+  bindPreviewStopForCancelledScope,
+  currentProviderRequestScope,
+  endProviderRequest,
+  isProviderScopeCancelled,
+  PROVIDER_USER_CANCEL_MESSAGE,
+} from "../providers/providerRequestRegistry.cjs";
 
 export { normalizePreviewUrl, extractPreviewUrl, isAllowedPreviewUrl } from "./previewUrlParse.cjs";
 
@@ -48,6 +56,8 @@ let lastSuccessfulPreviewAt: string | null = null;
 let lastFailureDiagnostics: PreviewDiagnosticsPayload | null = null;
 let previewTreePids: number[] = [];
 let stopInFlight: Promise<void> | null = null;
+let previewScope: string | null = null;
+let previewRequestId: string | null = null;
 
 export type { PreviewDiagnosticsPayload } from "./previewDiagnostics.cjs";
 
@@ -179,6 +189,11 @@ function takePreviewSnapshot(): { pids: number[]; port: number } {
   previewTreePids = [];
   previewProc = null;
   previewUrl = null;
+  previewScope = null;
+  if (previewRequestId) {
+    endProviderRequest(previewRequestId);
+    previewRequestId = null;
+  }
   return { pids, port };
 }
 
@@ -206,6 +221,14 @@ export function stopPreview(): void {
   void stopPreviewAsync();
 }
 
+async function stopPreviewIfMatchesScope(scope: string | null): Promise<void> {
+  if (!scope) return;
+  if (previewScope !== scope) return;
+  await stopPreviewAsync();
+}
+
+bindPreviewStopForCancelledScope((scope) => stopPreviewIfMatchesScope(scope));
+
 export function getPreviewState(): {
   running: boolean;
   url: string | null;
@@ -231,9 +254,17 @@ export function getPreviewState(): {
   };
 }
 
-export async function startPreview(root: string): Promise<PreviewStartResult> {
+export async function startPreview(
+  root: string,
+  opts?: { generationId?: string },
+): Promise<PreviewStartResult> {
+  const generationId = opts?.generationId ?? currentProviderRequestScope();
+  if (generationId && isProviderScopeCancelled(generationId)) {
+    return { ok: false, error: PROVIDER_USER_CANCEL_MESSAGE };
+  }
   await stopPreviewAsync();
   previewRoot = root;
+  previewScope = generationId ?? null;
   lastFailureDiagnostics = null;
 
   const context = collectPreviewProjectContext(root);
@@ -319,6 +350,15 @@ export async function startPreview(root: string): Promise<PreviewStartResult> {
     });
     previewProc = child;
     rememberPreviewTree();
+    previewRequestId = `greenfield-preview-${child.pid ?? Date.now()}`;
+    beginProviderRequest({
+      id: previewRequestId,
+      kind: "child_process",
+      attempt: 1,
+      abort: () => {
+        void stopPreviewAsync();
+      },
+    });
 
     const fail = (genericError: string, exitCode: number | null = null) => {
       if (settled) return;

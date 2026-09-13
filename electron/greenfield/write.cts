@@ -9,6 +9,10 @@ import {
   isAllowedGreenfieldWritePath,
 } from "./paths.cjs";
 import { validateGreenfieldFiles } from "./validate.cjs";
+import {
+  isProviderScopeCancelled,
+  PROVIDER_USER_CANCEL_MESSAGE,
+} from "../providers/providerRequestRegistry.cjs";
 
 /**
  * Write greenfield files using the Phase 5 safe writer (Phase 10).
@@ -33,6 +37,7 @@ export interface GreenfieldWriteResult {
 
 export interface GreenfieldWriteOptions {
   mode?: FileWriteMode;
+  generationId?: string;
 }
 
 const LOG_TAG = "greenfield:write";
@@ -113,6 +118,16 @@ export async function writeGreenfieldFiles(
     };
   }
   const projectRoot = rootCheck.path;
+  const generationId = opts?.generationId;
+  if (generationId && isProviderScopeCancelled(generationId)) {
+    logWriteFailure(`blocked — ${PROVIDER_USER_CANCEL_MESSAGE}`);
+    return {
+      ok: false,
+      written: [],
+      errors: [PROVIDER_USER_CANCEL_MESSAGE],
+      logs: [],
+    };
+  }
   const written: string[] = [];
   const errors: string[] = [];
   const logs: WriteFileLogEntry[] = [];
@@ -142,6 +157,19 @@ export async function writeGreenfieldFiles(
   const filesToWrite = configCheck.files;
 
   for (const file of filesToWrite) {
+    if (generationId && isProviderScopeCancelled(generationId)) {
+      const msg = PROVIDER_USER_CANCEL_MESSAGE;
+      errors.push(msg);
+      logs.push({
+        path: file.path,
+        mkdir: "skipped",
+        overwrite: false,
+        ok: false,
+        reason: msg,
+      });
+      logWriteFailure(formatLogLine(logs[logs.length - 1]!));
+      break;
+    }
     if (!isAllowedGreenfieldWritePath(file.path)) {
       const msg = `Rejected non-allowed path: ${file.path}`;
       errors.push(msg);

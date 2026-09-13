@@ -29,6 +29,12 @@ import {
   isMockProviderEnabled,
   mockGreenfieldGenerate,
 } from "../providers/mockProvider.cjs";
+import {
+  PROVIDER_USER_CANCEL_MESSAGE,
+  isCurrentProviderScopeCancelled,
+  isProviderUserCancelError,
+} from "../providers/providerRequestRegistry.cjs";
+import { waitForMockGreenfieldDelay } from "../providers/mockGreenfieldDelay.cjs";
 
 /**
  * AI greenfield generation (Phase 10). Produces exactly seven files for a
@@ -57,6 +63,7 @@ export interface GreenfieldGenerateResult {
   debug?: GreenfieldDebugReport;
   metrics?: GreenfieldGenerationMetrics;
   markerAudit?: import("./promptAudit.cjs").GreenfieldMarkerAudit;
+  exactFailureStage?: string;
 }
 
 const IMPLS = { gemini, ollama, anthropic, groq, openrouter } as const;
@@ -273,12 +280,42 @@ function providerFailureResult(
   };
 }
 
+function cancelledGenerateResult(
+  provider: ProviderId,
+  startedAt: number,
+): GreenfieldGenerateResult {
+  return {
+    ok: false,
+    provider,
+    model: isMockProviderEnabled() ? "mock-deterministic" : "",
+    latencyMs: Math.max(0, Date.now() - startedAt),
+    error: PROVIDER_USER_CANCEL_MESSAGE,
+    exactFailureStage: "cancelled",
+  };
+}
+
 export async function runGreenfieldGenerate(
   provider: ProviderId,
   userPrompt: string,
 ): Promise<GreenfieldGenerateResult> {
-  if (isMockProviderEnabled()) return mockGreenfieldGenerate(provider, userPrompt);
   const startedAt = Date.now();
+  if (isCurrentProviderScopeCancelled()) {
+    return cancelledGenerateResult(provider, startedAt);
+  }
+  if (isMockProviderEnabled()) {
+    try {
+      await waitForMockGreenfieldDelay();
+    } catch (err) {
+      if (isProviderUserCancelError(err) || isCurrentProviderScopeCancelled()) {
+        return cancelledGenerateResult(provider, startedAt);
+      }
+      throw err;
+    }
+    if (isCurrentProviderScopeCancelled()) {
+      return cancelledGenerateResult(provider, startedAt);
+    }
+    return mockGreenfieldGenerate(provider, userPrompt);
+  }
   const raw = await loadRawSettings();
   const impl = IMPLS[provider];
   if (!impl) {
@@ -310,10 +347,21 @@ export async function runGreenfieldGenerate(
         ? PROVIDER_TIMEOUT_MS.generateGreenfieldLarge
         : PROVIDER_TIMEOUT_MS.generateGreenfield;
   const providerStart = Date.now();
-  const res = await impl.generate(raw, prompt, maxOutputTokens, {
-    timeoutMs: configuredTimeoutMs,
-    operation: "greenfield",
-  });
+  let res;
+  try {
+    res = await impl.generate(raw, prompt, maxOutputTokens, {
+      timeoutMs: configuredTimeoutMs,
+      operation: "greenfield",
+    });
+  } catch (err) {
+    if (isProviderUserCancelError(err) || isCurrentProviderScopeCancelled()) {
+      return cancelledGenerateResult(provider, startedAt);
+    }
+    throw err;
+  }
+  if (isCurrentProviderScopeCancelled()) {
+    return cancelledGenerateResult(provider, startedAt);
+  }
   const providerWaitMs = Date.now() - providerStart;
 
   const parseStart = Date.now();

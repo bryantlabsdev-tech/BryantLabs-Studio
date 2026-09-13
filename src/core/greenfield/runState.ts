@@ -26,6 +26,7 @@ import type {
 } from "@/core/greenfield/uiAudit";
 import type { ProjectMemoryInjectionMeta } from "@/core/projectIntelligence/types";
 import type { VerificationResult } from "@/types";
+import { shouldIgnoreGreenfieldRunMutation } from "@/core/greenfield/generationGuard";
 
 /** Global Studio run observability (live log + summary). */
 export interface GreenfieldRunSnapshot {
@@ -81,6 +82,8 @@ export interface GreenfieldRunSnapshot {
   routeDecision: AgentRouteDecisionTrace | null;
   /** Latest execution mode decision (project-aware routing guard). */
   executionMode: import("@/core/agent/executionModeConfirmation").ExecutionModeDiagnostics | null;
+  /** Identifies the active/last greenfield generation so late responses cannot clobber a newer run. */
+  generationId: string | null;
 }
 
 const GREENFIELD_RUN_KEYS = [
@@ -117,6 +120,7 @@ const GREENFIELD_RUN_KEYS = [
   "appliedFileDiffs",
   "projectMemoryInjection",
   "routeDecision",
+  "generationId",
 ] as const satisfies ReadonlyArray<keyof GreenfieldRunSnapshot>;
 
 export function greenfieldRunSnapshotsEqual(
@@ -136,6 +140,7 @@ export function applyGreenfieldRunUpdate(
     | ((prev: GreenfieldRunSnapshot) => Partial<GreenfieldRunSnapshot>),
 ): GreenfieldRunSnapshot {
   const resolved = typeof patch === "function" ? patch(prev) : patch;
+  if (shouldIgnoreGreenfieldRunMutation(prev, resolved)) return prev;
   let changed = false;
   for (const key of Object.keys(resolved) as (keyof GreenfieldRunSnapshot)[]) {
     if (!Object.is(prev[key], resolved[key])) {
@@ -184,6 +189,7 @@ export function emptyGreenfieldRun(): GreenfieldRunSnapshot {
     projectMemoryInjection: null,
     routeDecision: null,
     executionMode: null,
+    generationId: null,
   };
 }
 
@@ -194,6 +200,7 @@ export function appendGreenfieldRunEntry(
   message: string,
   detailsOrOpts?: string | import("@/core/greenfield/runLog").RunLogEntryOptions,
 ): GreenfieldRunSnapshot {
+  if (snapshot.runResult === "cancelled") return snapshot;
   return {
     ...snapshot,
     entries: [

@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { DEFAULT_TSCONFIG_NODE_JSON } from "./configRepair.cjs";
 import { writeGreenfieldFiles } from "./write.cjs";
 import { GREENFIELD_PATHS, type GeneratedFile } from "./generate.cjs";
+import { cancelActiveProviderRequests } from "../providers/providerRequestRegistry.cjs";
 
 const VALID_PACKAGE_JSON = JSON.stringify({
   name: "test-app",
@@ -189,5 +190,18 @@ describe("writeGreenfieldFiles", () => {
     assert.ok(result.errors.some((e) => /Rejected non-allowed path/i.test(e)));
     const evilInRoot = path.join(root, "evil.ts");
     await assert.rejects(fs.access(evilInRoot));
+  });
+
+  it("does not write files after the generation scope is cancelled", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "bl-gf-cancel-write-"));
+    cancelActiveProviderRequests("user_cancel", "gf-write-stop");
+    const result = await writeGreenfieldFiles(root, sampleFiles(), {
+      mode: "workspace",
+      generationId: "gf-write-stop",
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.written.length, 0);
+    await assert.rejects(fs.access(path.join(root, "package.json")));
+    await assert.rejects(fs.access(path.join(root, "src/App.tsx")));
   });
 });

@@ -1027,6 +1027,104 @@ export default function App() {
     assert.equal(result.appShellIncomplete, false);
     assert.ok(result.recoveredPartialPaths?.includes("src/App.tsx"));
   });
+
+  it("cancels before the provider response", async () => {
+    const { runGreenfieldGenerateWithReliability } = await import(
+      "@/core/greenfield/generatePipeline"
+    );
+    const settings = await settingsWithMaxCalls(12);
+    const result = await runGreenfieldGenerateWithReliability(
+      {
+        api: {
+          greenfieldGenerate: async () => {
+            throw new Error("provider should not be called");
+          },
+        } as never,
+        settings,
+        isCancelled: () => true,
+        invokeGreenfieldCall: async () => {
+          throw new Error("invoke should not be called");
+        },
+      },
+      "Build a calculator app",
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.exactFailureStage, "cancelled");
+    assert.match(result.error ?? "", /cancelled/i);
+  });
+
+  it("cancels during an in-flight provider response and ignores the late payload", async () => {
+    const files = allSevenFiles();
+    const raw = files.map((f) => marker(f.path, f.content)).join("\n\n");
+    const { runGreenfieldGenerateWithReliability } = await import(
+      "@/core/greenfield/generatePipeline"
+    );
+    const settings = await settingsWithMaxCalls(12);
+    let cancelled = false;
+    const result = await runGreenfieldGenerateWithReliability(
+      {
+        api: {
+          greenfieldGenerate: async () => ({
+            ok: true,
+            provider: "gemini",
+            model: "gemini-2.5-flash",
+            files,
+            rawText: raw,
+            latencyMs: 12,
+          }),
+        } as never,
+        settings,
+        isCancelled: () => cancelled,
+        invokeGreenfieldCall: async (_s, _t, call) => {
+          cancelled = true;
+          return call("gemini") as never;
+        },
+      },
+      "Build a calculator app",
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.exactFailureStage, "cancelled");
+    assert.equal(result.files, undefined);
+  });
+
+  it("can start a successful run after a cancelled run", async () => {
+    const files = allSevenFiles();
+    const raw = files.map((f) => marker(f.path, f.content)).join("\n\n");
+    const { runGreenfieldGenerateWithReliability } = await import(
+      "@/core/greenfield/generatePipeline"
+    );
+    const settings = await settingsWithMaxCalls(12);
+    const cancelled = await runGreenfieldGenerateWithReliability(
+      {
+        api: { greenfieldGenerate: async () => ({ ok: false, provider: "gemini", model: "x", latencyMs: 0 }) } as never,
+        settings,
+        isCancelled: () => true,
+        invokeGreenfieldCall: async () => null,
+      },
+      "Build a calculator app",
+    );
+    assert.equal(cancelled.exactFailureStage, "cancelled");
+    const result = await runGreenfieldGenerateWithReliability(
+      {
+        api: {
+          greenfieldGenerate: async () => ({
+            ok: true,
+            provider: "gemini",
+            model: "gemini-2.5-flash",
+            files,
+            rawText: raw,
+            latencyMs: 8,
+          }),
+        } as never,
+        settings,
+        isCancelled: () => false,
+        invokeGreenfieldCall: async (_s, _t, call) => call("gemini") as never,
+      },
+      "Build a calculator app",
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.files?.length, 7);
+  });
 });
 
 async function settingsWithMaxCalls(maxAiCalls: number) {

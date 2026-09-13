@@ -399,7 +399,7 @@ export interface BryantLabsApi {
     context: PlanContext,
   ): Promise<AIPlanResult>;
   /** Abort in-flight main-process provider HTTP requests (explicit user cancel). */
-  cancelActiveProviderRequests(): Promise<{ cancelled: number }>;
+  cancelActiveProviderRequests(scope?: string): Promise<{ cancelled: number }>;
   /** Safe HTTP transport metrics ring (no prompts/keys/bodies). */
   getProviderTransportDiagnostics(): Promise<
     readonly import("@/core/diagnostics/providerTransport").ProviderTransportEvent[]
@@ -452,15 +452,18 @@ export interface BryantLabsApi {
   greenfieldGenerate(
     provider: ProviderId,
     prompt: string,
+    generationId?: string,
   ): Promise<GreenfieldGenerateResult>;
   /** Multi-phase greenfield — prompt sent as-is (no seven-file wrapper). */
   greenfieldGenerateRaw(
     provider: ProviderId,
     prompt: string,
+    generationId?: string,
   ): Promise<GreenfieldGenerateResult>;
   greenfieldWrite(
     root: string,
     files: GeneratedFile[] | import("@/core/greenfield/types").GreenfieldProjectFile[],
+    generationId?: string,
   ): Promise<
     | { ok: true; written: string[]; logs?: import("@/core/greenfield/writeLog").WriteFileLogEntry[] }
     | {
@@ -475,7 +478,10 @@ export interface BryantLabsApi {
     current: string,
   ): Promise<ProjectInfo | { error: string }>;
   greenfieldClearFolder(root: string): Promise<{ ok: true } | { error: string }>;
-  greenfieldSetup(root: string): Promise<GreenfieldSetupResult | { error: string }>;
+  greenfieldSetup(
+    root: string,
+    generationId?: string,
+  ): Promise<GreenfieldSetupResult | { error: string }>;
   greenfieldTypecheck(
     root: string,
   ): Promise<
@@ -488,7 +494,10 @@ export interface BryantLabsApi {
   greenfieldBuild(
     root: string,
   ): Promise<{ build: CommandResult } | { error: string }>;
-  greenfieldPreviewStart(root: string): Promise<GreenfieldPreviewStartResult>;
+  greenfieldPreviewStart(
+    root: string,
+    generationId?: string,
+  ): Promise<GreenfieldPreviewStartResult>;
   greenfieldPreviewStop(): Promise<{ ok: boolean }>;
   greenfieldPreviewState(): Promise<GreenfieldPreviewState>;
   greenfieldPreviewProbe(url: string): Promise<GreenfieldPreviewProbeResult>;

@@ -52,6 +52,7 @@ export async function launchStudioApp(opts?: {
   e2eProject?: string | null;
   mockProvider?: boolean;
   userDataDir?: string;
+  extraEnv?: Record<string, string | undefined>;
 }): Promise<ElectronApplication> {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -71,6 +72,12 @@ export async function launchStudioApp(opts?: {
   }
 
   env.VITE_BRYANTLABS_E2E = "1";
+  if (opts?.extraEnv) {
+    for (const [key, value] of Object.entries(opts.extraEnv)) {
+      if (value === undefined) delete env[key];
+      else env[key] = value;
+    }
+  }
   if (opts?.e2eProject === null) {
     delete env.BRYANTLABS_E2E_PROJECT;
   } else {
@@ -377,11 +384,12 @@ export async function waitForGreenfieldRunStarted(page: Page): Promise<void> {
       if (!run) return false;
       if (run.runResult === "success" || run.runResult === "failed") return true;
       return (
-        run.active ||
+        run.active === true ||
         run.runResult === "running" ||
-        run.genStatus !== "idle" ||
-        run.writeStatus !== "idle" ||
-        run.setupStatus !== "idle"
+        run.genStatus === "running" ||
+        run.writeStatus === "writing" ||
+        run.setupStatus === "running" ||
+        run.setupStatus === "repairing"
       );
     },
     undefined,
@@ -391,12 +399,8 @@ export async function waitForGreenfieldRunStarted(page: Page): Promise<void> {
 
 export async function waitForGreenfieldRunTerminal(
   page: Page,
-): Promise<"success" | "failed"> {
-  await waitForGreenfieldRunStarted(page);
-
-  // Prefer the app's structured readiness state over console markers:
-  // - Electron sometimes doesn't surface console logs the same way Playwright expects.
-  // - The greenfield run can also terminate as cancelled/aborted/interrupted, not just success/failed.
+): Promise<"success" | "failed" | "cancelled" | "aborted" | "interrupted"> {
+  // Prefer the app's structured readiness state over console markers.
   try {
     await page.waitForFunction(
       () => {
@@ -445,7 +449,15 @@ export async function waitForGreenfieldRunTerminal(
   const runResult = await page.evaluate(
     () => window.__studioTestHooks?.getReadinessState?.()?.greenfieldRun.runResult,
   );
-  return runResult === "success" ? "success" : "failed";
+  if (
+    runResult === "success" ||
+    runResult === "cancelled" ||
+    runResult === "aborted" ||
+    runResult === "interrupted"
+  ) {
+    return runResult;
+  }
+  return "failed";
 }
 
 export async function waitForRoutingIntent(

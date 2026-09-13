@@ -23,6 +23,12 @@ import {
   isMockProviderEnabled,
   mockGreenfieldGenerate,
 } from "../providers/mockProvider.cjs";
+import {
+  isCurrentProviderScopeCancelled,
+  isProviderUserCancelError,
+  PROVIDER_USER_CANCEL_MESSAGE,
+} from "../providers/providerRequestRegistry.cjs";
+import { waitForMockGreenfieldDelay } from "../providers/mockGreenfieldDelay.cjs";
 import type { GreenfieldGenerateResult } from "./generate.cjs";
 
 const IMPLS = { gemini, ollama, anthropic, groq, openrouter } as const;
@@ -83,10 +89,45 @@ export async function runGreenfieldRawGenerate(
   prompt: string,
   opts?: { maxOutputTokens?: number; userPrompt?: string },
 ): Promise<GreenfieldGenerateResult> {
+  const startedAt = Date.now();
+  if (isCurrentProviderScopeCancelled()) {
+    return {
+      ok: false,
+      provider,
+      model: "",
+      latencyMs: 0,
+      error: PROVIDER_USER_CANCEL_MESSAGE,
+      exactFailureStage: "cancelled",
+    };
+  }
   if (isMockProviderEnabled()) {
+    try {
+      await waitForMockGreenfieldDelay();
+    } catch (err) {
+      if (isProviderUserCancelError(err) || isCurrentProviderScopeCancelled()) {
+        return {
+          ok: false,
+          provider,
+          model: "mock-deterministic",
+          latencyMs: Math.max(0, Date.now() - startedAt),
+          error: PROVIDER_USER_CANCEL_MESSAGE,
+          exactFailureStage: "cancelled",
+        };
+      }
+      throw err;
+    }
+    if (isCurrentProviderScopeCancelled()) {
+      return {
+        ok: false,
+        provider,
+        model: "mock-deterministic",
+        latencyMs: Math.max(0, Date.now() - startedAt),
+        error: PROVIDER_USER_CANCEL_MESSAGE,
+        exactFailureStage: "cancelled",
+      };
+    }
     return mockGreenfieldGenerate(provider, prompt);
   }
-  const startedAt = Date.now();
   const raw = await loadRawSettings();
   const impl = IMPLS[provider];
   if (!impl) {
@@ -120,10 +161,35 @@ export async function runGreenfieldRawGenerate(
         ? PROVIDER_TIMEOUT_MS.generateGreenfieldLarge
         : PROVIDER_TIMEOUT_MS.generateGreenfield;
   const providerStart = Date.now();
-  const res = await impl.generate(raw, prompt, maxOutputTokens, {
-    timeoutMs: configuredTimeoutMs,
-    operation: "greenfield",
-  });
+  let res;
+  try {
+    res = await impl.generate(raw, prompt, maxOutputTokens, {
+      timeoutMs: configuredTimeoutMs,
+      operation: "greenfield",
+    });
+  } catch (err) {
+    if (isProviderUserCancelError(err) || isCurrentProviderScopeCancelled()) {
+      return {
+        ok: false,
+        provider,
+        model: "",
+        latencyMs: Math.max(0, Date.now() - startedAt),
+        error: PROVIDER_USER_CANCEL_MESSAGE,
+        exactFailureStage: "cancelled",
+      };
+    }
+    throw err;
+  }
+  if (isCurrentProviderScopeCancelled()) {
+    return {
+      ok: false,
+      provider,
+      model: res.model,
+      latencyMs: Math.max(0, Date.now() - startedAt),
+      error: PROVIDER_USER_CANCEL_MESSAGE,
+      exactFailureStage: "cancelled",
+    };
+  }
   const providerWaitMs = Date.now() - providerStart;
   const totalMs = Date.now() - startedAt;
   const hasText = Boolean(res.text?.trim());

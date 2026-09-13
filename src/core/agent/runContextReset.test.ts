@@ -124,6 +124,20 @@ describe("runContextReset", () => {
     assert.equal(hasStaleRunContext(input), false);
   });
 
+  it("does not flag stale after a user-cancelled greenfield run", () => {
+    const input = staleInput({
+      greenfieldRun: {
+        ...emptyGreenfieldRun(),
+        actionType: "greenfield",
+        runResult: "cancelled",
+        genStatus: "cancelled",
+        finalMessage: "Run cancelled. You can try again.",
+      },
+    });
+    assert.equal(isSuccessfulTerminalIdleContext(input), true);
+    assert.equal(hasStaleRunContext(input), false);
+  });
+
   it("still flags failed apply as stale", () => {
     assert.equal(
       hasStaleRunContext(

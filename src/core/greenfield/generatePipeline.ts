@@ -46,6 +46,10 @@ import type { BryantLabsApi } from "@/types";
 import { retryBlockedDueToBudgetReason, greenfieldRepairReserve } from "@/core/providers/greenfieldCallBudget";
 import { classifyGreenfieldGenerationRoute } from "@/core/greenfield/greenfieldRouter";
 import { runMultiPhaseGreenfieldGenerate } from "@/core/greenfield/multiPhasePipeline";
+import {
+  isUserCancelledGreenfieldFailure,
+  USER_CANCELLED_GREENFIELD_MESSAGE,
+} from "@/core/greenfield/generationGuard";
 
 const MAX_FILE_REPAIR_ATTEMPTS = 2;
 const MAX_MALFORMED_REPAIR_ATTEMPTS = 1;
@@ -138,6 +142,8 @@ export interface GreenfieldGenerateReliabilityHost {
   readonly invokeAppCompletionCall?: GreenfieldGenerateReliabilityHost["invokeGreenfieldCall"];
   /** Raw phased greenfield call (prompt as-is, smaller output cap). */
   readonly invokeGreenfieldRawCall?: GreenfieldGenerateReliabilityHost["invokeGreenfieldCall"];
+  readonly generationId?: string;
+  readonly isCancelled?: () => boolean;
 }
 
 function buildParseDiagnostics(
@@ -181,7 +187,19 @@ async function callProviderGenerate(
   provider: ProviderId,
   prompt: string,
 ): Promise<GreenfieldGenerateResult> {
-  return host.api.greenfieldGenerate(provider, prompt);
+  return host.api.greenfieldGenerate(provider, prompt, host.generationId);
+}
+
+function cancelledPipelineResult(
+  host: GreenfieldGenerateReliabilityHost,
+  startedAt: number,
+  extras?: Partial<GreenfieldGenerateResult>,
+): GreenfieldGenerateResult {
+  return stoppedResult(host.settings, USER_CANCELLED_GREENFIELD_MESSAGE, startedAt, {
+    exactFailureStage: "cancelled",
+    error: USER_CANCELLED_GREENFIELD_MESSAGE,
+    ...extras,
+  });
 }
 
 function collectRecoveredPartials(
@@ -425,6 +443,9 @@ export async function runGreenfieldGenerateWithReliability(
 
   host.resetAiCallBudget?.();
   host.prepareGreenfieldBudget?.();
+  if (host.isCancelled?.()) {
+    return cancelledPipelineResult(host, startedAt);
+  }
 
   const preflight = runProviderPreflight({
     settings,
@@ -467,6 +488,9 @@ export async function runGreenfieldGenerateWithReliability(
     }
 
     generateAttempt += 1;
+    if (host.isCancelled?.()) {
+      return cancelledPipelineResult(host, startedAt, { providerRequestSent });
+    }
     if (host.providerRequestSentRef) host.providerRequestSentRef.current = false;
 
     logGreenfieldRequest({
@@ -486,6 +510,13 @@ export async function runGreenfieldGenerateWithReliability(
 
     providerRequestSent =
       host.providerRequestSentRef?.current === true || providerRequestSent;
+
+    if (
+      host.isCancelled?.() ||
+      isUserCancelledGreenfieldFailure(ipcResult as GreenfieldGenerateResult | null)
+    ) {
+      return cancelledPipelineResult(host, startedAt, { providerRequestSent });
+    }
 
     if (!ipcResult) {
       const stopReason =

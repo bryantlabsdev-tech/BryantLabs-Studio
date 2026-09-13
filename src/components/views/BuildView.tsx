@@ -209,6 +209,7 @@ export function BuildView() {
     emptyProjectFolder,
     dispatchPrompt,
     handleResetAgentState,
+    releaseSubmitLock,
     proceedAfterStaleRunReset,
     proceedAfterFeasibility,
     proceedAfterClarity,
@@ -706,7 +707,13 @@ export function BuildView() {
 
   const handleCancelGreenfield = () => {
     cancelGreenfieldRun();
+    clearRunContextForNewSubmit();
     exitGreenfieldMode();
+    setStaleRunGate(null);
+    setSubmissionPending(false);
+    setSubmissionError(null);
+    setBlockedMessage(null);
+    releaseSubmitLock();
   };
 
   const handleCancelAgentRun = () => {

@@ -78,10 +78,11 @@ describe("greenfieldRunLifecycle", () => {
       ],
     };
     const cleared = { ...run, ...cancelGreenfieldRunPatch(run) };
-    assert.equal(cleared.genStatus, "error");
-    assert.equal(cleared.writeStatus, "error");
-    assert.equal(cleared.setupStatus, "error");
+    assert.equal(cleared.genStatus, "cancelled");
+    assert.equal(cleared.writeStatus, "cancelled");
+    assert.equal(cleared.setupStatus, "cancelled");
     assert.equal(cleared.runResult, "cancelled");
+    assert.equal(cleared.actionType, "greenfield");
     assert.equal(isGreenfieldRunActive(cleared, false), false);
     assert.equal(cleared.entries.every((e) => e.status !== "running"), true);
   });
