@@ -35,7 +35,14 @@ test.describe("Composer UI", () => {
   });
 
   test("shows project memory after fixture project loads", async () => {
-    const panel = page.getByLabel("Project memory");
+    const advanced = page.getByRole("button", { name: /^More$/ });
+    await expect(advanced).toBeVisible();
+    if ((await advanced.getAttribute("aria-expanded")) !== "true") {
+      await advanced.click();
+    }
+    await expect(advanced).toHaveAttribute("aria-expanded", "true");
+
+    const panel = page.getByRole("region", { name: "Project memory" });
     await expect(panel).toBeVisible();
     await expect(panel.getByText(/sudoku/i)).toBeVisible();
   });

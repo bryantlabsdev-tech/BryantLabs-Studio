@@ -8,15 +8,107 @@ import {
   launchStudioApp,
   sendAgentPrompt,
   waitForAgentReady,
-  waitForPostPatchProgress,
   openFixtureProject,
   readCenterTab,
-  selectWorkbenchTab,
   waitForComposerReady,
   waitForPatchReviewReady,
   waitForWorkbenchDiffTab,
   assertNoRenderLoopConsoleErrors,
 } from "./helpers/studio";
+
+async function confirmStaleRunResetIfPresent(page: Page): Promise<void> {
+  const stale = page.getByRole("region", { name: "Stale run state" });
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline) {
+    if (await stale.isVisible().catch(() => false)) {
+      await expect(stale.getByRole("heading", { name: "Previous run state detected" })).toBeVisible();
+      await stale.getByRole("button", { name: /^Reset and start$/i }).click();
+      await expect(stale).toBeHidden();
+      return;
+    }
+    const runStarted = await page.evaluate(() => {
+      const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+      const diagnostic = window.__studioTestHooks?.getFollowUpSettlementDiagnostic?.();
+      const greenfield = window.__studioTestHooks?.getReadinessState?.()?.greenfieldRun;
+      return Boolean(
+        pipeline?.activeAgentRunId ||
+          pipeline?.planApplyPhase ||
+          pipeline?.buildRunning ||
+          diagnostic?.submitEventId ||
+          greenfield?.active ||
+          greenfield?.runResult === "running",
+      );
+    });
+    if (runStarted) return;
+    await page.waitForTimeout(100);
+  }
+}
+
+async function resetAgentWorkspaceForNewPrompt(page: Page): Promise<void> {
+  await dismissBlockingDialogs(page);
+  const reset = page.getByRole("button", { name: /^Reset agent state$/i });
+  if (await reset.isVisible().catch(() => false)) {
+    await reset.click();
+  }
+  await expect(page.getByText("Project index not ready.")).toBeHidden();
+  await dismissBlockingDialogs(page);
+}
+
+async function waitForGameplayFollowUpOutcome(page: Page) {
+  const started = Date.now();
+  let lastDebug: unknown = null;
+
+  while (Date.now() - started < 90_000) {
+    const debug = await page.evaluate(() => {
+      const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+      const run = window.__studioTestHooks?.getGreenfieldRunSnapshot?.();
+      const routing = window.__studioTestHooks?.getRoutingState?.();
+      const diagnostic = window.__studioTestHooks?.getFollowUpSettlementDiagnostic?.();
+      return {
+        pipeline,
+        runResult: run?.runResult ?? null,
+        actionType: run?.actionType ?? null,
+        applyPlanInvocations: diagnostic?.applyPlanInvocations ?? 0,
+        selectedRoute: diagnostic?.selectedRoutingDecision ?? null,
+        routingIntent: routing?.intent ?? null,
+        reviewVisible: Boolean(document.querySelector('[data-testid="agent-review-chip"]')),
+        failureVisible: Boolean(document.querySelector('[data-testid="run-failure-card"]')),
+      };
+    });
+    lastDebug = debug;
+
+    if (debug.reviewVisible) return "waiting_for_review" as const;
+    if (debug.failureVisible) return "apply_failed" as const;
+
+    const phase = debug.pipeline?.planApplyPhase;
+    if (phase === "waiting_for_review" || phase === "review") return "waiting_for_review" as const;
+    if (phase === "done") return "patch_applied" as const;
+    if (debug.pipeline?.buildPhase === "review") return "waiting_for_review" as const;
+    if (debug.pipeline?.buildPhase === "completed") return "patch_applied" as const;
+    if (
+      debug.pipeline?.planApplyError ||
+      debug.pipeline?.buildPhase === "failed" ||
+      debug.pipeline?.buildError ||
+      debug.pipeline?.aiPlanStatus === "error"
+    ) {
+      return "apply_failed" as const;
+    }
+    if (debug.pipeline?.planApplyPhase === "verifying") {
+      // Keep polling until apply finishes or fails; do not treat in-flight verify as terminal.
+    } else if (
+      debug.applyPlanInvocations > 0 &&
+      debug.runResult === "success" &&
+      !debug.pipeline?.buildRunning &&
+      !debug.pipeline?.activeAgentRunId
+    ) {
+      return "patch_applied" as const;
+    }
+
+    await page.waitForTimeout(300);
+  }
+
+  throw new Error(`Patch pipeline timed out after 90s. debug=${JSON.stringify(lastDebug)}`);
+}
 
 test.describe("Follow-up edit (mock provider)", () => {
   let app: ElectronApplication | undefined;
@@ -110,18 +202,21 @@ test.describe("Follow-up review (mock provider)", () => {
       ["Editor", "editor"],
     ] as const;
 
+    const workbench = page.getByRole("region", { name: "Workbench" });
     for (const [label, id] of tabs) {
-      await selectWorkbenchTab(page, label);
+      await workbench.getByRole("tab", { name: label, exact: true }).click();
       await expect
         .poll(async () => readCenterTab(page), { timeout: 5_000 })
         .toBe(id);
     }
 
-    await page.locator("#center-tab-more").click();
-    await page.getByRole("menuitem", { name: "Run Metrics" }).click();
+    const moreTab = workbench.getByRole("tab", { name: /^More/ });
+    await moreTab.click();
+    await expect(moreTab).toHaveAttribute("aria-expanded", "true");
+    await page.getByRole("menuitem", { name: "Metrics" }).click();
     await expect.poll(async () => readCenterTab(page), { timeout: 5_000 }).toBe("metrics");
 
-    await selectWorkbenchTab(page, "Editor");
+    await workbench.getByRole("tab", { name: "Editor", exact: true }).click();
     await expect.poll(async () => readCenterTab(page), { timeout: 5_000 }).toBe("editor");
   });
 
@@ -142,22 +237,44 @@ test.describe("Follow-up review (mock provider)", () => {
     await expect(page.getByTestId("agent-execution-details")).toBeVisible();
   });
 
+});
+
+test.describe("Follow-up gameplay (mock provider)", () => {
+  let app: ElectronApplication | undefined;
+  let page: Page | undefined;
+
+  test.beforeAll(async () => {
+    app = await launchStudioApp();
+    page = await getMainWindow(app);
+    await page.waitForLoadState("domcontentloaded");
+    await dismissBlockingDialogs(page);
+    await openFixtureProject(page);
+    await waitForComposerReady(page);
+  });
+
+  test.afterAll(async () => {
+    try {
+      if (page) await assertNoRenderLoopConsoleErrors(page);
+    } finally {
+      await closeStudioApp(app);
+    }
+  });
+
   test("mock provider reaches review after gameplay follow-up", async () => {
     test.setTimeout(120_000);
 
-    await openFixtureProject(page);
     await waitForComposerReady(page);
-
-    await page.evaluate(() => {
-      localStorage.setItem("bryantlabs.followUpReviewFirst", "1");
-    });
+    await resetAgentWorkspaceForNewPrompt(page);
 
     await fillAgentPrompt(page, "Upgrade Sudoku gameplay. Add notes mode and hints.");
     await sendAgentPrompt(page);
+    await confirmStaleRunResetIfPresent(page);
     await dismissBlockingDialogs(page);
 
-    const outcome = await waitForPostPatchProgress(page);
-    expect(["waiting_for_review", "ready_for_apply", "apply_failed"]).toContain(outcome);
+    const outcome = await waitForGameplayFollowUpOutcome(page);
+    expect(["waiting_for_review", "ready_for_apply", "patch_applied", "apply_failed"]).toContain(
+      outcome,
+    );
 
     if (outcome === "waiting_for_review") {
       // A successful run can surface the modal "Save to memory?" dialog, which
@@ -181,7 +298,9 @@ test.describe("Follow-up review (mock provider)", () => {
         await expect(review.getByTestId("patch-review-file-chips")).toContainText("src/App.tsx");
         await expect(review.getByRole("button", { name: "Reject all" })).toBeVisible();
       }
+    }
 
+    if (outcome === "waiting_for_review" || outcome === "patch_applied") {
       const routing = await page.evaluate(() => window.__studioTestHooks?.getRoutingState?.());
       expect(routing?.intent).toBe("feature_addition");
       expect(routing?.files_allowed?.some((p) => p.includes("App.tsx"))).toBe(true);

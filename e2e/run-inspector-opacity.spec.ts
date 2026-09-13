@@ -24,7 +24,7 @@ async function readRunInspectorOverlayStyles(page: Page): Promise<ComputedOverla
   return page.evaluate(() => {
     const backdrop = document.querySelector(".diagnostic-modal__backdrop");
     const modal = document.querySelector('[data-testid="run-inspector-modal"]');
-    const panel = document.querySelector('[data-testid="run-inspector-panel"]');
+    const panel = modal?.querySelector('[data-testid="run-inspector-panel"]');
     const timeline = document.querySelector(".run-inspector__timeline-item");
     const workbenchContent = document.querySelector(
       '.center-diff, [data-testid="preview-panel-url"], .center-preview',
@@ -92,9 +92,15 @@ test.describe("Run Inspector overlay opacity", () => {
     expect(simulated?.ok).toBe(true);
     await waitForPatchReviewReady(page);
 
-    await page.getByTestId("run-inspector-open").click();
-    await expect(page.getByTestId("run-inspector-modal")).toBeVisible();
-    await expect(page.getByTestId("run-inspector-panel")).toBeVisible();
+    const details = page
+      .getByTestId("agent-execution-flow")
+      .getByRole("button", { name: /^(View Details|Details)$/ });
+    await expect(details).toBeVisible();
+    await details.click();
+
+    const inspector = page.getByRole("dialog", { name: "Run Inspector" });
+    await expect(inspector).toBeVisible();
+    await expect(inspector.getByRole("navigation", { name: "Run inspector sections" })).toBeVisible();
 
     const styles = await readRunInspectorOverlayStyles(page);
     expect(styles.workbenchContentBehind).toBe(true);
