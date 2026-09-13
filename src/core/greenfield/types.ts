@@ -29,6 +29,7 @@ export type GreenfieldProjectFilePath =
   | `src/${string}.tsx`
   | `src/${string}.ts`
   | `src/${string}.css`
+  | `public/${string}`
   | "tailwind.config.js"
   | "postcss.config.js";
 

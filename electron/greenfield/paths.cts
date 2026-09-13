@@ -20,6 +20,7 @@ export type GeneratedFilePath =
   | `src/${string}.tsx`
   | `src/${string}.ts`
   | `src/${string}.css`
+  | `public/${string}`
   | "tailwind.config.js"
   | "postcss.config.js";
 
@@ -31,7 +32,13 @@ export const GREENFIELD_CONFIG_PATHS = [
 const SRC_FILE_RE =
   /^src\/[a-zA-Z0-9][a-zA-Z0-9/_-]*\.(tsx|ts|css|json)$/;
 
+const PUBLIC_FILE_RE =
+  /^public\/[a-zA-Z0-9][a-zA-Z0-9._/-]*\.(svg|png|ico|webmanifest|txt|json)$/;
+
 export function isAllowedGreenfieldWritePath(filePath: string): boolean {
+  if (filePath.includes("..") || filePath.includes("\\") || filePath.includes("\0")) {
+    return false;
+  }
   if (GREENFIELD_PATHS.includes(filePath as GreenfieldPath)) return true;
   if (GREENFIELD_SUPPLEMENTARY_PATHS.includes(filePath as GreenfieldSupplementaryPath)) {
     return true;
@@ -39,7 +46,8 @@ export function isAllowedGreenfieldWritePath(filePath: string): boolean {
   if (GREENFIELD_CONFIG_PATHS.includes(filePath as (typeof GREENFIELD_CONFIG_PATHS)[number])) {
     return true;
   }
-  return SRC_FILE_RE.test(filePath);
+  if (SRC_FILE_RE.test(filePath)) return true;
+  return PUBLIC_FILE_RE.test(filePath);
 }
 
 export const GREENFIELD_REPAIRABLE_REFERENCES = new Set<string>([

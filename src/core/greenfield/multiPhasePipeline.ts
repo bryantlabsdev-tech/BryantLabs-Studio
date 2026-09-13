@@ -26,9 +26,11 @@ import {
   manifestSliceForBatch,
   splitPagesIntoBatches,
 } from "@/core/greenfield/multiPhasePlan";
+import { isMockFieldFlowMultipageFixturePrompt } from "@/core/greenfield/mockFieldFlowFixture";
 import {
   coreFilesFromProject,
   mergeProjectFiles,
+  parseAllowedProjectFilesFromResponse,
   parseTargetFilesFromResponse,
 } from "@/core/greenfield/parseProjectFile";
 import { fillMissingPageStubs } from "@/core/greenfield/pageStubs";
@@ -213,7 +215,19 @@ async function runPhase(
 
   let parsed = parseTargetFilesFromResponse(rawText, expectedPaths);
   let merged = mergeProjectFiles(existing, parsed.files);
-  let stillMissing = [...parsed.missing];
+  if (
+    isMockFieldFlowMultipageFixturePrompt(userPrompt) ||
+    isMockFieldFlowMultipageFixturePrompt(rawText)
+  ) {
+    const extras = parseAllowedProjectFilesFromResponse(rawText).filter((file) => {
+      const isPage = file.path.startsWith("src/pages/") && file.path.endsWith(".tsx");
+      return !isPage || expectedPaths.includes(file.path);
+    });
+    merged = mergeProjectFiles(merged, extras);
+  }
+  let stillMissing = expectedPaths.filter(
+    (path) => !merged.some((file) => file.path === path && file.content.trim()),
+  );
 
   if (
     stillMissing.length > 0 &&

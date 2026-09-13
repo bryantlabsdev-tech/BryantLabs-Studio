@@ -6,6 +6,10 @@ import type { ApplyPlanBatchPatchMeta } from "./applyPlanPatch.cjs";
 import { normalizeApplyPlanPath } from "./markedFileParse.cjs";
 import { GREENFIELD_PATHS } from "../greenfield/paths.cjs";
 import type { GreenfieldGenerateResult, GeneratedFile } from "../greenfield/generate.cjs";
+import {
+  buildMockFieldFlowFiles,
+  isMockFieldFlowMultipageFixtureSelected,
+} from "./mockFieldFlowFixture.cjs";
 
 export const MOCK_MODEL = "mock-deterministic";
 
@@ -405,10 +409,12 @@ export function mockGreenfieldGenerate(
   provider: ProviderId,
   prompt: string,
 ): GreenfieldGenerateResult {
-  const files: GeneratedFile[] = GREENFIELD_PATHS.map((path) => ({
-    path,
-    content: greenfieldFileContent(path, prompt),
-  }));
+  const files: GeneratedFile[] = isMockFieldFlowMultipageFixtureSelected(prompt)
+    ? buildMockFieldFlowFiles()
+    : GREENFIELD_PATHS.map((path) => ({
+        path,
+        content: greenfieldFileContent(path, prompt),
+      }));
   return {
     ok: true,
     provider,
