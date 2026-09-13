@@ -6,6 +6,18 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import type { ElectronApplication, Page } from "playwright";
 import { _electron as electron } from "playwright";
+import {
+  teardownStudioApp,
+  trackRootPid,
+} from "./processTeardown.ts";
+
+export { trackRootPid };
+
+export async function closeStudioApp(
+  app: ElectronApplication | null | undefined,
+): Promise<void> {
+  await teardownStudioApp(app ?? undefined);
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -86,26 +98,32 @@ export async function launchStudioApp(opts?: {
     env,
     timeout: 120_000,
   });
+  trackRootPid(app.process()?.pid);
   const captureLaunch = (text: string) => {
     if (/Maximum update depth exceeded/i.test(text)) {
       launchRenderLoopErrors.push(text);
     }
   };
-  app.on("window", (page) => {
-    installRenderLoopConsoleGuard(page);
-  });
   try {
-    app.context().on("console", (msg) => captureLaunch(msg.text()));
-  } catch {
-    // Electron context may not expose console until a window exists.
+    app.on("window", (page) => {
+      installRenderLoopConsoleGuard(page);
+    });
+    try {
+      app.context().on("console", (msg) => captureLaunch(msg.text()));
+    } catch {
+      // Electron context may not expose console until a window exists.
+    }
+    app.process().stdout?.on("data", (buf: Buffer | string) => {
+      captureLaunch(String(buf));
+    });
+    app.process().stderr?.on("data", (buf: Buffer | string) => {
+      captureLaunch(String(buf));
+    });
+    return app;
+  } catch (err) {
+    await closeStudioApp(app);
+    throw err;
   }
-  app.process().stdout?.on("data", (buf: Buffer | string) => {
-    captureLaunch(String(buf));
-  });
-  app.process().stderr?.on("data", (buf: Buffer | string) => {
-    captureLaunch(String(buf));
-  });
-  return app;
 }
 
 export async function getMainWindow(app: ElectronApplication): Promise<Page> {

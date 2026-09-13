@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import type { ElectronApplication, Page } from "playwright";
 import {
+  closeStudioApp,
   dismissBlockingDialogs,
   getMainWindow,
   launchStudioApp,
@@ -18,7 +19,7 @@ const expectedProvider = resolveRealProviderEnv();
 test.describe("Real provider smoke", () => {
   test.skip(!smokeReady, realProviderSkipReason());
 
-  let app: ElectronApplication;
+  let app: ElectronApplication | undefined;
   let page: Page;
 
   test.beforeAll(async () => {
@@ -29,7 +30,7 @@ test.describe("Real provider smoke", () => {
   });
 
   test.afterAll(async () => {
-    await app.close();
+    await closeStudioApp(app);
   });
 
   test("seeds configured provider (not mock)", async () => {

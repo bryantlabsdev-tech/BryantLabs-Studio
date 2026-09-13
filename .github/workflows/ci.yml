@@ -59,7 +59,7 @@ jobs:
           VITE_BRYANTLABS_E2E: "1"
 
       - name: E2E (mock provider)
-        run: npm run test:e2e
+        run: xvfb-run -a npm run test:e2e
         env:
           CI: "1"
           BRYANTLABS_MOCK_PROVIDER: "1"

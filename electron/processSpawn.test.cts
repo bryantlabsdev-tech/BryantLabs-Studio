@@ -6,6 +6,7 @@ import {
   formatPosixSpawnError,
   formatNpmInstallFailureMessage,
   isNpmEnoentOutput,
+  parseDirectSpawnCommand,
   resolveShellCommand,
 } from "./processSpawn.cjs";
 
@@ -55,5 +56,23 @@ describe("processSpawn", () => {
     if (resolved.startsWith("/")) {
       assert.match(resolved, /^\/(opt\/homebrew|usr\/local)\/bin\/npm install$/);
     }
+  });
+
+  it("parseDirectSpawnCommand yields a real npm executable, not a shell", () => {
+    const command = resolveShellCommand(
+      "npm run preview -- --host 127.0.0.1 --port 4173",
+    );
+    const { file, args } = parseDirectSpawnCommand(command);
+    assert.ok(!/(^|\/)(sh|bash|zsh|cmd\.exe|cmd)$/i.test(file));
+    assert.match(file, /npm(\.cmd)?$/);
+    assert.deepEqual(args, [
+      "run",
+      "preview",
+      "--",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "4173",
+    ]);
   });
 });

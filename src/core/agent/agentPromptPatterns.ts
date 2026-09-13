@@ -27,6 +27,12 @@ const EDIT_EXISTING_PROJECT_PATTERNS: readonly RegExp[] = [
 const EDIT_DISAMBIGUATION_RE =
   /\b(existing|modify|improve|improvements?|update|enhance|refactor|upgrade|add|change|remove|make|style)\b/i;
 
+/** Imperative UI mutations that are easy to confuse with “show me / explain”. */
+const UI_SURFACE_EDIT_VERBS_RE = /\b(highlight|display|show|add|update|change)\b/i;
+const UI_SURFACE_RE = /\b(pages?|components?|views?|screens?|panels?)\b/i;
+const UI_SURFACE_EDIT_ADVICE_RE =
+  /(\?\s*$)|(^(what|how|why|when|who|which|can|could|should|is|are|do|does)\b)|(\bshow\s+me\b)|(\b(explain|describe|tell)\b)/i;
+
 const AUDIT_PROMPT_PATTERNS: readonly RegExp[] = [
   /\baudit\b/i,
   /\banaly[sz]e\s+(the\s+)?(code|codebase|project|app)/i,
@@ -68,9 +74,17 @@ export function looksLikePreserveExistingAppPrompt(prompt: string): boolean {
   return PRESERVE_EXISTING_APP_PATTERNS.some((re) => re.test(trimmed));
 }
 
+export function looksLikeUiSurfaceEditPrompt(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (trimmed.length < 4) return false;
+  if (UI_SURFACE_EDIT_ADVICE_RE.test(trimmed)) return false;
+  return UI_SURFACE_EDIT_VERBS_RE.test(trimmed) && UI_SURFACE_RE.test(trimmed);
+}
+
 export function looksLikeEditExistingProjectPrompt(prompt: string): boolean {
   const trimmed = prompt.trim();
   if (trimmed.length < 4) return false;
+  if (looksLikeUiSurfaceEditPrompt(trimmed)) return true;
   const matchesEdit = EDIT_EXISTING_PROJECT_PATTERNS.some((re) => re.test(trimmed));
   if (!matchesEdit) return false;
   if (/\bfix\b/i.test(trimmed) && looksLikeRepairPrompt(trimmed)) {

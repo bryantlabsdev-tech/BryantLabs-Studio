@@ -13,7 +13,7 @@
     "typecheck": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/prebuild-typecheck.mjs --check-only",
     "electron:dev": "concurrently -k -n vite,electron -c blue,green \"vite\" \"wait-on tcp:5173 && npm run prebuild && npm run build:electron && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 node scripts/run-electron-app.mjs\"",
     "preview": "vite preview",
-    "test:unit": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs --test 'src/**/*.test.ts'",
+    "test:unit": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs --test 'src/**/*.test.ts' 'e2e/helpers/**/*.test.ts'",
     "test:electron": "node ./scripts/run-electron-tests.mjs",
     "test:all": "npm run test:unit && npm run test:electron",
     "test:smoke": "node ./scripts/e2e-smoke.mjs",

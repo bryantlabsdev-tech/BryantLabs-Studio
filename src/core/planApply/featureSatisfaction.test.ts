@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import {
   appTsxHasStatsPanelFeature,
   detectSatisfiedGameplayFeature,
@@ -11,34 +9,27 @@ import {
 const STATS_PROMPT =
   "Add a stats panel showing elapsed time, mistakes, hints used, and games completed. Persist stats in localStorage.";
 
+const COMPLETE_STATS_PANEL_APP = [
+  "const STATS_KEY = 'sudoku-stats';",
+  "function loadStats() { localStorage.getItem(STATS_KEY); }",
+  "const [mistakes, setMistakes] = useState(0);",
+  "const [hints, setHints] = useState(0);",
+  "const [elapsedTime, setElapsedTime] = useState(0);",
+  "const gamesCompleted = 0;",
+  "formatTime(elapsedTime)",
+  '<div className="stats-panel">',
+].join("\n");
+
 describe("featureSatisfaction", () => {
   it("detects stats panel feature prompts", () => {
     assert.equal(isStatsPanelFeaturePrompt(STATS_PROMPT), true);
     assert.equal(isStatsPanelFeaturePrompt("Make the header blue"), false);
   });
 
-  it("recognizes stats panel already present in A30 App.tsx", () => {
-    const appPath = resolve(
-      "/Users/ferrisb/Desktop/studiotest/A30/src/App.tsx",
-    );
-    let appTsx = "";
-    try {
-      appTsx = readFileSync(appPath, "utf8");
-    } catch {
-      appTsx = [
-        "const STATS_KEY = 'sudoku-stats';",
-        "function loadStats() { localStorage.getItem(STATS_KEY); }",
-        "const [mistakes, setMistakes] = useState(0);",
-        "const [hintsUsed, setHintsUsed] = useState(0);",
-        "const [elapsedTime, setElapsedTime] = useState(0);",
-        "gamesCompleted",
-        "formatTime(elapsedTime)",
-        '<div className="stats-panel">',
-      ].join("\n");
-    }
-    assert.equal(appTsxHasStatsPanelFeature(appTsx), true);
+  it("recognizes a complete stats panel already present in App.tsx", () => {
+    assert.equal(appTsxHasStatsPanelFeature(COMPLETE_STATS_PANEL_APP), true);
     const satisfied = detectSatisfiedGameplayFeature(STATS_PROMPT, {
-      "src/App.tsx": appTsx,
+      "src/App.tsx": COMPLETE_STATS_PANEL_APP,
     });
     assert.ok(satisfied);
     assert.equal(satisfied!.relPath, "src/App.tsx");

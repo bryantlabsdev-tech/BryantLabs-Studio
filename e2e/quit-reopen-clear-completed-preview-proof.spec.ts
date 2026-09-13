@@ -9,9 +9,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  closeStudioApp,
   dismissBlockingDialogs,
   getMainWindow,
   projectRoot,
+  trackRootPid,
   waitForStudioTestHooks,
 } from "./helpers/studio";
 
@@ -31,6 +33,11 @@ const PROJECT_PATH =
 test.describe("Clear-completed preview exec proof", () => {
   test.skip(!ACCEPTANCE_REAL, "Set BRYANTLABS_ACCEPTANCE_REAL=1");
   test.setTimeout(120_000);
+
+  let app: ElectronApplication | undefined;
+  test.afterAll(async () => {
+    await closeStudioApp(app);
+  });
 
   test("Preview shows clear button and confirmation clears completed tasks", async () => {
     await fs.mkdir(ARTIFACT_DIR, { recursive: true });
@@ -53,12 +60,13 @@ test.describe("Clear-completed preview exec proof", () => {
     env.BRYANTLABS_E2E_USER_DATA = userDataDir;
     env.VITE_DEV_SERVER_URL = env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
 
-    const app: ElectronApplication = await electron.launch({
+    app = await electron.launch({
       args: ["."],
       cwd: projectRoot,
       env,
       timeout: 30_000,
     });
+    trackRootPid(app.process()?.pid);
     const page: Page = await getMainWindow(app);
     await dismissBlockingDialogs(page);
     await waitForStudioTestHooks(page);
@@ -145,6 +153,6 @@ test.describe("Clear-completed preview exec proof", () => {
       )}\n`,
     );
 
-    await app.close();
+    await closeStudioApp(app);
   });
 });

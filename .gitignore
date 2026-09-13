@@ -12,5 +12,6 @@ playwright-report
 test-results
 benchmarks/results
 blob-report
+*.tsbuildinfo
 .vscode/*
 !.vscode/extensions.json

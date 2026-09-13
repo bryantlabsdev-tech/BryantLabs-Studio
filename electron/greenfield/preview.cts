@@ -3,10 +3,17 @@ import * as http from "node:http";
 import {
   buildSpawnDiagnostics,
   logSpawnDiagnostics,
+  parseDirectSpawnCommand,
   resolveShellCommand,
   resolveSpawnCwdSync,
   spawnProcessEnv,
 } from "../processSpawn.cjs";
+import {
+  collectProcessTree,
+  signalProcessTree,
+  terminateTrackedPids,
+  waitForTrackedPortRelease,
+} from "../processTree.cjs";
 import {
   buildPreviewDiagnostics,
   collectPreviewProjectContext,
@@ -39,6 +46,8 @@ let previewRoot: string | null = null;
 let previewPort: number = DEFAULT_PREVIEW_PORT;
 let lastSuccessfulPreviewAt: string | null = null;
 let lastFailureDiagnostics: PreviewDiagnosticsPayload | null = null;
+let previewTreePids: number[] = [];
+let stopInFlight: Promise<void> | null = null;
 
 export type { PreviewDiagnosticsPayload } from "./previewDiagnostics.cjs";
 
@@ -153,54 +162,48 @@ export function probePreviewUrl(url: string): Promise<PreviewProbeResult> {
   });
 }
 
-/** Kill any Studio-managed preview and wait for the process to exit (frees the port). */
+function rememberPreviewTree(): void {
+  const pid = previewProc?.pid;
+  if (pid == null || !Number.isInteger(pid) || pid <= 1) return;
+  const merged = new Set(previewTreePids);
+  merged.add(pid);
+  for (const child of collectProcessTree(pid)) merged.add(child);
+  merged.delete(process.pid);
+  previewTreePids = [...merged].filter((value) => Number.isInteger(value) && value > 1);
+}
+
+function takePreviewSnapshot(): { pids: number[]; port: number } {
+  rememberPreviewTree();
+  const pids = previewTreePids;
+  const port = previewPortFromUrl(previewUrl);
+  previewTreePids = [];
+  previewProc = null;
+  previewUrl = null;
+  return { pids, port };
+}
+
+async function finalizePreviewStop(pids: number[], port: number): Promise<void> {
+  await terminateTrackedPids(pids);
+  await waitForTrackedPortRelease(port, pids);
+}
+
+/** Kill the Studio-managed preview tree and wait until its port is released. */
 export async function stopPreviewAsync(): Promise<void> {
-  const proc = previewProc;
-  if (!proc) {
+  if (stopInFlight) return stopInFlight;
+  if (previewProc == null && previewTreePids.length === 0) {
     previewUrl = null;
     return;
   }
-  previewProc = null;
-  previewUrl = null;
-
-  await new Promise<void>((resolve) => {
-    const forceKill = setTimeout(() => {
-      try {
-        proc.kill("SIGKILL");
-      } catch {
-        /* already dead */
-      }
-      resolve();
-    }, 2_500);
-
-    proc.once("close", () => {
-      clearTimeout(forceKill);
-      resolve();
-    });
-    proc.once("error", () => {
-      clearTimeout(forceKill);
-      resolve();
-    });
-
-    try {
-      proc.kill("SIGTERM");
-    } catch {
-      clearTimeout(forceKill);
-      resolve();
-    }
+  const { pids, port } = takePreviewSnapshot();
+  signalProcessTree(pids, "SIGTERM");
+  stopInFlight = finalizePreviewStop(pids, port).finally(() => {
+    stopInFlight = null;
   });
+  return stopInFlight;
 }
 
 export function stopPreview(): void {
-  if (previewProc) {
-    try {
-      previewProc.kill("SIGTERM");
-    } catch {
-      /* ignore */
-    }
-    previewProc = null;
-  }
-  previewUrl = null;
+  void stopPreviewAsync();
 }
 
 export function getPreviewState(): {
@@ -290,6 +293,7 @@ export async function startPreview(root: string): Promise<PreviewStartResult> {
   const port = picked.port;
   previewPort = port;
   const command = resolveShellCommand(previewCommand(port));
+  const { file, args } = parseDirectSpawnCommand(command);
   const { cwd: spawnRoot, exists: rootExists } = resolveSpawnCwdSync(root);
   const diagnostics = buildSpawnDiagnostics({ command, cwd: spawnRoot });
   logSpawnDiagnostics(diagnostics, "greenfield:preview");
@@ -306,13 +310,15 @@ export async function startPreview(root: string): Promise<PreviewStartResult> {
       NO_COLOR: "1",
     });
 
-    const child = spawn(command, {
+    // Spawn npm/vite directly (no shell) so the tracked PID is the real
+    // preview process. Killing that PID then reaches Vite and its children.
+    const child = spawn(file, args, {
       cwd: rootExists ? spawnRoot : root,
-      shell: true,
       env,
       windowsHide: true,
     });
     previewProc = child;
+    rememberPreviewTree();
 
     const fail = (genericError: string, exitCode: number | null = null) => {
       if (settled) return;
@@ -380,6 +386,7 @@ export async function startPreview(root: string): Promise<PreviewStartResult> {
         previewUrl = url ?? `http://127.0.0.1:${port}/`;
         lastSuccessfulPreviewAt = new Date().toISOString();
         lastFailureDiagnostics = null;
+        rememberPreviewTree();
         resolve({ ok: true, url: previewUrl });
       } else {
         fail("Preview failed to start");
@@ -397,6 +404,7 @@ export async function startPreview(root: string): Promise<PreviewStartResult> {
     child.on("error", (err) => fail(String(err), null));
     child.on("close", (code) => {
       if (settled) {
+        rememberPreviewTree();
         previewProc = null;
         return;
       }
