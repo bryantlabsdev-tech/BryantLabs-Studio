@@ -14,6 +14,10 @@ export {
   type WriteFileLogEntry,
 } from "./write.cjs";
 export {
+  handleGreenfieldWriteIpc,
+  type GreenfieldWriteIpcResult,
+} from "./writeIpc.cjs";
+export {
   clearDirectoryContents,
   findNextNumberedSiblingFolder,
   FOLDER_NOT_EMPTY_CODE,

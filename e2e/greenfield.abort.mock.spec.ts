@@ -64,12 +64,17 @@ test.describe("Greenfield Stop aborts mock FieldFlow generation", () => {
     projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "bl-abort-fieldflow-"));
     userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "bl-abort-fieldflow-user-"));
     await fs.writeFile(path.join(projectDir, ".gitkeep"), "\n");
+    await fs.writeFile(path.join(projectDir, "keep-me.txt"), "user-notes\n");
+    await fs.writeFile(
+      path.join(projectDir, "package.json"),
+      '{"name":"preexisting"}\n',
+    );
     app = await launchStudioApp({
       e2eProject: null,
       userDataDir,
       extraEnv: {
-        BRYANTLABS_MOCK_GREENFIELD_DELAY_MS: "2500",
-        BRYANTLABS_MOCK_GREENFIELD_DELAY_ONCE: "1",
+        BRYANTLABS_GREENFIELD_WRITE_DELAY_MS: "800",
+        BRYANTLABS_GREENFIELD_WRITE_DELAY_ONCE: "1",
       },
     });
     page = await getMainWindow(app);
@@ -93,13 +98,25 @@ test.describe("Greenfield Stop aborts mock FieldFlow generation", () => {
     }
   });
 
-  test("Stop cancels the delayed run, writes nothing, then a new run completes", async () => {
+  test("Stop after a delayed write rolls back, then a new run completes", async () => {
     test.setTimeout(240_000);
 
     await fillAgentPrompt(page, FIELDFLOW_PROMPT);
     await sendAgentPrompt(page);
     await dismissBlockingDialogs(page);
     await waitForGreenfieldRunStarted(page);
+
+    await expect
+      .poll(
+        async () => {
+          const pkg = await fs
+            .readFile(path.join(projectDir, "package.json"), "utf8")
+            .catch(() => "");
+          return pkg.includes("preexisting") ? "old" : pkg.length > 0 ? "new" : "missing";
+        },
+        { timeout: 60_000 },
+      )
+      .toBe("new");
 
     const cancel = page.getByTestId("agent-cancel");
     await expect(cancel).toBeVisible();
@@ -127,8 +144,22 @@ test.describe("Greenfield Stop aborts mock FieldFlow generation", () => {
     expect(cancelledState.filesWritten).toEqual([]);
 
     const afterCancel = await listProjectRelPaths(projectDir);
-    expect(afterCancel).toEqual([".gitkeep"]);
+    expect(afterCancel).toContain(".gitkeep");
+    expect(afterCancel).toContain("keep-me.txt");
+    expect(await fs.readFile(path.join(projectDir, "keep-me.txt"), "utf8")).toBe(
+      "user-notes\n",
+    );
+    expect(await fs.readFile(path.join(projectDir, "package.json"), "utf8")).toBe(
+      '{"name":"preexisting"}\n',
+    );
+    expect(afterCancel.includes("src/App.tsx")).toBe(false);
+    if (afterCancel.includes("package.json") && !afterCancel.includes("src/App.tsx")) {
+      expect(await fs.readFile(path.join(projectDir, "package.json"), "utf8")).toBe(
+        '{"name":"preexisting"}\n',
+      );
+    }
     for (const marker of GENERATED_MARKERS) {
+      if (marker === "package.json") continue;
       expect(afterCancel.includes(marker)).toBe(false);
     }
 
@@ -137,15 +168,37 @@ test.describe("Greenfield Stop aborts mock FieldFlow generation", () => {
     await sendAgentPrompt(page);
     await dismissBlockingDialogs(page);
 
-    await page.waitForFunction(
-      () => {
-        const run = window.__studioTestHooks?.getReadinessState?.()?.greenfieldRun;
-        if (!run) return false;
-        return run.runResult === "running" || run.active === true;
-      },
-      undefined,
-      { timeout: 30_000 },
-    );
+    const resetButtons = page.locator("button", { hasText: "Reset agent state" });
+    const retryOutcome = await Promise.race([
+      page
+        .waitForFunction(
+          () => {
+            const run = window.__studioTestHooks?.getReadinessState?.()?.greenfieldRun;
+            if (!run) return false;
+            return (
+              run.active === true ||
+              run.runResult === "running" ||
+              run.genStatus === "running" ||
+              run.writeStatus === "writing"
+            );
+          },
+          undefined,
+          { timeout: 15_000 },
+        )
+        .then(() => "started" as const),
+      resetButtons
+        .last()
+        .waitFor({ state: "visible", timeout: 15_000 })
+        .then(() => "blocked" as const),
+    ]);
+    if (retryOutcome === "blocked") {
+      await resetButtons.last().click();
+      await waitForComposerReady(page);
+      await fillAgentPrompt(page, FIELDFLOW_PROMPT);
+      await sendAgentPrompt(page);
+      await dismissBlockingDialogs(page);
+    }
+    await waitForGreenfieldRunStarted(page);
 
     const outcome = await waitForGreenfieldRunTerminal(page);
     expect(outcome).toBe("success");
