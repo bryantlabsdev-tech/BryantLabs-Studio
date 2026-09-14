@@ -3,6 +3,7 @@ import type { AIPatchSession } from "@/core/planner/aiTypes";
 import type { PlanApplyFileEntry } from "@/core/planApply/types";
 import { DiffRowsView } from "@/components/editor/DiffRowsView";
 import { HunkDiffView } from "@/components/editor/HunkDiffView";
+import { PatchReviewBulkBar } from "@/components/editor/patchReviewBulkBar";
 import {
   deriveAiPatchReviewState,
   derivePlanApplyReviewState,
@@ -95,34 +96,6 @@ function PatchReviewMessages({
         </p>
       ) : null}
     </>
-  );
-}
-
-function PatchReviewBulkBar({
-  busy,
-  onRejectAll,
-  onRegenerate,
-  rejectLabel = "Reject all",
-}: {
-  readonly busy: boolean;
-  readonly onRejectAll: () => void;
-  readonly onRegenerate: () => void;
-  readonly rejectLabel?: string;
-}) {
-  return (
-    <div className="patch-review__bulk-actions agent-patch-review__bulk-actions">
-      <button
-        type="button"
-        className="prov-btn"
-        disabled={busy}
-        onClick={onRejectAll}
-      >
-        {rejectLabel}
-      </button>
-      <button type="button" className="build-view__link" disabled={busy} onClick={onRegenerate}>
-        Regenerate
-      </button>
-    </div>
   );
 }
 
@@ -351,8 +324,11 @@ function PlanApplyReviewPanel(props: PatchReviewPlanApplyProps) {
         </p>
         <PatchReviewBulkBar
           busy={review?.busy ?? false}
+          canAcceptAll={review?.canAcceptAll ?? false}
+          onAcceptAll={props.onAcceptAll}
           onRejectAll={props.onRejectAll}
           onRegenerate={props.onRegenerate}
+          {...(props.acceptLabel ? { acceptLabel: props.acceptLabel } : {})}
           {...(props.rejectLabel ? { rejectLabel: props.rejectLabel } : {})}
         />
       </header>
