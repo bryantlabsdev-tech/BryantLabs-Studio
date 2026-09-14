@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
+import { validateWritePath } from "../fileWriter.cjs";
 
 export interface PackageJsonSanitizeResult {
   content: string;
@@ -177,6 +178,10 @@ export async function sanitizePackageJsonOnDisk(
   root: string,
 ): Promise<{ repairs: string[]; changed: boolean }> {
   const pkgPath = path.join(root, "package.json");
+  const pathCheck = validateWritePath(root, pkgPath, "write");
+  if (!pathCheck.ok) {
+    return { repairs: [], changed: false };
+  }
   let content: string;
   try {
     content = await fs.readFile(pkgPath, "utf8");
@@ -189,6 +194,10 @@ export async function sanitizePackageJsonOnDisk(
     return { repairs: [], changed: false };
   }
 
+  const preWrite = validateWritePath(root, pkgPath, "write");
+  if (!preWrite.ok) {
+    return { repairs: [], changed: false };
+  }
   await fs.writeFile(pkgPath, sanitized.content, "utf8");
   return { repairs: sanitized.repairs, changed: true };
 }
@@ -198,6 +207,10 @@ export async function repairPackageJsonOnDiskForEtarget(
   packageName: string,
 ): Promise<{ repairs: string[]; changed: boolean }> {
   const pkgPath = path.join(root, "package.json");
+  const pathCheck = validateWritePath(root, pkgPath, "write");
+  if (!pathCheck.ok) {
+    return { repairs: [], changed: false };
+  }
   let content: string;
   try {
     content = await fs.readFile(pkgPath, "utf8");
@@ -210,6 +223,10 @@ export async function repairPackageJsonOnDiskForEtarget(
     return { repairs: [], changed: false };
   }
 
+  const preWrite = validateWritePath(root, pkgPath, "write");
+  if (!preWrite.ok) {
+    return { repairs: [], changed: false };
+  }
   await fs.writeFile(pkgPath, repaired.content, "utf8");
   return { repairs: repaired.repairs, changed: true };
 }

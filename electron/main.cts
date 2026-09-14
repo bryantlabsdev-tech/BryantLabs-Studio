@@ -47,7 +47,14 @@ import {
   writeFollowUpChat,
   normalizeFollowUpChatRecord,
 } from "./followUpChatStore.cjs";
-import { applyEdit, createProjectFile, deleteProjectFile, writeVerified, validateWritePath } from "./fileWriter.cjs";
+import {
+  applyEdit,
+  createProjectFile,
+  deleteProjectFile,
+  writeVerified,
+  validateWritePath,
+  isCanonicalPathWithinRoot,
+} from "./fileWriter.cjs";
 import { createLastEditStore, parseUndoBatchEntries } from "./lastEditBatch.cjs";
 import { runVerification, type VerificationResult } from "./verifier.cjs";
 import {
@@ -190,6 +197,12 @@ function isWithinProject(target: string): boolean {
   const resolved = path.resolve(target);
   const root = path.resolve(projectRoot);
   return resolved === root || resolved.startsWith(root + path.sep);
+}
+
+/** Containment for mutating/execution contexts such as terminal cwd. */
+function isExecutionPathWithinProject(target: string): boolean {
+  if (!projectRoot) return false;
+  return isCanonicalPathWithinRoot(projectRoot, target);
 }
 
 function languageFromExtension(filePath: string): string | null {
@@ -1176,8 +1189,13 @@ function registerIpcHandlers(): void {
     return { ok: true };
   });
 
-  registerTerminalIpc(ipcMain, () => mainWindow, isWithinProject, () => projectRoot);
-  registerTerminalExecIpc(ipcMain, isWithinProject, () => projectRoot);
+  registerTerminalIpc(
+    ipcMain,
+    () => mainWindow,
+    isExecutionPathWithinProject,
+    () => projectRoot,
+  );
+  registerTerminalExecIpc(ipcMain, isExecutionPathWithinProject, () => projectRoot);
 
   registerProjectGrepIpc(ipcMain, () => projectRoot);
 

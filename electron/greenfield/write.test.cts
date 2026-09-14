@@ -399,6 +399,54 @@ describe("writeGreenfieldFiles", () => {
     await fs.access(path.join(root, "index.html"));
   });
 
+  it("rejects nested write through src symlink without touching the outside sentinel", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "bl-gf-src-link-"));
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), "bl-gf-src-out-"));
+    const sentinel = path.join(outside, "SENTINEL.txt");
+    await fs.writeFile(sentinel, "untouched\n", "utf8");
+    await fs.symlink(outside, path.join(root, "src"));
+
+    const result = await writeGreenfieldFiles(root, sampleFiles(), { mode: "workspace" });
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => /Path is outside the project root/.test(e)));
+    assert.equal(await fs.readFile(sentinel, "utf8"), "untouched\n");
+    await assert.rejects(fs.access(path.join(outside, "App.tsx")));
+    await assert.rejects(fs.access(path.join(outside, "main.tsx")));
+    await assert.rejects(fs.access(path.join(outside, "index.css")));
+  });
+
+  it("rollback cannot restore or delete through an outside-pointing parent symlink", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "bl-gf-rb-link-"));
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), "bl-gf-rb-out-"));
+    const sentinel = path.join(outside, "SENTINEL.txt");
+    await fs.writeFile(sentinel, "untouched\n", "utf8");
+    await fs.writeFile(path.join(outside, "main.tsx"), "outside-main\n", "utf8");
+    let swapped = false;
+    const io: GreenfieldWriteIo = {
+      writeVerified: async (projRoot, filePath, content) => {
+        const rel = relFrom(root, filePath);
+        if (rel === "tsconfig.json" && !swapped) {
+          swapped = true;
+          await fs.rename(path.join(root, "src"), path.join(root, "src-real"));
+          await fs.symlink(outside, path.join(root, "src"));
+          return { ok: false, reason: "forced write failure" };
+        }
+        return writeVerified(projRoot, filePath, content);
+      },
+      deleteProjectFile,
+    };
+    const result = await writeGreenfieldFiles(root, sampleFiles(), {
+      mode: "workspace",
+      io,
+    });
+    assert.equal(result.ok, false);
+    assert.ok(
+      result.errors.some((e) => /Path is outside the project root|rollback failed/i.test(e)),
+    );
+    assert.equal(await fs.readFile(sentinel, "utf8"), "untouched\n");
+    assert.equal(await fs.readFile(path.join(outside, "main.tsx"), "utf8"), "outside-main\n");
+  });
+
   it("does not call clearDirectoryContents", async () => {
     const writeSrc = await fs.readFile(path.join(__dirname, "write.cjs"), "utf8");
     const ipcSrc = await fs.readFile(path.join(__dirname, "writeIpc.cjs"), "utf8");
