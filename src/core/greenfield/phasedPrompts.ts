@@ -3,9 +3,11 @@ import type { GreenfieldProjectFile } from "@/core/greenfield/types";
 
 const MARKER_RULES = [
   "Output ONLY @@FILE:path@@ … @@END:path@@ blocks. No prose outside markers.",
-  "Use the exact path given for each file.",
+  "Use the exact path given for each required file.",
   "TypeScript strict — no unused locals. Export components used by other files.",
-  "Do not reference files outside the requested list.",
+  "Required files MUST be present.",
+  "Additional allowlisted files under src/ and public/ ARE permitted (nested components, hooks, assets).",
+  "Do not emit extra src/pages/*.tsx files that were not requested.",
 ].join("\n");
 
 const ICON_RULES = [
@@ -65,8 +67,9 @@ export function buildSharedPhasePrompt(
     `App name: ${manifest.appName}`,
     `Stack: ${stack}`,
     "",
-    "Generate ONLY these files:",
+    "These required files MUST be present:",
     paths,
+    "Additional allowlisted files under src/ and public/ ARE permitted.",
     "",
     "Requirements:",
     `- src/types.ts: domain types and status unions for ${manifest.appName} — entities: ${manifestDomainSummary(manifest)}. Do NOT use unrelated CRM types (Lead, Job, Invoice) unless they appear in the user request.`,
@@ -119,7 +122,7 @@ export function buildPagesBatchPhasePrompt(
     ICON_RULES,
     MOCK_DATA_RULES,
     "",
-    `You MUST output exactly ${batchManifest.pagePaths.length} page file(s) in this batch (one @@FILE block each):`,
+    `You MUST output the ${batchManifest.pagePaths.length} required page file(s) in this batch (one @@FILE block each). Additional allowlisted files under src/ and public/ (except extra page files) ARE permitted:`,
     pageList,
     otherPages ? `(Other pages ${otherPages} are generated in other batches — do not output them here.)` : "",
     "",
@@ -163,7 +166,7 @@ export function buildPagesPhasePrompt(
     ICON_RULES,
     MOCK_DATA_RULES,
     "",
-    `You MUST output exactly ${manifest.pagePaths.length} page files (one @@FILE block each):`,
+    `You MUST output the ${manifest.pagePaths.length} required page files (one @@FILE block each). Additional allowlisted files under src/ and public/ (except extra page files) ARE permitted:`,
     pageList,
     "",
     "Each page must:",
@@ -212,8 +215,9 @@ export function buildAppIntegrationPrompt(
     "Generate src/App.tsx — the application router and provider wiring ONLY.",
     `App: ${manifest.appName}`,
     "",
-    "Generate ONLY:",
+    "Required file (MUST be present):",
     "src/App.tsx",
+    "Additional allowlisted files under src/ and public/ ARE permitted.",
     "",
     "Must:",
     "- Import Layout from ./components/Layout (named export: { Layout })",

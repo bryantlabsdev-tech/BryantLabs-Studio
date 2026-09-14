@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { runMultiPhaseGreenfieldGenerate } from "@/core/greenfield/multiPhasePipeline";
+import {
+  extraFilesFromPhaseResponse,
+  MULTI_PHASE_EXTRA_FILE_CAP,
+  runMultiPhaseGreenfieldGenerate,
+} from "@/core/greenfield/multiPhasePipeline";
+import { mergeProjectFiles, parseTargetFilesFromResponse } from "@/core/greenfield/parseProjectFile";
 import type { GreenfieldGenerateReliabilityHost } from "@/core/greenfield/generatePipeline";
 import type { ProviderSettings } from "@/core/providers/types";
 
@@ -440,6 +445,132 @@ export default function App(){
     assert.equal(result.ok, true);
     assert.ok(result.projectFiles?.some((f) => f.path === "src/components/jobs/JobDetail.tsx"));
     assert.ok(result.projectFiles?.some((f) => f.path === "public/logo.svg"));
+  });
+
+  it("keeps nested extras without the FieldFlow fixture token", async () => {
+    const settings = await mockSettings();
+    const rawText = [
+      marker("src/types.ts", "export type Job = { id: string };"),
+      marker(
+        "src/components/Layout.tsx",
+        "export function Layout(){ return <div><aside /><main /></div>; }",
+      ),
+      marker(
+        "src/components/Sidebar.tsx",
+        'export function Sidebar(){ return <nav><a href="/">Dashboard</a><a href="/jobs">Jobs</a></nav>; }',
+      ),
+      marker(
+        "src/hooks/useLocalStorage.ts",
+        "export function useLocalStorage<T>(k:string,i:T){ return [i,()=>{}] as const; }",
+      ),
+      marker(
+        "src/pages/Dashboard.tsx",
+        "export default function Dashboard(){ return <div>FieldFlow Dashboard</div>; }",
+      ),
+      marker("src/pages/Jobs.tsx", "export default function Jobs(){ return <div>Jobs</div>; }"),
+      marker(
+        "src/components/jobs/JobDetail.tsx",
+        "export default function JobDetail(){ return <div>Job</div>; }",
+      ),
+      marker("public/logo.svg", "<svg xmlns='http://www.w3.org/2000/svg' />"),
+      marker(
+        "src/App.tsx",
+        `import { Routes, Route } from "react-router-dom";
+import { Layout } from "./components/Layout";
+import Dashboard from "./pages/Dashboard";
+import Jobs from "./pages/Jobs";
+export default function App(){
+  return <Routes><Route path="/" element={<Layout/>}><Route index element={<Dashboard/>}/><Route path="jobs" element={<Jobs/>}/></Route></Routes>;
+}`,
+      ),
+    ].join("\n");
+    const host: GreenfieldGenerateReliabilityHost = {
+      api: {
+        greenfieldGenerateRaw: async () => ({
+          ok: true,
+          provider: "gemini",
+          model: "m",
+          latencyMs: 1,
+          rawText,
+        }),
+      } as never,
+      settings,
+      invokeGreenfieldCall: async (_s, _t, call) => call("gemini") as never,
+      invokeGreenfieldRawCall: async (_s, _t, call) => call("gemini") as never,
+      canMakeAiCall: () => ({ ok: true }),
+    };
+
+    const result = await runMultiPhaseGreenfieldGenerate(
+      host,
+      `Build FieldFlow with React Router and localStorage persistence.\nPages:\n- Dashboard\n- Jobs`,
+    );
+    assert.equal(result.ok, true);
+    assert.ok(result.projectFiles?.some((f) => f.path === "src/components/jobs/JobDetail.tsx"));
+    assert.ok(result.projectFiles?.some((f) => f.path === "public/logo.svg"));
+  });
+});
+
+describe("extraFilesFromPhaseResponse", () => {
+  it("drops unexpected extra pages, traversal, and files past the cap", () => {
+    const expected = ["src/pages/Dashboard.tsx", "src/pages/Jobs.tsx"];
+    const extraBlocks = Array.from({ length: MULTI_PHASE_EXTRA_FILE_CAP + 1 }, (_, i) =>
+      marker(`src/components/extra/Extra${i}.tsx`, `export const Extra${i} = ${i};`),
+    );
+    const rawText = [
+      marker("src/pages/Dashboard.tsx", "export default function Dashboard(){ return <div/>; }"),
+      marker("src/pages/Unexpected.tsx", "export default function Unexpected(){ return <div/>; }"),
+      marker(
+        "src/components/jobs/JobDetail.tsx",
+        "export default function JobDetail(){ return <div/>; }",
+      ),
+      marker("../evil.ts", "export const evil = true;"),
+      ...extraBlocks,
+    ].join("\n");
+
+    const extras = extraFilesFromPhaseResponse(rawText, expected);
+    assert.equal(
+      extras.some((f) => f.path === "src/pages/Unexpected.tsx"),
+      false,
+    );
+    assert.equal(
+      extras.some((f) => f.path === "src/pages/Dashboard.tsx"),
+      false,
+    );
+    assert.equal(
+      extras.some((f) => f.path.includes("evil")),
+      false,
+    );
+    assert.ok(extras.some((f) => f.path === "src/components/jobs/JobDetail.tsx"));
+    assert.equal(extras.length, MULTI_PHASE_EXTRA_FILE_CAP);
+    assert.equal(
+      extras.some((f) => f.path === `src/components/extra/Extra${MULTI_PHASE_EXTRA_FILE_CAP}.tsx`),
+      false,
+    );
+  });
+
+  it("does not treat extras as covering a missing expected page", () => {
+    const expected = ["src/pages/Dashboard.tsx", "src/pages/Jobs.tsx"];
+    const rawText = [
+      marker("src/pages/Dashboard.tsx", "export default function Dashboard(){ return <div/>; }"),
+      marker(
+        "src/components/jobs/JobDetail.tsx",
+        "export default function JobDetail(){ return <div/>; }",
+      ),
+      marker("public/logo.svg", "<svg xmlns='http://www.w3.org/2000/svg' />"),
+    ].join("\n");
+    const extras = extraFilesFromPhaseResponse(rawText, expected);
+    const parsed = parseTargetFilesFromResponse(rawText, expected);
+    const merged = mergeProjectFiles(parsed.files, extras);
+    const stillMissing = expected.filter(
+      (path) => !merged.some((file) => file.path === path && file.content.trim()),
+    );
+    assert.ok(extras.some((f) => f.path === "src/components/jobs/JobDetail.tsx"));
+    assert.ok(extras.some((f) => f.path === "public/logo.svg"));
+    assert.equal(
+      extras.some((f) => f.path === "src/pages/Jobs.tsx"),
+      false,
+    );
+    assert.deepEqual(stillMissing, ["src/pages/Jobs.tsx"]);
   });
 });
 
