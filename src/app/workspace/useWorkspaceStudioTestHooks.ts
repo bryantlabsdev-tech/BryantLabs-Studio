@@ -1,5 +1,10 @@
 import { useCallback, type Dispatch, type SetStateAction } from "react";
 import { createAgentRunId } from "@/app/workspace/useAgentRunHistoryController";
+import {
+  clearFollowUpReviewFirstPreference,
+  readFollowUpReviewFirst,
+  resolveFollowUpAutoContinue,
+} from "@/core/build/followUpPrefs";
 import { getFollowUpSettlementDiagnostic } from "@/core/agent/followUpSettlementDiagnostics";
 import { useStudioTestHooks } from "@/app/workspace/useStudioTestHooks";
 import {
@@ -363,6 +368,16 @@ export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput
     [],
   );
 
+  const getFollowUpReviewFirstHook = useCallback(() => readFollowUpReviewFirst(), []);
+  const resolveFollowUpAutoContinueHook = useCallback(
+    (prompt: string) => resolveFollowUpAutoContinue(prompt),
+    [],
+  );
+  const clearFollowUpReviewFirstPreferenceHook = useCallback(
+    () => clearFollowUpReviewFirstPreference(),
+    [],
+  );
+
   useStudioTestHooks({
     getReadinessState,
     getGreenfieldRunSnapshot,
@@ -378,5 +393,8 @@ export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput
     getProviderSmokeState,
     checkConfiguredProviderHealth,
     runProviderSmokeTest,
+    getFollowUpReviewFirst: getFollowUpReviewFirstHook,
+    resolveFollowUpAutoContinue: resolveFollowUpAutoContinueHook,
+    clearFollowUpReviewFirstPreference: clearFollowUpReviewFirstPreferenceHook,
   });
 }

@@ -124,9 +124,24 @@ async function turnOffReviewFirst(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Command palette", exact: true }).first().click();
   const palette = page.getByTestId("command-palette");
   await expect(palette).toBeVisible();
-  await palette.locator(".command-palette__input").fill("review first");
-  await palette.getByRole("option", { name: "Turn off review first" }).click();
+  const input = palette.locator(".command-palette__input");
+  await input.fill("review first");
+  const off = palette.getByRole("option", { name: /Turn off review first/i });
+  await expect(off).toBeVisible();
+  await off.click();
   await expect(palette).toBeHidden();
+  await expect
+    .poll(async () => {
+      return page.evaluate(() => {
+        const hooks = window.__studioTestHooks;
+        return {
+          stored: localStorage.getItem("bryantlabs.followUpReviewFirst"),
+          reviewFirst: hooks?.getFollowUpReviewFirst?.() ?? null,
+          autoContinue: hooks?.resolveFollowUpAutoContinue?.("Add a timer") ?? null,
+        };
+      });
+    })
+    .toEqual({ stored: "0", reviewFirst: false, autoContinue: true });
 }
 
 async function undoViaAdvanced(page: Page): Promise<void> {
@@ -253,12 +268,37 @@ test.describe("Review-first follow-up (mock provider)", () => {
       .toEqual({ created: false, app: originalApp });
 
     await turnOffReviewFirst(page);
-    await submitFollowUp(page, TIMER_PROMPT);
     await expect
-      .poll(async () => (await readApp(projectDir)).includes("mock: timer"), {
-        timeout: 60_000,
+      .poll(async () => {
+        return page.evaluate(() => {
+          const hooks = window.__studioTestHooks;
+          return (
+            hooks?.getFollowUpReviewFirst?.() === false &&
+            hooks?.resolveFollowUpAutoContinue?.("Add a timer") === true &&
+            localStorage.getItem("bryantlabs.followUpReviewFirst") === "0"
+          );
+        });
       })
       .toBe(true);
+    await submitFollowUp(page, TIMER_PROMPT);
+    await expect
+      .poll(async () => {
+        const snapshot = await page.evaluate(() => {
+          const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+          return {
+            phase: pipeline?.planApplyPhase ?? null,
+            buildError: pipeline?.buildError ?? null,
+            planApplyError: pipeline?.planApplyError ?? null,
+          };
+        });
+        const hasMarker = (await readApp(projectDir).catch(() => "")).includes("mock: timer");
+        return {
+          pausedForReview: snapshot.phase === "waiting_for_review",
+          hasMarker,
+          phase: snapshot.phase,
+        };
+      }, { timeout: 60_000 })
+      .toMatchObject({ pausedForReview: false, hasMarker: true });
     await expect(page.getByRole("button", { name: "Accept all" })).toHaveCount(0);
   });
 });

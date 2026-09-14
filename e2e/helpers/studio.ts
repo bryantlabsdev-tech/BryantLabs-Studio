@@ -326,7 +326,7 @@ export async function openFixtureProject(
     localStorage.removeItem("bryantlabs.agentRunHistory.__bryantlabs-session__");
     localStorage.removeItem(`bryantlabs.followUpChat.${targetPath}`);
     localStorage.removeItem("bryantlabs.providerCircuit.v1");
-    localStorage.removeItem("bryantlabs.followUpReviewFirst");
+    window.__studioTestHooks?.clearFollowUpReviewFirstPreference?.();
     localStorage.setItem("bryantlabs.useAgentLoopForEdits", "0");
     const hooks = window.__studioTestHooks;
     if (!hooks?.openProjectAt) {

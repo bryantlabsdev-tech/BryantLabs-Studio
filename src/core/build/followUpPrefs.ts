@@ -4,6 +4,10 @@ import type { PlanApplySession } from "@/core/planApply/types";
 
 const STORAGE_KEY = "bryantlabs.followUpReviewFirst";
 
+/** Last explicit write in this renderer. Used when localStorage getItem is null
+ * after a successful setItem (observed in some Electron/Linux sessions). */
+let sessionReviewFirst: boolean | undefined;
+
 /**
  * Emergency rollback: skip Accept all / review-first and write ready patches
  * as soon as the coder returns them. Keep the gated auto-apply paths; flip
@@ -20,21 +24,48 @@ export function interpretFollowUpReviewFirst(
   return raw === "1";
 }
 
-/** When true, follow-up runs pause for review before applying patches. */
-export function readFollowUpReviewFirst(): boolean {
+function notifyFollowUpReviewFirstChanged(): void {
+  if (typeof window === "undefined") return;
   try {
-    return interpretFollowUpReviewFirst(localStorage.getItem(STORAGE_KEY));
+    window.dispatchEvent(new CustomEvent("bryantlabs:toggle-review-first"));
   } catch {
-    return interpretFollowUpReviewFirst(null);
+    /* ignore non-DOM test environments */
   }
 }
 
+/** When true, follow-up runs pause for review before applying patches. */
+export function readFollowUpReviewFirst(): boolean {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw !== null) return interpretFollowUpReviewFirst(raw);
+  } catch {
+    /* fall through to the in-session write, then default */
+  }
+  if (sessionReviewFirst !== undefined) {
+    return interpretFollowUpReviewFirst(sessionReviewFirst ? "1" : "0");
+  }
+  return interpretFollowUpReviewFirst(null);
+}
+
 export function writeFollowUpReviewFirst(reviewFirst: boolean): void {
+  sessionReviewFirst = reviewFirst;
   try {
     localStorage.setItem(STORAGE_KEY, reviewFirst ? "1" : "0");
   } catch {
     /* ignore quota / private mode */
   }
+  notifyFollowUpReviewFirstChanged();
+}
+
+/** Restore the default (review-first on) for a fresh project / e2e fixture. */
+export function clearFollowUpReviewFirstPreference(): void {
+  sessionReviewFirst = undefined;
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  notifyFollowUpReviewFirstChanged();
 }
 
 /** Automated Fix-with-AI flows should apply without pausing for manual review. */

@@ -9,6 +9,7 @@ import {
   shouldAutoContinueFollowUpApply,
   shouldAutoPromoteFollowUpReview,
   writeFollowUpReviewFirst,
+  clearFollowUpReviewFirstPreference,
 } from "./followUpPrefs.ts";
 import { buildUiAuditAdvisoryFixPrompt, recommendationsForUiAuditIssues } from "@/core/agent/uiAuditAdvisoryUx";
 import type { PlanApplySession } from "@/core/planApply";
@@ -29,9 +30,11 @@ describe("followUpPrefs", () => {
         delete store[k];
       },
     } as Storage;
+    clearFollowUpReviewFirstPreference();
   });
 
   afterEach(() => {
+    clearFollowUpReviewFirstPreference();
     globalThis.localStorage = original;
   });
 
@@ -49,6 +52,13 @@ describe("followUpPrefs", () => {
     assert.equal(store[key], "0");
     assert.equal(readFollowUpReviewFirst(), false);
     assert.equal(interpretFollowUpReviewFirst("0"), false);
+  });
+
+  it("keeps an explicit opt-out if localStorage getItem later returns null", () => {
+    writeFollowUpReviewFirst(false);
+    store = {};
+    assert.equal(readFollowUpReviewFirst(), false);
+    assert.equal(resolveFollowUpAutoContinue("Add a timer"), true);
   });
 
   it("forces review-first off when the emergency auto-apply switch is true", () => {

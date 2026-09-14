@@ -75,6 +75,8 @@ describe("review-first surfaces", () => {
     assert.match(palette, /Turn off review first/);
     assert.match(palette, /Turn on review first/);
     assert.match(palette, /reviewFirst \? "Turn off review first"/);
+    assert.match(palette, /writeFollowUpReviewFirst\(!reviewFirst\)/);
+    assert.match(palette, /onPointerDown=\{/);
   });
 
   it("regenerate uses the current follow-up auto-continue preference", () => {

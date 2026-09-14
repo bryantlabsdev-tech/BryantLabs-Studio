@@ -53,6 +53,9 @@ interface StudioTestHooks {
   };
   checkConfiguredProviderHealth(): Promise<import("@/types").HealthResult>;
   runProviderSmokeTest(prompt: string): Promise<import("@/types").ProviderResponse>;
+  getFollowUpReviewFirst(): boolean;
+  resolveFollowUpAutoContinue(prompt: string): boolean;
+  clearFollowUpReviewFirstPreference(): void;
 }
 
 interface StudioReadinessState {
