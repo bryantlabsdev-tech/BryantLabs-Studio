@@ -26,7 +26,6 @@ import {
   manifestSliceForBatch,
   splitPagesIntoBatches,
 } from "@/core/greenfield/multiPhasePlan";
-import { isMockFieldFlowMultipageFixturePrompt } from "@/core/greenfield/mockFieldFlowFixture";
 import {
   coreFilesFromProject,
   mergeProjectFiles,
@@ -54,6 +53,30 @@ export interface MultiPhasePhaseResult {
   readonly ok: boolean;
   readonly paths: readonly string[];
   readonly missing: readonly string[];
+}
+
+/** Max unexpected allowlisted files merged from one phase response. */
+export const MULTI_PHASE_EXTRA_FILE_CAP = 24;
+
+function isManifestPagePath(path: string): boolean {
+  return path.startsWith("src/pages/") && path.endsWith(".tsx");
+}
+
+/**
+ * Allowlisted files beyond expectedPaths. Unexpected extra pages are dropped.
+ * Extras never enter stillMissing / retries.
+ */
+export function extraFilesFromPhaseResponse(
+  rawText: string,
+  expectedPaths: readonly string[],
+): GreenfieldProjectFile[] {
+  const expected = new Set(expectedPaths);
+  const extras = parseAllowedProjectFilesFromResponse(rawText).filter((file) => {
+    if (expected.has(file.path)) return false;
+    if (isManifestPagePath(file.path)) return false;
+    return true;
+  });
+  return extras.slice(0, MULTI_PHASE_EXTRA_FILE_CAP);
 }
 
 function responseRawText(
@@ -243,17 +266,10 @@ async function runPhase(
   }
 
   let parsed = parseTargetFilesFromResponse(rawText, expectedPaths);
-  let merged = mergeProjectFiles(existing, parsed.files);
-  if (
-    isMockFieldFlowMultipageFixturePrompt(userPrompt) ||
-    isMockFieldFlowMultipageFixturePrompt(rawText)
-  ) {
-    const extras = parseAllowedProjectFilesFromResponse(rawText).filter((file) => {
-      const isPage = file.path.startsWith("src/pages/") && file.path.endsWith(".tsx");
-      return !isPage || expectedPaths.includes(file.path);
-    });
-    merged = mergeProjectFiles(merged, extras);
-  }
+  let merged = mergeProjectFiles(
+    mergeProjectFiles(existing, parsed.files),
+    extraFilesFromPhaseResponse(rawText, expectedPaths),
+  );
   let stillMissing = expectedPaths.filter(
     (path) => !merged.some((file) => file.path === path && file.content.trim()),
   );
