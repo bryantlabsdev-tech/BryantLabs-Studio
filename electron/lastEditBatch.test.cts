@@ -16,6 +16,7 @@ import {
   createProjectFile,
   deleteProjectFile,
   writeVerified,
+  PATH_OUTSIDE_PROJECT_ROOT,
 } from "./fileWriter.cjs";
 
 function memoryIo(disk: Map<string, string | null>) {
@@ -197,5 +198,57 @@ describe("lastEditBatch disk", () => {
     assert.equal(notifications.some((n) => n.path === newPath && n.deleted), true);
     assert.equal(notifications.some((n) => n.path === appPath && !n.deleted), true);
     assert.equal(store.peek(), null);
+  });
+
+  it("undo cannot mutate an outside sentinel through a parent symlink", async () => {
+    const project = await mkdtemp(path.join(tmpdir(), "bl-undo-link-proj-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "bl-undo-link-out-"));
+    const sentinel = path.join(outside, "SENTINEL.txt");
+    await fs.writeFile(sentinel, "untouched\n", "utf8");
+    const created = path.join(project, "src", "New.tsx");
+    const made = await createProjectFile(project, created, "export const n = 1;\n");
+    assert.equal(made.ok, true);
+    await fs.rename(path.join(project, "src"), path.join(project, "src-real"));
+    await fs.symlink(outside, path.join(project, "src"));
+    const store = createLastEditStore();
+    store.recordSingle({ path: created, previousContent: "", created: true });
+    const undo = await store.undo(project, {
+      writeVerified,
+      deleteProjectFile,
+      notifyIndexFileChange: () => {},
+    });
+    assert.equal(undo.ok, false);
+    assert.equal(undo.reason, PATH_OUTSIDE_PROJECT_ROOT);
+    assert.equal(await fs.readFile(sentinel, "utf8"), "untouched\n");
+  });
+
+  it("undo restore cannot write through an outside-pointing parent symlink", async () => {
+    const project = await mkdtemp(path.join(tmpdir(), "bl-undo-restore-proj-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "bl-undo-restore-out-"));
+    const sentinel = path.join(outside, "SENTINEL.txt");
+    await fs.writeFile(sentinel, "untouched\n", "utf8");
+    await fs.writeFile(path.join(outside, "App.tsx"), "outside-app\n", "utf8");
+    const filePath = path.join(project, "src", "App.tsx");
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, "old\n", "utf8");
+    const edited = await applyEdit(project, filePath, "old\n", "new\n");
+    assert.equal(edited.ok, true);
+    await fs.rename(path.join(project, "src"), path.join(project, "src-real"));
+    await fs.symlink(outside, path.join(project, "src"));
+    const store = createLastEditStore();
+    store.recordSingle({
+      path: filePath,
+      previousContent: edited.previousContent ?? "",
+      created: false,
+    });
+    const undo = await store.undo(project, {
+      writeVerified,
+      deleteProjectFile,
+      notifyIndexFileChange: () => {},
+    });
+    assert.equal(undo.ok, false);
+    assert.equal(undo.reason, PATH_OUTSIDE_PROJECT_ROOT);
+    assert.equal(await fs.readFile(sentinel, "utf8"), "untouched\n");
+    assert.equal(await fs.readFile(path.join(outside, "App.tsx"), "utf8"), "outside-app\n");
   });
 });
