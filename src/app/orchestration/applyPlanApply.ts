@@ -6,6 +6,7 @@ import { summarizePostApplyRequirements } from "@/core/agent/postApplyRequiremen
 import {
   createFollowUpCheckpoint,
   rollbackPartialApply,
+  buildUndoBatchFromApprovedFiles,
 } from "@/core/build/followUpCheckpoint";
 import { commandResultLine } from "@/core/greenfield/runLog";
 import { finalizeOrchestrationAfterApplyPlan } from "@/app/orchestration/applyPlanFinalize";
@@ -168,11 +169,15 @@ export async function applyApprovedPlanFilesOrchestration(
       createFollowUpCheckpoint({
         projectPath: resolved.project.path,
         prompt,
-        files: approved.map((f) => ({
-          relPath: f.relPath,
-          absPath: f.absPath,
-          content: f.action === "create" ? "" : f.basisContent!,
-        })),
+        files: approved.map((f) => {
+          const action = f.action === "create" ? "create" as const : "modify" as const;
+          return {
+            relPath: f.relPath,
+            absPath: f.absPath,
+            content: action === "create" ? "" : f.basisContent!,
+            action,
+          };
+        }),
       }),
     );
   }
@@ -259,6 +264,8 @@ export async function applyApprovedPlanFilesOrchestration(
         rollbackNote = `Partial apply failed and rollback could not complete: ${rollback.error ?? "unknown error"}`;
         resolved.appendGreenfieldRunLog("apply_plan", "failed", rollbackNote);
       }
+      await api.replaceUndoBatch([]);
+      resolved.setCanUndo(false);
     }
 
     clearPatchGeneratedWatchdog();
@@ -307,6 +314,16 @@ export async function applyApprovedPlanFilesOrchestration(
       applied: [],
       error: writeReport.rootCauseLine,
     };
+  }
+
+  const undoBatch = buildUndoBatchFromApprovedFiles(approved, applied);
+  const replaced = await api.replaceUndoBatch(undoBatch);
+  if (!replaced.ok) {
+    resolved.appendGreenfieldRunLog(
+      "apply_plan",
+      "failed",
+      `Wrote files but could not record undo batch: ${replaced.reason ?? "unknown error"}`,
+    );
   }
 
   resolved.appendGreenfieldRunLog(

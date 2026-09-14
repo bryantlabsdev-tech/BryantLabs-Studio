@@ -1,0 +1,173 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import {
+  buildUndoBatchFromApprovedFiles,
+  createFollowUpCheckpoint,
+  restoreFollowUpCheckpoint,
+  rollbackPartialApply,
+} from "./followUpCheckpoint.ts";
+import type { BryantLabsApi } from "@/types";
+
+function mockDisk(initial: Record<string, string | null>) {
+  const disk = new Map<string, string>();
+  for (const [path, content] of Object.entries(initial)) {
+    if (content !== null) disk.set(path, content);
+  }
+  const applyCalls: { path: string; recordUndo?: boolean }[] = [];
+  const api = {
+    readFile: async (absPath: string) => {
+      if (!disk.has(absPath)) {
+        return { readable: false, content: "", language: null, reason: "missing" };
+      }
+      return { readable: true, content: disk.get(absPath)!, language: "typescript" };
+    },
+    applyEdit: async (
+      absPath: string,
+      expectedBefore: string,
+      after: string,
+      recordUndo?: boolean,
+    ) => {
+      applyCalls.push(
+        recordUndo === undefined
+          ? { path: absPath }
+          : { path: absPath, recordUndo },
+      );
+      if (!disk.has(absPath)) return { ok: false, reason: "File does not exist." };
+      if (disk.get(absPath) !== expectedBefore) {
+        return { ok: false, reason: "The file changed on disk since the patch was created." };
+      }
+      disk.set(absPath, after);
+      return { ok: true, content: after, path: absPath };
+    },
+    deleteProjectFile: async (absPath: string) => {
+      disk.delete(absPath);
+      return { ok: true, content: "", path: absPath };
+    },
+  } as unknown as BryantLabsApi;
+  return { disk, applyCalls, api };
+}
+
+describe("followUpCheckpoint undo", () => {
+  it("old checkpoint without action behaves as modify", async () => {
+    const { disk, applyCalls, api } = mockDisk({
+      "/tmp/p/src/App.tsx": "new",
+    });
+    const checkpoint = createFollowUpCheckpoint({
+      projectPath: "/tmp/p",
+      prompt: "edit",
+      files: [
+        { relPath: "src/App.tsx", absPath: "/tmp/p/src/App.tsx", content: "" },
+      ],
+    });
+    const result = await restoreFollowUpCheckpoint(api, checkpoint);
+    assert.equal(result.ok, true);
+    assert.equal(disk.has("/tmp/p/src/App.tsx"), true);
+    assert.equal(disk.get("/tmp/p/src/App.tsx"), "");
+    assert.equal(applyCalls[0]?.recordUndo, false);
+  });
+
+  it("checkpoint creation is deleted during Undo last change", async () => {
+    const { disk, applyCalls, api } = mockDisk({
+      "/tmp/p/src/App.tsx": "new app",
+      "/tmp/p/src/components/History.tsx": "created",
+    });
+    const checkpoint = createFollowUpCheckpoint({
+      projectPath: "/tmp/p",
+      prompt: "add history",
+      files: [
+        {
+          relPath: "src/App.tsx",
+          absPath: "/tmp/p/src/App.tsx",
+          content: "old app",
+          action: "modify",
+        },
+        {
+          relPath: "src/components/History.tsx",
+          absPath: "/tmp/p/src/components/History.tsx",
+          content: "",
+          action: "create",
+        },
+      ],
+    });
+    const result = await restoreFollowUpCheckpoint(api, checkpoint);
+    assert.equal(result.ok, true);
+    assert.equal(disk.get("/tmp/p/src/App.tsx"), "old app");
+    assert.equal(disk.has("/tmp/p/src/components/History.tsx"), false);
+    assert.equal(applyCalls.length, 1);
+    assert.equal(applyCalls[0]?.recordUndo, false);
+  });
+
+  it("does not infer creation from empty checkpoint content", async () => {
+    const { disk, api } = mockDisk({
+      "/tmp/p/src/empty.ts": "text",
+    });
+    const checkpoint = createFollowUpCheckpoint({
+      projectPath: "/tmp/p",
+      prompt: "empty",
+      files: [
+        { relPath: "src/empty.ts", absPath: "/tmp/p/src/empty.ts", content: "" },
+      ],
+    });
+    const result = await restoreFollowUpCheckpoint(api, checkpoint);
+    assert.equal(result.ok, true);
+    assert.equal(disk.has("/tmp/p/src/empty.ts"), true);
+    assert.equal(disk.get("/tmp/p/src/empty.ts"), "");
+  });
+
+  it("buildUndoBatchFromApprovedFiles records create vs modify", () => {
+    const batch = buildUndoBatchFromApprovedFiles(
+      [
+        {
+          relPath: "src/App.tsx",
+          absPath: "/tmp/p/src/App.tsx",
+          action: "modify",
+          basisContent: "old",
+        },
+        {
+          relPath: "src/components/History.tsx",
+          absPath: "/tmp/p/src/components/History.tsx",
+          action: "create",
+          basisContent: "",
+        },
+      ],
+      ["src/App.tsx", "src/components/History.tsx"],
+    );
+    assert.deepEqual(batch, [
+      { path: "/tmp/p/src/App.tsx", previousContent: "old", created: false },
+      {
+        path: "/tmp/p/src/components/History.tsx",
+        previousContent: "",
+        created: true,
+      },
+    ]);
+  });
+
+  it("rollbackPartialApply restores modifications and deletes creations", async () => {
+    const { disk, applyCalls, api } = mockDisk({
+      "/tmp/p/src/App.tsx": "new app",
+      "/tmp/p/src/components/History.tsx": "created",
+    });
+    const result = await rollbackPartialApply(
+      api,
+      ["src/App.tsx", "src/components/History.tsx"],
+      [
+        {
+          relPath: "src/App.tsx",
+          absPath: "/tmp/p/src/App.tsx",
+          action: "modify",
+          basisContent: "old app",
+        },
+        {
+          relPath: "src/components/History.tsx",
+          absPath: "/tmp/p/src/components/History.tsx",
+          action: "create",
+          basisContent: "",
+        },
+      ],
+    );
+    assert.equal(result.ok, true);
+    assert.equal(disk.get("/tmp/p/src/App.tsx"), "old app");
+    assert.equal(disk.has("/tmp/p/src/components/History.tsx"), false);
+    assert.equal(applyCalls[0]?.recordUndo, false);
+  });
+});

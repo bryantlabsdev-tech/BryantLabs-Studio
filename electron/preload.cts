@@ -139,12 +139,23 @@ const api = {
   gitUnstage: (paths: string[]) => ipcRenderer.invoke("git:unstage", paths),
   gitRestore: (paths: string[]) => ipcRenderer.invoke("git:restore", paths),
   gitCommit: (message: string) => ipcRenderer.invoke("git:commit", message),
-  applyEdit: (filePath: string, expectedBefore: string, after: string) =>
-    ipcRenderer.invoke("edit:apply", filePath, expectedBefore, after),
+  applyEdit: (
+    filePath: string,
+    expectedBefore: string,
+    after: string,
+    recordUndo?: boolean,
+  ) => ipcRenderer.invoke("edit:apply", filePath, expectedBefore, after, recordUndo),
   createProjectFile: (filePath: string, content: string) =>
     ipcRenderer.invoke("edit:createFile", filePath, content),
   deleteProjectFile: (filePath: string) =>
     ipcRenderer.invoke("edit:deleteFile", filePath),
+  replaceUndoBatch: (
+    entries: readonly {
+      path: string;
+      previousContent: string;
+      created: boolean;
+    }[],
+  ) => ipcRenderer.invoke("edit:replaceUndoBatch", entries),
   undoLastEdit: () => ipcRenderer.invoke("edit:undoLast"),
   verify: () => ipcRenderer.invoke("verify:run"),
 

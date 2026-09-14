@@ -206,6 +206,10 @@ export async function deleteProjectFile(
     await fs.unlink(filePath);
     return { ok: true, content: "", previousContent: "" };
   } catch (err) {
+    const code = err && typeof err === "object" && "code" in err ? err.code : null;
+    if (code === "ENOENT") {
+      return { ok: true, content: "", previousContent: "" };
+    }
     const message = err instanceof Error ? err.message : "Could not delete file.";
     return fail(message);
   }

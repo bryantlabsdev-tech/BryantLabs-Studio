@@ -1481,6 +1481,9 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     releaseBuildRunForReview,
     patchAppPreview,
     requestPreviewTab,
+    canUndo,
+    undoLastEdit,
+    applyApprovedPlanFiles,
   });
 
   const syncAppContextBeforeEdit = useCallback(() => {

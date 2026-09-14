@@ -8,6 +8,7 @@ import {
   validateWritePath,
   writeVerified,
   createProjectFile,
+  deleteProjectFile,
 } from "./fileWriter.cjs";
 
 describe("fileWriter safety", () => {
@@ -60,5 +61,12 @@ describe("fileWriter safety", () => {
     const result = await writeVerified(root, filePath, "hello");
     assert.equal(result.ok, true);
     assert.equal(await fs.readFile(filePath, "utf8"), "hello");
+  });
+
+  it("treats deleting a missing file as success", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "bl-writer-"));
+    const filePath = path.join(root, "gone.ts");
+    const result = await deleteProjectFile(root, filePath);
+    assert.equal(result.ok, true);
   });
 });

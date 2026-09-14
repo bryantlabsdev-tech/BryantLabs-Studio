@@ -71,8 +71,12 @@ function pendingSession(files: PlanApplyFileEntry[]): PlanApplySession {
 function applyHost(session: PlanApplySession | null): {
   readonly host: ApplyPlanOrchestrationHost;
   readonly written: string[];
+  readonly undoBatches: readonly { path: string; previousContent: string; created: boolean }[][];
+  readonly canUndo: { value: boolean };
 } {
   const written: string[] = [];
+  const undoBatches: { path: string; previousContent: string; created: boolean }[][] = [];
+  const canUndo = { value: false };
   let persisted: PlanApplySession | null = session;
   let memory = emptySessionMemory("/tmp/project");
   const host = {
@@ -84,6 +88,16 @@ function applyHost(session: PlanApplySession | null): {
       createProjectFile: async (absPath: string) => {
         written.push(absPath);
         return { ok: true, content: "created", path: absPath };
+      },
+      deleteProjectFile: async (absPath: string) => {
+        written.push(`delete:${absPath}`);
+        return { ok: true, content: "", path: absPath };
+      },
+      replaceUndoBatch: async (
+        entries: { path: string; previousContent: string; created: boolean }[],
+      ) => {
+        undoBatches.push(entries.map((e) => ({ ...e })));
+        return { ok: true };
       },
       verify: async () => okVerification(),
     },
@@ -123,10 +137,12 @@ function applyHost(session: PlanApplySession | null): {
       verification: null,
       awaitingApproval: false,
     }),
-    setCanUndo: () => {},
+    setCanUndo: (value: boolean) => {
+      canUndo.value = value;
+    },
     setLastEditedPath: () => {},
   };
-  return { host: host as unknown as ApplyPlanOrchestrationHost, written };
+  return { host: host as unknown as ApplyPlanOrchestrationHost, written, undoBatches, canUndo };
 }
 
 describe("applyApprovedPlanFilesOrchestration accept all", () => {
@@ -166,5 +182,92 @@ describe("applyApprovedPlanFilesOrchestration accept all", () => {
     assert.deepEqual(result.applied, ["src/App.tsx"]);
     assert.equal(harness.written.length, 1);
     assert.match(harness.written[0] ?? "", /src\/App\.tsx$/);
+  });
+});
+
+describe("applyApprovedPlanFilesOrchestration undo batch", () => {
+  it("successful Apply Plan records the complete batch", async () => {
+    const harness = applyHost(
+      pendingSession([
+        readyFile("src/App.tsx"),
+        readyFile("src/components/History.tsx", {
+          action: "create",
+          basisContent: "",
+          proposal: {
+            summary: "history",
+            newContent: "export function History() { return null; }\n",
+            reasoning: "",
+            risks: [],
+          },
+        }),
+      ]),
+    );
+    const result = await applyApprovedPlanFilesOrchestration(harness.host, {
+      pipelineMode: true,
+      approveReadyFiles: true,
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.applied, ["src/App.tsx", "src/components/History.tsx"]);
+    const lastBatch = harness.undoBatches[harness.undoBatches.length - 1];
+    assert.deepEqual(lastBatch, [
+      {
+        path: "/tmp/project/src/App.tsx",
+        previousContent: "export const value = 1;\n",
+        created: false,
+      },
+      {
+        path: "/tmp/project/src/components/History.tsx",
+        previousContent: "",
+        created: true,
+      },
+    ]);
+    assert.equal(harness.canUndo.value, true);
+  });
+
+  it("failed Apply Plan rollback clears pending undo state", async () => {
+    const disk = new Map<string, string>([
+      ["/tmp/project/src/App.tsx", "export const value = 1;\n"],
+      ["/tmp/project/src/broken.ts", "export const value = 1;\n"],
+    ]);
+    const harness = applyHost(
+      pendingSession([
+        readyFile("src/App.tsx"),
+        readyFile("src/broken.ts", {
+          proposal: {
+            summary: "broken",
+            newContent: "export const value = 2;\n",
+            reasoning: "",
+            risks: [],
+          },
+        }),
+      ]),
+    );
+    const api = harness.host.api!;
+    api.readFile = async (absPath: string) => {
+      if (!disk.has(absPath)) {
+        return { readable: false, content: "", language: null, reason: "missing" };
+      }
+      return { readable: true, content: disk.get(absPath)!, language: "typescript" };
+    };
+    harness.host.api!.applyEdit = async (absPath: string, _before: string, after: string) => {
+      if (absPath.endsWith("broken.ts")) {
+        return { ok: false, reason: "disk full" };
+      }
+      disk.set(absPath, after);
+      return { ok: true, content: after, path: absPath };
+    };
+    harness.host.api!.deleteProjectFile = async (absPath: string) => {
+      disk.delete(absPath);
+      return { ok: true, content: "", path: absPath };
+    };
+    const result = await applyApprovedPlanFilesOrchestration(harness.host, {
+      pipelineMode: true,
+      approveReadyFiles: true,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(disk.get("/tmp/project/src/App.tsx"), "export const value = 1;\n");
+    const lastBatch = harness.undoBatches[harness.undoBatches.length - 1];
+    assert.deepEqual(lastBatch, []);
+    assert.equal(harness.canUndo.value, false);
   });
 });

@@ -4,6 +4,8 @@ export interface FollowUpCheckpointFile {
   readonly relPath: string;
   readonly absPath: string;
   readonly content: string;
+  /** Absent on older checkpoints — treat as modify, never infer from empty content. */
+  readonly action?: "create" | "modify";
 }
 
 export interface FollowUpCheckpoint {
@@ -28,18 +30,56 @@ export function createFollowUpCheckpoint(input: {
   };
 }
 
+export function buildUndoBatchFromApprovedFiles(
+  files: readonly {
+    readonly relPath: string;
+    readonly absPath: string;
+    readonly action?: "create" | "modify";
+    readonly basisContent?: string;
+  }[],
+  appliedRelPaths: readonly string[],
+): readonly {
+  readonly path: string;
+  readonly previousContent: string;
+  readonly created: boolean;
+}[] {
+  const applied = new Set(appliedRelPaths);
+  const batch: {
+    path: string;
+    previousContent: string;
+    created: boolean;
+  }[] = [];
+  for (const file of files) {
+    if (!applied.has(file.relPath)) continue;
+    const created = file.action === "create";
+    batch.push({
+      path: file.absPath,
+      previousContent: created ? "" : (file.basisContent ?? ""),
+      created,
+    });
+  }
+  return batch;
+}
+
 export async function restoreFollowUpCheckpoint(
   api: BryantLabsApi,
   checkpoint: FollowUpCheckpoint,
 ): Promise<{ ok: boolean; error?: string }> {
   for (const file of checkpoint.files) {
     try {
+      if (file.action === "create") {
+        const del = await api.deleteProjectFile(file.absPath);
+        if (!del.ok) {
+          return { ok: false, error: `${file.relPath}: ${del.reason ?? "Delete failed"}` };
+        }
+        continue;
+      }
       const current = await api.readFile(file.absPath);
       if ("error" in current && current.error) {
         return { ok: false, error: `${file.relPath}: ${current.error}` };
       }
       const before = "content" in current ? current.content : "";
-      const res = await api.applyEdit(file.absPath, before, file.content);
+      const res = await api.applyEdit(file.absPath, before, file.content, false);
       if (!res.ok) {
         return { ok: false, error: `${file.relPath}: ${res.reason ?? "Restore failed"}` };
       }
@@ -86,7 +126,7 @@ export async function rollbackPartialApply(
           return { ok: false, error: `${relPath}: ${current.error}`, rolledBack };
         }
         const before = "content" in current ? current.content : "";
-        const res = await api.applyEdit(entry.absPath, before, entry.basisContent);
+        const res = await api.applyEdit(entry.absPath, before, entry.basisContent, false);
         if (!res.ok) {
           return {
             ok: false,

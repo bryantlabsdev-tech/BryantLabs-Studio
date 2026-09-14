@@ -135,6 +135,8 @@ export function buildApplyPlanStressHarness(input: {
         return { ok: false, reason: "Create failed." };
       }
     },
+    replaceUndoBatch: async () => ({ ok: true }),
+    deleteProjectFile: async () => ({ ok: true }),
     proposeApplyPlanPatches: async (
       _provider,
       prompt,
