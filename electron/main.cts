@@ -73,12 +73,11 @@ import {
   runGreenfieldGenerate,
   runGreenfieldRawGenerate,
   buildThrownGenerateResult,
-  writeGreenfieldFiles,
+  handleGreenfieldWriteIpc,
   isEmptyDirectory,
   clearDirectoryContents,
   findNextNumberedSiblingFolder,
   FOLDER_NOT_EMPTY_CODE,
-  folderNotEmptyErrorMessage,
   runGreenfieldSetup,
   runGreenfieldTypecheck,
   runGreenfieldBuild,
@@ -1043,31 +1042,13 @@ function registerIpcHandlers(): void {
       const settings = await loadRawSettings();
       const writeMode = settings.fileWriteMode ?? "workspace";
       const scope = typeof generationId === "string" && generationId ? generationId : undefined;
-      if (writeMode === "safe" && !(await isEmptyDirectory(approved))) {
-        const message = folderNotEmptyErrorMessage();
-        console.warn(`[greenfield:write] blocked — ${message} path=${approved}`);
-        return {
-          error: message,
-          code: FOLDER_NOT_EMPTY_CODE,
-        };
-      }
-      const { runInProviderRequestScope, isProviderScopeCancelled } = await import(
-        "./providers/providerRequestRegistry.cjs"
-      );
-      const result = await runInProviderRequestScope(scope, () =>
-        writeGreenfieldFiles(approved, Array.isArray(files) ? files : [], {
-          mode: writeMode,
-          ...(scope ? { generationId: scope } : {}),
-        }),
-      );
-      if (scope && isProviderScopeCancelled(scope)) {
-        return {
-          ok: false as const,
-          written: result.written,
-          errors: result.errors.length > 0 ? result.errors : ["Provider request cancelled by user."],
-          logs: result.logs,
-        };
-      }
+      const result = await handleGreenfieldWriteIpc({
+        approvedRoot: approved,
+        files: Array.isArray(files) ? files : [],
+        ...(scope ? { generationId: scope } : {}),
+        writeMode,
+      });
+      if ("error" in result) return result;
       if (result.ok) {
         await switchProjectRoot(approved);
         return { ok: true, written: result.written, logs: result.logs };
