@@ -29,7 +29,18 @@ export function CommandPalette() {
     greenfieldRun,
   } = useWorkspace();
   const [query, setQuery] = useState("");
+  const [reviewFirst, setReviewFirst] = useState(readFollowUpReviewFirst);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (commandPaletteOpen) setReviewFirst(readFollowUpReviewFirst());
+  }, [commandPaletteOpen]);
+
+  useEffect(() => {
+    const onToggle = () => setReviewFirst(readFollowUpReviewFirst());
+    window.addEventListener("bryantlabs:toggle-review-first", onToggle);
+    return () => window.removeEventListener("bryantlabs:toggle-review-first", onToggle);
+  }, []);
 
   const commands = useMemo((): CommandItem[] => {
     const go = (tool: RailTool, label: string, hint?: string): CommandItem => ({
@@ -70,7 +81,7 @@ export function CommandPalette() {
       },
       {
         id: "review:toggle",
-        label: readFollowUpReviewFirst() ? "Turn off review first" : "Turn on review first",
+        label: reviewFirst ? "Turn off review first" : "Turn on review first",
         hint: "Pause to review diffs before applying",
         section: "daily",
         run: () => {
@@ -133,6 +144,7 @@ export function CommandPalette() {
     runVerification,
     triggerGreenfieldRepair,
     greenfieldRun.setupStatus,
+    reviewFirst,
   ]);
 
   const filtered = useMemo(() => {

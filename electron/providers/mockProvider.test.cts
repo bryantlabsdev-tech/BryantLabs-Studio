@@ -42,6 +42,27 @@ describe("mock provider", () => {
     assert.match(result.files?.["src/App.tsx"] ?? "", /mock: gameplay upgrade/);
   });
 
+  it("mockApplyPlanBatchPatch creates a valid History component", () => {
+    const result = mockApplyPlanBatchPatch(
+      "anthropic",
+      "Add calculation history. Create a separate History component.",
+      [
+        { path: "src/App.tsx", content: "export function App() { return null; }\n" },
+        { path: "src/components/History.tsx", content: "" },
+      ],
+      {
+        planSummary: "History",
+        targetPaths: ["src/App.tsx", "src/components/History.tsx"],
+        slimContext: false,
+        directRewrite: false,
+        repair: false,
+      },
+    );
+    assert.equal(result.ok, true);
+    assert.match(result.files?.["src/App.tsx"] ?? "", /MOCK_CALC_HISTORY/);
+    assert.match(result.files?.["src/components/History.tsx"] ?? "", /export function History/);
+  });
+
   it("mockGreenfieldGenerate returns seven scaffold files", () => {
     const result = mockGreenfieldGenerate("anthropic", "Build a calculator");
     assert.equal(result.ok, true);

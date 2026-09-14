@@ -209,6 +209,11 @@ function patchAppTsx(content: string, promptLower: string): string {
       `${marker}\nexport function App()`,
     );
   }
+  if (promptLower.includes("history")) {
+    const marker = "// mock: calculator history";
+    if (content.includes(marker)) return content;
+    return `${content.trimEnd()}\n${marker}\nexport const MOCK_CALC_HISTORY = true;\n`;
+  }
   if (promptLower.includes("blue") || promptLower.includes("dark mode") || promptLower.includes("visually")) {
     if (content.includes('className="blue-theme"') || content.includes("dark-mode-toggle")) {
       return `${content.trimEnd()}\nexport const MOCK_THEME_BUMP = true;\n`;
@@ -236,6 +241,12 @@ function patchFileContent(
   const norm = normalizeApplyPlanPath(relPath);
   if (norm === "src/App.tsx") return patchAppTsx(content, promptLower);
   if (norm === "src/index.css") return patchIndexCss(content, promptLower);
+  if (norm === "src/components/History.tsx") {
+    return `export function History() {
+  return <section aria-label="calculation history">History</section>;
+}
+`;
+  }
   return `${content.trimEnd()}\n/* mock patch */\n`;
 }
 

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { PipelineSession } from "@/core/pipeline/types";
 import {
-  AUTO_APPLY_FOLLOW_UP_PATCHES,
-  readFollowUpReviewFirst,
+  resolveFollowUpAutoContinue,
+  shouldAutoPromoteFollowUpReview,
 } from "@/core/build/followUpPrefs";
 import type { BuildLoopMode, BuildLoopStatus } from "@/core/build";
 import { PipelineReviewGates } from "@/app/orchestration/pipelineGates";
@@ -17,7 +17,7 @@ import {
 } from "@/app/orchestration/pipelineRunner";
 import type { AIPlanStatus, BuildPipelineHost } from "@/app/orchestration/types";
 import type { AutoFixSession } from "@/core/autoFix";
-import { hasReviewablePlanApplyFiles, type PlanApplySession } from "@/core/planApply";
+import type { PlanApplySession } from "@/core/planApply";
 
 export interface BuildPhaseInputs {
   readonly aiPlanStatus: AIPlanStatus;
@@ -159,17 +159,9 @@ export function useBuildPipelineOrchestration(
 
   const autoAppliedReviewRunIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!AUTO_APPLY_FOLLOW_UP_PATCHES) return;
     const session = phaseInputs.planApplySession;
+    if (!shouldAutoPromoteFollowUpReview(session)) return;
     if (!session) return;
-    if (session.phase !== "waiting_for_review" && session.phase !== "review") return;
-    if (!hasReviewablePlanApplyFiles(session)) return;
-    if (
-      session.files.length > 0 &&
-      session.files.every((file) => file.selectionReason === "e2e")
-    ) {
-      return;
-    }
     if (autoAppliedReviewRunIdRef.current === session.applyRunId) return;
     autoAppliedReviewRunIdRef.current = session.applyRunId;
     void continueBuildAfterReview();
@@ -195,7 +187,7 @@ export function useBuildPipelineOrchestration(
   const retryApplyPlanReview = useCallback(async () => {
     const host = hostRef.current;
     if (!host?.executeApplyPlan) return;
-    const reviewFirst = readFollowUpReviewFirst();
+    const prompt = host.planApplySession?.prompt ?? host.lastPlanPrompt ?? "";
     setBuildRunning(true);
     setBuildError(null);
     host.cancelApplyPlan();
@@ -203,7 +195,8 @@ export function useBuildPipelineOrchestration(
     try {
       const result = await host.executeApplyPlan({
         directRewrite: false,
-        autoContinue: !reviewFirst,
+        autoContinue: resolveFollowUpAutoContinue(prompt),
+        ...(prompt ? { prompt } : {}),
       });
       waitingForReview = Boolean(result.waitingForReview);
       if (waitingForReview) {

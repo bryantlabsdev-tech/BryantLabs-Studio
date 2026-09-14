@@ -71,6 +71,11 @@ export function mockApplyPlanBatchPatch(
       out[path] = patchAppTsx(file.content, promptLower);
     } else if (path === "src/index.css") {
       out[path] = patchIndexCss(file.content, promptLower);
+    } else if (path === "src/components/History.tsx" || path.endsWith("/History.tsx")) {
+      out[path] = `export function History() {
+  return <section aria-label="calculation history">History</section>;
+}
+`;
     } else if (path.endsWith(".tsx") || path.endsWith(".ts")) {
       out[path] = patchPageTsx(file.content);
     } else {
