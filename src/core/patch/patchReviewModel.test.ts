@@ -91,6 +91,9 @@ describe("patchReviewModel", () => {
     assert.equal(review.canAcceptAll, true);
     assert.equal(review.canApplyApproved, false);
 
+    const applying = derivePlanApplyReviewState({ ...session, phase: "applying" });
+    assert.equal(applying?.canAcceptAll, false);
+
     const groups = groupPlanApplyFiles(changed);
     assert.equal(groups.length, 2);
     assert.equal(groups[0]?.label, "New files");

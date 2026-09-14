@@ -40,9 +40,11 @@ import { formatApplyPlanSuccessLatestAction } from "@/core/orchestration/applyPl
 import {
   computePlanApplyTotals,
   evaluateIncompleteCoordinatedApply,
+  resolvePlanApplySessionForApply,
   settleIncompleteCoordinatedApply,
   validateProposalQuality,
   validateCreateProposalQuality,
+  type PlanApplySession,
 } from "@/core/planApply";
 import { freezePlanApplyFileDiffs } from "@/core/agent/runFileDiffs";
 import { previewDiagnosticsToFailureInfo } from "@/core/preview/diagnostics";
@@ -55,6 +57,9 @@ import type { BryantLabsApi, ProjectInfo, VerificationResult } from "@/types";
 
 export interface ApplyApprovedPlanOptions {
   readonly pipelineMode?: boolean;
+  readonly session?: PlanApplySession;
+  readonly approveReadyFiles?: boolean;
+  readonly approveRelPaths?: readonly string[];
 }
 
 export interface ApplyApprovedPlanResult {
@@ -74,14 +79,16 @@ export async function applyApprovedPlanFilesOrchestration(
   host: ApplyPlanOrchestrationHost | null,
   opts?: ApplyApprovedPlanOptions,
 ): Promise<ApplyApprovedPlanResult> {
-  if (!host?.api || !host.planApplySession || !host.project) {
+  const sourceSession = opts?.session ?? host?.planApplySession ?? null;
+  if (!host?.api || !sourceSession || !host.project) {
     return { ok: false, verification: null, applied: [], error: "No apply session" };
   }
 
   const resolved = host as ResolvedApplyHost;
   const pipelineMode = opts?.pipelineMode ?? false;
   const api = resolved.api;
-  const planApplySession = resolved.planApplySession;
+  const planApplySession = resolvePlanApplySessionForApply(sourceSession, opts);
+  resolved.setPlanApplySession(planApplySession);
   const project = resolved.project;
 
   const runId = planApplySession.applyRunId ?? resolved.beginApplyPlanRun();
