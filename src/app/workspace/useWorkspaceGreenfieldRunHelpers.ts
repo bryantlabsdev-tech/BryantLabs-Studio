@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { bindRunTimelinePersistence } from "@/core/agent/runTimeline";
 import {
   appendGreenfieldRunEntry,
+  applyGreenfieldRunUpdate,
   type GreenfieldRunSnapshot,
 } from "@/core/greenfield/runState";
 import type {
@@ -23,8 +24,10 @@ import {
 import { emitGreenfieldConsoleEvent } from "@/core/console/greenfieldConsoleEvents";
 import type { CenterTab } from "@/core/layout/types";
 import type { OrchestrationHostRefs } from "@/app/workspace/useOrchestrationHostRefs";
+import type { BryantLabsApi } from "@/types";
 
 export function useWorkspaceGreenfieldRunHelpers(input: {
+  readonly api: BryantLabsApi | null | undefined;
   readonly projectPath: string | undefined;
   readonly agentGreenfieldPanelActive: boolean;
   readonly greenfieldRun: GreenfieldRunSnapshot;
@@ -163,6 +166,11 @@ export function useWorkspaceGreenfieldRunHelpers(input: {
   );
 
   const cancelGreenfieldRun = useCallback(() => {
+    const scope = runRef.current.generationId ?? undefined;
+    void input.api?.cancelActiveProviderRequests?.(scope);
+    if (scope) {
+      void input.api?.discardShadowRun?.(scope).catch(() => undefined);
+    }
     input.greenfieldRunControlRef.current?.cancel();
     input.setGreenfieldRun((prev) => {
       emitGreenfieldConsoleEvent("greenfield:cancelled", {
@@ -170,11 +178,12 @@ export function useWorkspaceGreenfieldRunHelpers(input: {
         provider: prev.provider,
         model: prev.model,
       });
-      return { ...prev, ...cancelGreenfieldRunPatch(prev) };
+      return applyGreenfieldRunUpdate(prev, cancelGreenfieldRunPatch(prev));
     });
     input.setAgentGreenfieldPanelActive(false);
     input.recordAgentActivityMessage("Run cancelled. You can try again.");
   }, [
+    input.api,
     input.greenfieldRunControlRef,
     input.setGreenfieldRun,
     input.setAgentGreenfieldPanelActive,

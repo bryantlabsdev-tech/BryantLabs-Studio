@@ -15,6 +15,15 @@ import {
   resolveSpawnCwdSync,
   spawnProcessEnv,
 } from "../processSpawn.cjs";
+import {
+  beginProviderRequest,
+  currentProviderRequestScope,
+  endProviderRequest,
+  isCurrentProviderScopeCancelled,
+  isProviderScopeCancelled,
+  PROVIDER_USER_CANCEL_MESSAGE,
+} from "../providers/providerRequestRegistry.cjs";
+import { collectProcessTree, terminateTrackedPids } from "../processTree.cjs";
 
 /**
  * Post-generation setup (Phase 10): npm install, then typecheck + build.
@@ -118,14 +127,37 @@ export function runGreenfieldCommand(
       windowsHide: true,
     });
 
+    const requestId = `greenfield-cmd-${child.pid ?? Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const abortChild = () => {
+      const pid = child.pid;
+      if (pid != null && Number.isInteger(pid) && pid > 1) {
+        void terminateTrackedPids(collectProcessTree(pid));
+      }
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // already exited
+      }
+    };
+    beginProviderRequest({
+      id: requestId,
+      kind: "child_process",
+      attempt: 1,
+      abort: abortChild,
+    });
+    if (isCurrentProviderScopeCancelled()) {
+      abortChild();
+    }
+
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      abortChild();
     }, timeoutMs);
 
     const finish = (exitCode: number | null) => {
       if (settled) return;
       settled = true;
+      endProviderRequest(requestId);
       clearTimeout(timer);
       const combined = `${stdout}\n${stderr}`;
       resolve({
@@ -154,7 +186,28 @@ export function runGreenfieldCommand(
 
 export async function runGreenfieldSetup(
   root: string,
+  opts?: { generationId?: string },
 ): Promise<GreenfieldSetupResult> {
+  const generationId = opts?.generationId ?? currentProviderRequestScope();
+  if (generationId && isProviderScopeCancelled(generationId)) {
+    const install: CommandResult = {
+      command: resolveShellCommand("npm install"),
+      ok: false,
+      exitCode: null,
+      stdout: "",
+      stderr: PROVIDER_USER_CANCEL_MESSAGE,
+      durationMs: 0,
+      errorCount: 0,
+      warningCount: 0,
+      timedOut: false,
+      truncated: false,
+    };
+    return {
+      ok: false,
+      install,
+      error: PROVIDER_USER_CANCEL_MESSAGE,
+    };
+  }
   const { cwd, exists } = resolveSpawnCwdSync(root);
   if (!exists) {
     const diagnostics = buildSpawnDiagnostics({
@@ -220,6 +273,16 @@ export async function runGreenfieldSetup(
     };
   }
 
+  if (generationId && isProviderScopeCancelled(generationId)) {
+    return {
+      ok: false,
+      install,
+      error: PROVIDER_USER_CANCEL_MESSAGE,
+      ...(dependencyRepairs.length > 0 ? { dependencyRepairs } : {}),
+      ...(installRetried ? { installRetried: true } : {}),
+    };
+  }
+
   const typecheck = await runGreenfieldTypecheck(cwd);
   if (!typecheck.ok) {
     const typecheckDetails = buildTypeScriptCheckDetails(typecheck);
@@ -234,6 +297,17 @@ export async function runGreenfieldSetup(
         n > 0
           ? `TypeScript check failed (${n} error${n === 1 ? "" : "s"}).`
           : "TypeScript check failed.",
+      ...(dependencyRepairs.length > 0 ? { dependencyRepairs } : {}),
+      ...(installRetried ? { installRetried: true } : {}),
+    };
+  }
+
+  if (generationId && isProviderScopeCancelled(generationId)) {
+    return {
+      ok: false,
+      install,
+      typecheck,
+      error: PROVIDER_USER_CANCEL_MESSAGE,
       ...(dependencyRepairs.length > 0 ? { dependencyRepairs } : {}),
       ...(installRetried ? { installRetried: true } : {}),
     };

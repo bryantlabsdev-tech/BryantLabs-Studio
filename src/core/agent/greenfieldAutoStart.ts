@@ -6,7 +6,7 @@ export function shouldAutoStartEmbeddedGreenfield(input: {
   readonly embedded: boolean;
   readonly autoStartGeneration: boolean;
   readonly alreadyStarted: boolean;
-  readonly genStatus: "idle" | "running" | "done" | "error";
+  readonly genStatus: "idle" | "running" | "done" | "error" | "cancelled";
   readonly generateLocked: boolean;
   readonly promptLength: number;
   readonly folderPresent: boolean;
@@ -18,7 +18,7 @@ export function shouldAutoStartEmbeddedGreenfield(input: {
   if (input.alreadyStarted || input.generateLocked) return false;
   if (input.followUpAccepted) return false;
   if (input.genStatus === "running" || input.genStatus === "done") return false;
-  if (input.genStatus === "error") return false;
+  if (input.genStatus === "error" || input.genStatus === "cancelled") return false;
   if (!input.greenfieldRecovery && input.runResult === "success") return false;
   if (!input.folderPresent || input.promptLength < 4) return false;
   return true;
@@ -27,7 +27,7 @@ export function shouldAutoStartEmbeddedGreenfield(input: {
 /** Do not reset the auto-start latch after generate has begun or finished. */
 export function shouldResetGreenfieldAutoStartLatch(input: {
   readonly alreadyStarted: boolean;
-  readonly genStatus: "idle" | "running" | "done" | "error";
+  readonly genStatus: "idle" | "running" | "done" | "error" | "cancelled";
   readonly runResult?: string | null;
 }): boolean {
   if (input.alreadyStarted) return false;

@@ -416,7 +416,12 @@ export function AgentComposer({
             ) : null}
             {active || awaitingReview || greenfieldActive ? (
               onCancel ? (
-                <button type="button" className="agent-composer__secondary" onClick={onCancel}>
+                <button
+                  type="button"
+                  className="agent-composer__secondary"
+                  data-testid="agent-cancel"
+                  onClick={onCancel}
+                >
                   {greenfieldActive ? "Cancel run" : "Cancel"}
                 </button>
               ) : null

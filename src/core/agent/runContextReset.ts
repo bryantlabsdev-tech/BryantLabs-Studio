@@ -23,7 +23,7 @@ export interface StaleRunContextInput {
   readonly mutex: AgentRunMutexInput;
 }
 
-/** True when the workspace is idle after a successful terminal run — safe for the next prompt. */
+/** True when the workspace is idle after a terminal run that is safe to follow with a new prompt. */
 export function isSuccessfulTerminalIdleContext(
   input: StaleRunContextInput,
 ): boolean {
@@ -38,7 +38,13 @@ export function isSuccessfulTerminalIdleContext(
   if (input.followUpEscalation != null) return false;
   if (input.greenfieldRun.failureReport != null) return false;
 
-  return input.greenfieldRun.runResult === "success";
+  const result = input.greenfieldRun.runResult;
+  return (
+    result === "success" ||
+    result === "cancelled" ||
+    result === "aborted" ||
+    result === "interrupted"
+  );
 }
 
 /** Leftover workspace state that could conflict with a new run (failed/abandoned/incomplete). */

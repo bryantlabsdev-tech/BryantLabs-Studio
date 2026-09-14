@@ -719,11 +719,12 @@ function registerIpcHandlers(): void {
     async (_event, provider: ProviderId) => checkHealth(provider),
   );
 
-  ipcMain.handle("providers:cancelActive", async () => {
+  ipcMain.handle("providers:cancelActive", async (_event, scope?: unknown) => {
     const { cancelActiveProviderRequests } = await import(
       "./providers/providerRequestRegistry.cjs"
     );
-    return { cancelled: cancelActiveProviderRequests("user_cancel") };
+    const scoped = typeof scope === "string" && scope.length > 0 ? scope : undefined;
+    return { cancelled: cancelActiveProviderRequests("user_cancel", scoped) };
   });
 
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -935,7 +936,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(
     "greenfield:generate",
-    async (_event, provider: ProviderId, prompt: string) => {
+    async (_event, provider: ProviderId, prompt: string, generationId?: unknown) => {
       const id =
         provider === "gemini" ||
         provider === "ollama" ||
@@ -944,10 +945,13 @@ function registerIpcHandlers(): void {
         provider === "openrouter"
           ? provider
           : "ollama";
+      const { runInProviderRequestScope } = await import(
+        "./providers/providerRequestRegistry.cjs"
+      );
+      const scope = typeof generationId === "string" && generationId ? generationId : undefined;
       try {
-        return await runGreenfieldGenerate(
-          id,
-          typeof prompt === "string" ? prompt : "",
+        return await runInProviderRequestScope(scope, () =>
+          runGreenfieldGenerate(id, typeof prompt === "string" ? prompt : ""),
         );
       } catch (err) {
         console.error(
@@ -961,7 +965,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(
     "greenfield:generate-raw",
-    async (_event, provider: ProviderId, prompt: string) => {
+    async (_event, provider: ProviderId, prompt: string, generationId?: unknown) => {
       const id =
         provider === "gemini" ||
         provider === "ollama" ||
@@ -970,10 +974,13 @@ function registerIpcHandlers(): void {
         provider === "openrouter"
           ? provider
           : "ollama";
+      const { runInProviderRequestScope } = await import(
+        "./providers/providerRequestRegistry.cjs"
+      );
+      const scope = typeof generationId === "string" && generationId ? generationId : undefined;
       try {
-        return await runGreenfieldRawGenerate(
-          id,
-          typeof prompt === "string" ? prompt : "",
+        return await runInProviderRequestScope(scope, () =>
+          runGreenfieldRawGenerate(id, typeof prompt === "string" ? prompt : ""),
         );
       } catch (err) {
         console.error(
@@ -991,6 +998,7 @@ function registerIpcHandlers(): void {
       _event,
       root: string,
       files: GeneratedFile[],
+      generationId?: unknown,
     ): Promise<
       | { ok: true; written: string[]; logs: import("./greenfield/write.cjs").WriteFileLogEntry[] }
       | {
@@ -1006,6 +1014,7 @@ function registerIpcHandlers(): void {
       if (typeof approved !== "string") return approved;
       const settings = await loadRawSettings();
       const writeMode = settings.fileWriteMode ?? "workspace";
+      const scope = typeof generationId === "string" && generationId ? generationId : undefined;
       if (writeMode === "safe" && !(await isEmptyDirectory(approved))) {
         const message = folderNotEmptyErrorMessage();
         console.warn(`[greenfield:write] blocked — ${message} path=${approved}`);
@@ -1014,11 +1023,23 @@ function registerIpcHandlers(): void {
           code: FOLDER_NOT_EMPTY_CODE,
         };
       }
-      const result = await writeGreenfieldFiles(
-        approved,
-        Array.isArray(files) ? files : [],
-        { mode: writeMode },
+      const { runInProviderRequestScope, isProviderScopeCancelled } = await import(
+        "./providers/providerRequestRegistry.cjs"
       );
+      const result = await runInProviderRequestScope(scope, () =>
+        writeGreenfieldFiles(approved, Array.isArray(files) ? files : [], {
+          mode: writeMode,
+          ...(scope ? { generationId: scope } : {}),
+        }),
+      );
+      if (scope && isProviderScopeCancelled(scope)) {
+        return {
+          ok: false as const,
+          written: result.written,
+          errors: result.errors.length > 0 ? result.errors : ["Provider request cancelled by user."],
+          logs: result.logs,
+        };
+      }
       if (result.ok) {
         await switchProjectRoot(approved);
         return { ok: true, written: result.written, logs: result.logs };
@@ -1064,10 +1085,16 @@ function registerIpcHandlers(): void {
     return { ok: true as const };
   });
 
-  ipcMain.handle("greenfield:setup", async (_event, root: string) => {
+  ipcMain.handle("greenfield:setup", async (_event, root: string, generationId?: unknown) => {
     const approved = rejectUnapprovedRoot(root);
     if (typeof approved !== "string") return approved;
-    return runGreenfieldSetup(approved);
+    const { runInProviderRequestScope } = await import(
+      "./providers/providerRequestRegistry.cjs"
+    );
+    const scope = typeof generationId === "string" && generationId ? generationId : undefined;
+    return runInProviderRequestScope(scope, () =>
+      runGreenfieldSetup(approved, scope ? { generationId: scope } : undefined),
+    );
   });
 
   ipcMain.handle("greenfield:typecheck", async (_event, root: string) => {
@@ -1091,10 +1118,13 @@ function registerIpcHandlers(): void {
     return { build: await runGreenfieldBuild(approved) };
   });
 
-  ipcMain.handle("greenfield:previewStart", async (_event, root: string) => {
+  ipcMain.handle(
+    "greenfield:previewStart",
+    async (_event, root: string, generationId?: unknown) => {
     const approved = rejectUnapprovedRoot(root);
     if (typeof approved !== "string") return { ok: false, error: approved.error };
-    return startPreview(approved);
+    const scope = typeof generationId === "string" && generationId ? generationId : undefined;
+    return startPreview(approved, scope ? { generationId: scope } : undefined);
   });
 
   ipcMain.handle("greenfield:previewStop", async () => {

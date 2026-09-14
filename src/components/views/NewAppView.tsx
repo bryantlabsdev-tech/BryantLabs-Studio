@@ -61,6 +61,10 @@ import {
   type GreenfieldDebugReport,
 } from "@/core/greenfield/debug";
 import { runGreenfieldGenerateWithReliability } from "@/core/greenfield/generatePipeline";
+import {
+  createGreenfieldGenerationId,
+  isUserCancelledGreenfieldFailure,
+} from "@/core/greenfield/generationGuard";
 import { emitGreenfieldConsoleEvent } from "@/core/console/greenfieldConsoleEvents";
 import { beginRunTimeline, recordRunTimelineStage } from "@/core/agent/runTimeline";
 import { logPromptSubmission } from "@/core/agent/promptSubmission";
@@ -164,7 +168,7 @@ export function NewAppView({
   const [settings, setSettings] = useState<ProviderSettings | null>(null);
   const [prompt, setPrompt] = useState(initialPrompt?.trim() || "Build a calculator app");
   const [genResult, setGenResult] = useState<GreenfieldGenerateResult | null>(null);
-  const [genStatus, setGenStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [genStatus, setGenStatus] = useState<"idle" | "running" | "done" | "error" | "cancelled">("idle");
   const [approved, setApproved] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string>(GREENFIELD_FILE_PATHS[0]);
   const [writeStatus, setWriteStatus] = useState<
@@ -191,6 +195,8 @@ export function NewAppView({
   const recoveryStartedRef = useRef(false);
   const lastGreenfieldActivityRef = useRef<string | null>(null);
   const cancelledRef = useRef(false);
+  const generationIdRef = useRef<string | null>(null);
+  const cancelledGenerationIdsRef = useRef(new Set<string>());
   const [repairing, setRepairing] = useState(false);
   const runGreenfieldRepairRef = useRef<(() => Promise<void>) | null>(null);
 
@@ -199,7 +205,10 @@ export function NewAppView({
     registerGreenfieldRunControl({
       cancel: () => {
         cancelledRef.current = true;
-        setGenStatus("idle");
+        if (generationIdRef.current) {
+          cancelledGenerationIdsRef.current.add(generationIdRef.current);
+        }
+        setGenStatus((prev) => (prev === "running" ? "cancelled" : prev));
         setWriteStatus("idle");
         setSetupStatus("idle");
         setRepairing(false);
@@ -600,7 +609,19 @@ export function NewAppView({
     generateLockRef.current = true;
     autoStartedRef.current = true;
     incrementGenerateInvocations();
+    const runId = createGreenfieldGenerationId();
+    generationIdRef.current = runId;
     cancelledRef.current = false;
+    const isThisRun = () =>
+      generationIdRef.current === runId && !cancelledGenerationIdsRef.current.has(runId);
+    const updateThisRun = (patch: Parameters<typeof updateGreenfieldRun>[0]) => {
+      if (!isThisRun()) return;
+      if (typeof patch === "function") {
+        updateGreenfieldRun((prev) => ({ ...patch(prev), generationId: runId }));
+        return;
+      }
+      updateGreenfieldRun({ ...patch, generationId: runId });
+    };
     const requestStartedAt = new Date().toISOString();
     const requestStartMs = Date.now();
     const projectPath = folder.path;
@@ -625,7 +646,7 @@ export function NewAppView({
         `Generating app from ${prompt.trim().length.toLocaleString()}-character prompt…`,
       );
     }
-    updateGreenfieldRun({
+    updateThisRun({
       actionType: "greenfield",
       provider,
       model: activeModel,
@@ -659,12 +680,15 @@ export function NewAppView({
         provider,
         model: activeModel,
       });
-      if (cancelledRef.current) return;
+      if (cancelledRef.current || !isThisRun()) return;
       const res = settings
         ? await runGreenfieldGenerateWithReliability(
             {
               api,
               settings,
+              generationId: runId,
+              isCancelled: () =>
+                cancelledRef.current || cancelledGenerationIdsRef.current.has(runId),
               invokeGreenfieldCall,
               invokeGreenfieldRawCall: (s, tokens, call, promptPayload, recordPurpose) =>
                 invokeGreenfieldRawCall(s, tokens, call, promptPayload, recordPurpose),
@@ -698,8 +722,14 @@ export function NewAppView({
             },
             prompt,
           )
-        : await api.greenfieldGenerate(provider, prompt);
-      if (cancelledRef.current) return;
+        : await api.greenfieldGenerate(provider, prompt, runId);
+      if (!isThisRun() || cancelledRef.current || isUserCancelledGreenfieldFailure(res)) {
+        if (isThisRun()) {
+          setGenStatus("cancelled");
+          setGenResult(null);
+        }
+        return;
+      }
       const elapsedMs = Date.now() - requestStartMs;
       setGenResult(res);
       appendGreenfieldRunLog(
@@ -740,7 +770,7 @@ export function NewAppView({
         if (res.markerAudit) debugExtras.markerAudit = res.markerAudit;
         if (res.parseTrace) debugExtras.parseTrace = res.parseTrace;
         const dbg = mergeGenerateDebug(res.debug, requestStartedAt, elapsedMs, msg, debugExtras);
-        updateGreenfieldRun({
+        updateThisRun({
           genStatus: "error",
           runResult: "failed",
           debug: dbg,
@@ -816,7 +846,7 @@ export function NewAppView({
           model: activeModel,
           details: greenfieldReviewFilePathList(res).join(", "),
         });
-        updateGreenfieldRun({
+        updateThisRun({
           generatedFiles: greenfieldReviewFiles(res),
           genStatus: "done",
           generationMetrics: res.metrics ?? null,
@@ -859,7 +889,7 @@ export function NewAppView({
             ],
           },
         );
-        updateGreenfieldRun({
+        updateThisRun({
           genStatus: "error",
           runResult: "failed",
           generatedFiles: greenfieldReviewFiles(res),
@@ -876,10 +906,15 @@ export function NewAppView({
         setCenterTab("summary");
       }
     } catch (err) {
+      if (!isThisRun() || cancelledRef.current) return;
       const elapsedMs = Date.now() - requestStartMs;
       const msg = redactSecrets(
         err instanceof Error ? err.message : "IPC invoke failed for greenfield:generate.",
       );
+      if (isUserCancelledGreenfieldFailure({ ok: false, error: msg })) {
+        setGenStatus("cancelled");
+        return;
+      }
       const stack =
         err instanceof Error && err.stack ? redactSecrets(err.stack) : undefined;
       setGenResult({
@@ -901,7 +936,7 @@ export function NewAppView({
       const dbg = mergeGenerateDebug(undefined, requestStartedAt, elapsedMs, msg, ipcExtras);
       appendGreenfieldRunLog("provider_response", "failed", "Provider response failed", msg);
       appendGreenfieldRunLog("parser", "failed", "Parser skipped (IPC error)", msg);
-      updateGreenfieldRun({
+      updateThisRun({
         genStatus: "error",
         runResult: "failed",
         debug: dbg,
@@ -978,6 +1013,21 @@ export function NewAppView({
         opts?.setupOnly ? "setup-only" : "write-setup",
       ),
       async () => {
+    const runId = generationIdRef.current;
+    const isThisRun = () =>
+      Boolean(runId) &&
+      generationIdRef.current === runId &&
+      !cancelledGenerationIdsRef.current.has(runId!);
+    const updateThisRun = (patch: Parameters<typeof updateGreenfieldRun>[0]) => {
+      if (!isThisRun() || !runId) return;
+      if (typeof patch === "function") {
+        updateGreenfieldRun((prev) => ({ ...patch(prev), generationId: runId }));
+        return;
+      }
+      updateGreenfieldRun({ ...patch, generationId: runId });
+    };
+    if (!runId || cancelledRef.current || cancelledGenerationIdsRef.current.has(runId)) return;
+
     let writtenFilesForSetup: readonly string[] = [];
 
     if (opts?.setupOnly) {
@@ -988,7 +1038,7 @@ export function NewAppView({
       setSetupResult(null);
       setFinalMessage(null);
       setFolder(writeTarget);
-      updateGreenfieldRun({
+      updateThisRun({
         writeStatus: "done",
         ...(greenfieldRun.runResult !== "success" ? { runResult: "running" as const } : {}),
       });
@@ -1008,7 +1058,7 @@ export function NewAppView({
     setSetupResult(null);
     setFinalMessage(null);
 
-    updateGreenfieldRun({
+    updateThisRun({
       writeStatus: "writing",
       latestAction: createLatestAction("running", "Write started", {
         stage: "write",
@@ -1031,12 +1081,13 @@ export function NewAppView({
       model: greenfieldRun.model,
       details: writeTarget.path,
     });
-    if (cancelledRef.current) return;
+    if (cancelledRef.current || !isThisRun()) return;
     const writeRes = await api.greenfieldWrite(
       writeTarget.path,
       files as GeneratedFile[],
+      runId,
     );
-    if (cancelledRef.current) return;
+    if (cancelledRef.current || !isThisRun()) return;
     const logPerFileWrites = (
       logs: import("@/core/greenfield/writeLog").WriteFileLogEntry[] | undefined,
     ) => {
@@ -1070,7 +1121,7 @@ export function NewAppView({
         isFolderNotEmptyWriteError(writeRes) &&
         (settings?.fileWriteMode ?? "workspace") === "safe"
       ) {
-        updateGreenfieldRun({
+        updateThisRun({
           writeStatus: "blocked",
           writeError: writeRes.error,
           generatedFiles: files as GeneratedFile[],
@@ -1092,7 +1143,7 @@ export function NewAppView({
         setWriteError(folderNotEmptyUserMessage());
         return;
       }
-      updateGreenfieldRun({
+      updateThisRun({
         writeStatus: "error",
         writeError: writeRes.error,
         latestAction: createLatestAction(
@@ -1118,7 +1169,7 @@ export function NewAppView({
         details: errText,
         error: errText,
       });
-      updateGreenfieldRun({
+      updateThisRun({
         writeStatus: "error",
         writeError: errText,
         latestAction: createLatestAction(
@@ -1147,7 +1198,7 @@ export function NewAppView({
       message: `Write succeeded (${writeRes.written.length} files)`,
       details: writeRes.written.join(", "),
     });
-    updateGreenfieldRun({
+    updateThisRun({
       writeStatus: "done",
       filesWritten: writeRes.written,
       writeError: null,
@@ -1176,7 +1227,7 @@ export function NewAppView({
     }
 
     setSetupStatus("running");
-    updateGreenfieldRun({
+    updateThisRun({
       setupStatus: "running",
       latestAction: createLatestAction("running", "npm install started", {
         stage: "npm_install",
@@ -1191,9 +1242,9 @@ export function NewAppView({
       provider: greenfieldRun.provider,
       model: greenfieldRun.model,
     });
-    if (cancelledRef.current) return;
-    const setup = await api.greenfieldSetup(writeTarget.path);
-    if (cancelledRef.current) return;
+    if (cancelledRef.current || !isThisRun()) return;
+    const setup = await api.greenfieldSetup(writeTarget.path, runId);
+    if (cancelledRef.current || !isThisRun()) return;
     if (isGreenfieldSetupTransportError(setup)) {
       appendGreenfieldRunLog("npm_install", "failed", setup.error);
       emitGreenfieldConsoleEvent("npm:fail", {
@@ -1202,7 +1253,7 @@ export function NewAppView({
         model: greenfieldRun.model,
         details: setup.error,
       });
-      updateGreenfieldRun({
+      updateThisRun({
         setupStatus: "error",
         runResult: "failed",
         finalMessage: setup.error,
@@ -1216,7 +1267,7 @@ export function NewAppView({
       return;
     }
     setSetupResult(setup);
-    updateGreenfieldRun({ setupResult: setup });
+    updateThisRun({ setupResult: setup });
 
     if (setup.dependencyRepairs?.length) {
       for (const repair of setup.dependencyRepairs) {
@@ -1345,7 +1396,7 @@ export function NewAppView({
       }
 
       const failReport = buildGreenfieldSetupFailureReport(setup);
-      updateGreenfieldRun({
+      updateThisRun({
         setupStatus: "error",
         runResult: "failed",
         failureReport: failReport,
@@ -1363,7 +1414,7 @@ export function NewAppView({
     }
 
     setSetupStatus("done");
-    updateGreenfieldRun({
+    updateThisRun({
       setupStatus: "done",
       latestAction: createLatestAction("success", "Build finished", { stage: "build" }),
     });
@@ -1379,9 +1430,9 @@ export function NewAppView({
       provider: greenfieldRun.provider,
       model: greenfieldRun.model,
     });
-    if (cancelledRef.current) return;
-    const preview = await api.greenfieldPreviewStart(writeTarget.path);
-    if (cancelledRef.current) return;
+    if (cancelledRef.current || !isThisRun()) return;
+    const preview = await api.greenfieldPreviewStart(writeTarget.path, runId);
+    if (cancelledRef.current || !isThisRun()) return;
     if (preview.ok && preview.url) {
       appendGreenfieldRunLog("preview", "success", "Preview started", preview.url);
       emitGreenfieldConsoleEvent("preview:success", {
@@ -1455,7 +1506,7 @@ export function NewAppView({
         return;
       }
 
-      updateGreenfieldRun({
+      updateThisRun({
         runResult: "success",
         failureReport: null,
         lastSuccessfulRunAt: Date.now(),
@@ -1501,7 +1552,7 @@ export function NewAppView({
             port: 4173,
             crashed: false,
           });
-      updateGreenfieldRun({
+      updateThisRun({
         runResult: "failed",
         failureReport: previewReport,
         finalMessage: previewReport.rootCauseLine,
@@ -1519,6 +1570,7 @@ export function NewAppView({
 
   useEffect(() => {
     if (!agentStreamlined || !files) return;
+    if (cancelledRef.current) return;
     if (genStatus !== "done" || alreadyWritten) return;
     const decision = resolveGreenfieldAutoWriteDecision(files, prompt, {
       ...(genResult?.generationMode ? { generationMode: genResult.generationMode } : {}),

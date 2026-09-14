@@ -1411,6 +1411,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     cancelGreenfieldRun,
     triggerGreenfieldRepair,
   } = useWorkspaceGreenfieldRunHelpers({
+    api,
     projectPath: project?.path,
     agentGreenfieldPanelActive,
     greenfieldRun,

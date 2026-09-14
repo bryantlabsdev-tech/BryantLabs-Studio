@@ -5,6 +5,18 @@ import { isGreenfieldRunActive } from "@/core/agent/agentRunMutex";
 import { GREENFIELD_STUCK_THRESHOLDS } from "@/core/agent/greenfieldRunProgress";
 import { createLatestAction } from "@/core/greenfield/runLog";
 import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
+import {
+  USER_CANCELLED_GREENFIELD_MESSAGE,
+  USER_CANCELLED_GREENFIELD_RETRY_MESSAGE,
+} from "@/core/greenfield/generationGuard";
+
+export {
+  createGreenfieldGenerationId,
+  isUserCancelledGreenfieldFailure,
+  shouldIgnoreGreenfieldRunMutation,
+  USER_CANCELLED_GREENFIELD_MESSAGE,
+  USER_CANCELLED_GREENFIELD_RETRY_MESSAGE,
+} from "@/core/greenfield/generationGuard";
 
 export { GREENFIELD_STUCK_THRESHOLDS };
 
@@ -65,23 +77,30 @@ export function clearStaleGreenfieldRunPatch(
 export function cancelGreenfieldRunPatch(
   run: GreenfieldRunSnapshot,
 ): Partial<GreenfieldRunSnapshot> {
+  if (run.runResult === "cancelled" && !isGreenfieldRunActive(run, false)) {
+    return {
+      runResult: "cancelled",
+      finalMessage: run.finalMessage ?? USER_CANCELLED_GREENFIELD_RETRY_MESSAGE,
+    };
+  }
   return {
-    actionType: "studio_agent",
-    genStatus: run.genStatus === "running" ? "error" : run.genStatus,
-    writeStatus: run.writeStatus === "writing" ? "error" : run.writeStatus,
+    genStatus: run.genStatus === "running" ? "cancelled" : run.genStatus,
+    writeStatus: run.writeStatus === "writing" ? "cancelled" : run.writeStatus,
     setupStatus:
       run.setupStatus === "running" || run.setupStatus === "repairing"
-        ? "error"
+        ? "cancelled"
         : run.setupStatus,
     runResult: "cancelled",
     endedAt: Date.now(),
     durationMs: run.runStartedAt ? Math.max(0, Date.now() - run.runStartedAt) : 0,
     failureReport: null,
+    greenfieldRepair: null,
     entries: closeStaleGreenfieldRunningEntries(run.entries, "failed"),
-    latestAction: createLatestAction("failed", "Run cancelled by user", {
+    latestAction: createLatestAction("failed", USER_CANCELLED_GREENFIELD_MESSAGE, {
       stage: "generation",
     }),
-    finalMessage: "Run cancelled. You can try again.",
+    finalMessage: USER_CANCELLED_GREENFIELD_RETRY_MESSAGE,
+    ...(run.generationId ? { generationId: run.generationId } : {}),
   };
 }
 

@@ -173,6 +173,9 @@ const api = {
     ipcRenderer.invoke("providers:agentStep", provider, prompt),
   planWithProvider: (provider: string, prompt: string, context: unknown) =>
     ipcRenderer.invoke("providers:plan", provider, prompt, context),
+  cancelActiveProviderRequests: (scope?: string) =>
+    ipcRenderer.invoke("providers:cancelActive", scope),
+  discardShadowRun: (runId: string) => ipcRenderer.invoke("shadow:discard", runId),
   proposePatch: (
     provider: string,
     prompt: string,
@@ -230,22 +233,23 @@ const api = {
     ipcRenderer.invoke("providers:autoFix", provider, context, file),
 
   greenfieldSelectFolder: () => ipcRenderer.invoke("greenfield:selectFolder"),
-  greenfieldGenerate: (provider: string, prompt: string) =>
-    ipcRenderer.invoke("greenfield:generate", provider, prompt),
-  greenfieldGenerateRaw: (provider: string, prompt: string) =>
-    ipcRenderer.invoke("greenfield:generate-raw", provider, prompt),
-  greenfieldWrite: (root: string, files: unknown) =>
-    ipcRenderer.invoke("greenfield:write", root, files),
+  greenfieldGenerate: (provider: string, prompt: string, generationId?: string) =>
+    ipcRenderer.invoke("greenfield:generate", provider, prompt, generationId),
+  greenfieldGenerateRaw: (provider: string, prompt: string, generationId?: string) =>
+    ipcRenderer.invoke("greenfield:generate-raw", provider, prompt, generationId),
+  greenfieldWrite: (root: string, files: unknown, generationId?: string) =>
+    ipcRenderer.invoke("greenfield:write", root, files, generationId),
   greenfieldNextNumberedFolder: (current: string) =>
     ipcRenderer.invoke("greenfield:nextNumberedFolder", current),
   greenfieldClearFolder: (root: string) =>
     ipcRenderer.invoke("greenfield:clearFolder", root),
-  greenfieldSetup: (root: string) => ipcRenderer.invoke("greenfield:setup", root),
+  greenfieldSetup: (root: string, generationId?: string) =>
+    ipcRenderer.invoke("greenfield:setup", root, generationId),
   greenfieldTypecheck: (root: string) =>
     ipcRenderer.invoke("greenfield:typecheck", root),
   greenfieldBuild: (root: string) => ipcRenderer.invoke("greenfield:build", root),
-  greenfieldPreviewStart: (root: string) =>
-    ipcRenderer.invoke("greenfield:previewStart", root),
+  greenfieldPreviewStart: (root: string, generationId?: string) =>
+    ipcRenderer.invoke("greenfield:previewStart", root, generationId),
   greenfieldPreviewStop: () => ipcRenderer.invoke("greenfield:previewStop"),
   greenfieldPreviewState: () => ipcRenderer.invoke("greenfield:previewState"),
   greenfieldPreviewProbe: (url: string) =>

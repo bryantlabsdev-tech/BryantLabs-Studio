@@ -4,7 +4,11 @@ import { describe, it } from "node:test";
 import { requestHttpJson } from "./httpJson.cjs";
 import {
   activeProviderRequestCount,
+  beginProviderRequest,
   cancelActiveProviderRequests,
+  endProviderRequest,
+  enterProviderRequestScope,
+  leaveProviderRequestScope,
 } from "./providerRequestRegistry.cjs";
 
 describe("providerRequestRegistry", () => {
@@ -42,5 +46,47 @@ describe("providerRequestRegistry", () => {
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
     });
+  });
+
+  it("aborts only the matching generation scope", async () => {
+    let otherAborted = false;
+    let targetAborted = false;
+    enterProviderRequestScope("gf-keep");
+    beginProviderRequest({
+      id: "other",
+      kind: "http_json",
+      attempt: 1,
+      abort: () => {
+        otherAborted = true;
+      },
+    });
+    leaveProviderRequestScope("gf-keep");
+    enterProviderRequestScope("gf-stop");
+    beginProviderRequest({
+      id: "target",
+      kind: "http_json",
+      attempt: 1,
+      abort: () => {
+        targetAborted = true;
+      },
+    });
+    leaveProviderRequestScope("gf-stop");
+    const cancelled = cancelActiveProviderRequests("user_cancel", "gf-stop");
+    assert.equal(cancelled, 1);
+    assert.equal(targetAborted, true);
+    assert.equal(otherAborted, false);
+    endProviderRequest("other");
+  });
+
+  it("is safe to cancel the same scope more than once", () => {
+    beginProviderRequest({
+      id: "repeat",
+      kind: "http_json",
+      attempt: 1,
+      scope: "gf-repeat",
+      abort: () => undefined,
+    });
+    assert.equal(cancelActiveProviderRequests("user_cancel", "gf-repeat"), 1);
+    assert.equal(cancelActiveProviderRequests("user_cancel", "gf-repeat"), 0);
   });
 });

@@ -69,11 +69,23 @@ async function invokeRaw(
   prompt: string,
   purpose: "primary" | "retry" | "repair" = "primary",
 ): Promise<GreenfieldGenerateResult | null> {
+  if (host.isCancelled?.()) {
+    return {
+      ok: false,
+      provider: host.settings.provider,
+      model: modelForProvider(host.settings, host.settings.provider),
+      latencyMs: 0,
+      error: "Run cancelled by user",
+      generationMode: "multi-phase",
+      exactFailureStage: "cancelled",
+    };
+  }
   if (!host.invokeGreenfieldRawCall) {
     return host.api.greenfieldGenerateRaw
       ? (host.api.greenfieldGenerateRaw(
           host.settings.provider,
           prompt,
+          host.generationId,
         ) as Promise<GreenfieldGenerateResult>)
       : null;
   }
@@ -81,7 +93,7 @@ async function invokeRaw(
     host.settings,
     estimateTokens(prompt),
     (provider: ProviderId) =>
-      host.api.greenfieldGenerateRaw!(provider, prompt) as Promise<
+      host.api.greenfieldGenerateRaw!(provider, prompt, host.generationId) as Promise<
         GreenfieldGenerateResult & StageProviderResult
       >,
     prompt,
@@ -204,6 +216,23 @@ async function runPhase(
   });
 
   let last = await invokeRaw(host, prompt, purpose);
+  if (host.isCancelled?.() || last?.exactFailureStage === "cancelled") {
+    return {
+      merged: [...existing],
+      result: { phase, ok: false, paths: [], missing: [...expectedPaths] },
+      last: last
+        ? { ...last, exactFailureStage: "cancelled", error: last.error ?? "Run cancelled by user" }
+        : {
+            ok: false,
+            provider: host.settings.provider,
+            model: modelForProvider(host.settings, host.settings.provider),
+            latencyMs: 0,
+            error: "Run cancelled by user",
+            generationMode: "multi-phase",
+            exactFailureStage: "cancelled",
+          },
+    };
+  }
   const rawText = responseRawText(last);
   if (!rawText) {
     return {
@@ -279,6 +308,12 @@ export async function runMultiPhaseGreenfieldGenerate(
   host.resetAiCallBudget?.();
   host.prepareMultiPhaseGreenfieldBudget?.(manifest.pages.length) ??
     host.prepareGreenfieldBudget?.();
+  if (host.isCancelled?.()) {
+    return failResult(settings, startedAt, "Run cancelled by user", {
+      exactFailureStage: "cancelled",
+      providerRequestSent: false,
+    });
+  }
 
   let projectFiles: GreenfieldProjectFile[] = buildBootstrapFiles(manifest);
   let lastResult: GreenfieldGenerateResult | null = null;
@@ -296,6 +331,11 @@ export async function runMultiPhaseGreenfieldGenerate(
   projectFiles = applyProjectHardening(manifest, sharedPhase.merged, warnings);
   lastResult = sharedPhase.last;
   phaseResults.push(sharedPhase.result);
+  if (host.isCancelled?.() || lastResult?.exactFailureStage === "cancelled") {
+    return failResult(settings, startedAt, "Run cancelled by user", {
+      exactFailureStage: "cancelled",
+    });
+  }
   if (!sharedPhase.result.ok) {
     warnings.push(
       `Shared phase incomplete: missing ${sharedPhase.result.missing.join(", ")}`,
@@ -304,6 +344,11 @@ export async function runMultiPhaseGreenfieldGenerate(
 
   const pageBatches = splitPagesIntoBatches(manifest.pages);
   for (let batchIdx = 0; batchIdx < pageBatches.length; batchIdx++) {
+    if (host.isCancelled?.()) {
+      return failResult(settings, startedAt, "Run cancelled by user", {
+        exactFailureStage: "cancelled",
+      });
+    }
     const batch = pageBatches[batchIdx]!;
     const batchManifest = manifestSliceForBatch(manifest, batch);
     const phaseName = `pages-${batchIdx + 1}`;
