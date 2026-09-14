@@ -40,6 +40,12 @@ interface StudioTestHooks {
     port?: number;
     root?: string;
   }): { ok: true; url: string; centerTab: string } | { ok: false; reason: string };
+  simulateMixedCreateEditReadyForReview(): Promise<
+    { ok: true } | { ok: false; reason: string }
+  >;
+  applyApprovedReadyFiles(): Promise<{ ok: boolean; applied?: readonly string[] }>;
+  undoLastEdit(): Promise<void>;
+  getCanUndo(): boolean;
   getProviderSmokeState(): {
     provider: import("@/core/providers/types").ProviderId | null;
     model: string | null;

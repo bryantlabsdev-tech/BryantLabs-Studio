@@ -343,10 +343,19 @@ export interface BryantLabsApi {
     filePath: string,
     expectedBefore: string,
     after: string,
+    recordUndo?: boolean,
   ): Promise<EditResult>;
   /** Create a new file under the project (multi-file execution). */
   createProjectFile(filePath: string, content: string): Promise<EditResult>;
   deleteProjectFile(filePath: string): Promise<EditResult>;
+  /** Replace the pending single-level undo batch after a multi-file apply. */
+  replaceUndoBatch(
+    entries: readonly {
+      path: string;
+      previousContent: string;
+      created: boolean;
+    }[],
+  ): Promise<EditResult>;
   /** Undo the last applied edit (single level). */
   undoLastEdit(): Promise<EditResult>;
   /** Stage proposed edits under `.bryantlabs/shadow-runs/<runId>/` before promote. */

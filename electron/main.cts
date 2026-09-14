@@ -47,7 +47,8 @@ import {
   writeFollowUpChat,
   normalizeFollowUpChatRecord,
 } from "./followUpChatStore.cjs";
-import { applyEdit, createProjectFile, deleteProjectFile, writeVerified } from "./fileWriter.cjs";
+import { applyEdit, createProjectFile, deleteProjectFile, writeVerified, validateWritePath } from "./fileWriter.cjs";
+import { createLastEditStore, parseUndoBatchEntries } from "./lastEditBatch.cjs";
 import { runVerification, type VerificationResult } from "./verifier.cjs";
 import {
   checkHealth,
@@ -142,8 +143,8 @@ let mainWindow: BrowserWindow | null = null;
 /** Absolute path of the currently opened project. Reads are confined to it. */
 let projectRoot: string | null = null;
 
-/** Single-level undo state for the last applied edit. */
-let lastEdit: { path: string; previousContent: string } | null = null;
+/** Single-level undo batch for the last applied edit or Apply Plan write. */
+const lastEditStore = createLastEditStore();
 
 /** Guards against overlapping verification runs. */
 let verifying = false;
@@ -273,7 +274,7 @@ async function switchProjectRoot(selected: string): Promise<void> {
   const approved = approveWorkspaceRoot(selected);
   await prepareProjectSwitch(approved);
   projectRoot = approved;
-  lastEdit = null;
+  lastEditStore.clear();
   hydrateProjectAfterSwitch(approved);
   await activateProjectIndex(approved, () => mainWindow);
 }
@@ -600,6 +601,7 @@ function registerIpcHandlers(): void {
       filePath: string,
       expectedBefore: string,
       after: string,
+      recordUndoFlag?: unknown,
     ): Promise<EditResult> => {
       if (
         typeof filePath !== "string" ||
@@ -608,9 +610,16 @@ function registerIpcHandlers(): void {
       ) {
         return { ok: false, reason: "Invalid edit request." };
       }
+      const recordUndo = recordUndoFlag !== false;
       const result = await applyEdit(projectRoot, filePath, expectedBefore, after);
       if (result.ok && result.previousContent !== undefined) {
-        lastEdit = { path: filePath, previousContent: result.previousContent };
+        if (recordUndo) {
+          lastEditStore.recordSingle({
+            path: filePath,
+            previousContent: result.previousContent,
+            created: false,
+          });
+        }
         notifyIndexFileChange(filePath);
       }
       return result.ok
@@ -631,7 +640,11 @@ function registerIpcHandlers(): void {
       }
       const result = await createProjectFile(projectRoot, filePath, content);
       if (result.ok) {
-        lastEdit = { path: filePath, previousContent: "" };
+        lastEditStore.recordSingle({
+          path: filePath,
+          previousContent: "",
+          created: true,
+        });
         notifyIndexFileChange(filePath);
       }
       return result.ok
@@ -656,13 +669,28 @@ function registerIpcHandlers(): void {
     },
   );
 
+  ipcMain.handle(
+    "edit:replaceUndoBatch",
+    async (_event, input: unknown): Promise<EditResult> => {
+      const parsed = parseUndoBatchEntries(input);
+      if (!parsed.ok) return { ok: false, reason: parsed.reason };
+      for (const entry of parsed.entries) {
+        const pathCheck = validateWritePath(projectRoot, entry.path);
+        if (!pathCheck.ok) {
+          return { ok: false, reason: pathCheck.reason ?? "Invalid undo batch path." };
+        }
+      }
+      lastEditStore.replace(parsed.entries);
+      return { ok: true };
+    },
+  );
+
   ipcMain.handle("edit:undoLast", async (): Promise<EditResult> => {
-    if (!lastEdit) return { ok: false, reason: "Nothing to undo." };
-    const { path: target, previousContent } = lastEdit;
-    const result = await writeVerified(projectRoot, target, previousContent);
-    if (!result.ok) return { ok: false, reason: result.reason };
-    lastEdit = null;
-    return { ok: true, content: result.content, path: target };
+    return lastEditStore.undo(projectRoot, {
+      writeVerified,
+      deleteProjectFile,
+      notifyIndexFileChange,
+    });
   });
 
   ipcMain.handle(

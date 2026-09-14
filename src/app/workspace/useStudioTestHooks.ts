@@ -29,6 +29,12 @@ export interface StudioTestHookCallbacks {
     port?: number;
     root?: string;
   }) => { ok: true; url: string; centerTab: string } | { ok: false; reason: string };
+  readonly simulateMixedCreateEditReadyForReview: () => Promise<
+    { ok: true } | { ok: false; reason: string }
+  >;
+  readonly applyApprovedReadyFiles: () => Promise<{ ok: boolean; applied?: readonly string[] }>;
+  readonly undoLastEdit: () => Promise<void>;
+  readonly getCanUndo: () => boolean;
   readonly getProviderSmokeState: () => {
     provider: ProviderId | null;
     model: string | null;
@@ -58,6 +64,11 @@ export function useStudioTestHooks(callbacks: StudioTestHookCallbacks): void {
         callbacksRef.current.simulatePatchReadyForReview(),
       simulatePreviewReady: (opts?: { url?: string; port?: number; root?: string }) =>
         callbacksRef.current.simulatePreviewReady(opts),
+      simulateMixedCreateEditReadyForReview: () =>
+        callbacksRef.current.simulateMixedCreateEditReadyForReview(),
+      applyApprovedReadyFiles: () => callbacksRef.current.applyApprovedReadyFiles(),
+      undoLastEdit: () => callbacksRef.current.undoLastEdit(),
+      getCanUndo: () => callbacksRef.current.getCanUndo(),
       getProviderSmokeState: () => callbacksRef.current.getProviderSmokeState(),
       checkConfiguredProviderHealth: () =>
         callbacksRef.current.checkConfiguredProviderHealth(),

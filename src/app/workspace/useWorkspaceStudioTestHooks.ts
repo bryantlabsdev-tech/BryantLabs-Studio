@@ -53,6 +53,11 @@ export interface WorkspaceStudioTestHooksInput {
     port?: number | null;
   }) => void;
   readonly requestPreviewTab: () => void;
+  readonly canUndo: boolean;
+  readonly undoLastEdit: () => Promise<void>;
+  readonly applyApprovedPlanFiles: (opts?: {
+    approveReadyFiles?: boolean;
+  }) => Promise<{ ok: boolean; applied?: readonly string[] }>;
 }
 
 export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput): void {
@@ -82,6 +87,9 @@ export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput
     releaseBuildRunForReview,
     patchAppPreview,
     requestPreviewTab,
+    canUndo,
+    undoLastEdit,
+    applyApprovedPlanFiles,
   } = input;
 
   const getReadinessState = useCallback((): StudioReadinessState => {
@@ -267,6 +275,89 @@ export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput
     [greenfieldRun],
   );
 
+  const simulateMixedCreateEditReadyForReview = useCallback(async () => {
+    const resolvedPath = projectPath ?? greenfieldRun.projectPath;
+    if (!resolvedPath || !api) return { ok: false as const, reason: "no_project" };
+    const appAbs = `${resolvedPath}/src/App.tsx`;
+    const historyAbs = `${resolvedPath}/src/components/History.tsx`;
+    const current = await api.readFile(appAbs);
+    if (!current.readable || current.content === undefined) {
+      return { ok: false as const, reason: "no_app" };
+    }
+    const basis = current.content;
+    const runId = createAgentRunId();
+    setPlanApplySession({
+      applyRunId: runId,
+      prompt: "Add calculation history",
+      planSummary: "Add calculation history",
+      planSource: "deterministic",
+      applyTargetCount: 2,
+      applySkippedCount: 0,
+      files: [
+        {
+          relPath: "src/App.tsx",
+          absPath: appAbs,
+          selectionReason: "e2e",
+          planReason: "e2e",
+          status: "ready",
+          decision: "pending",
+          action: "modify",
+          basisContent: basis,
+          proposal: {
+            newContent: `${basis.trimEnd()}\nexport const MOCK_BATCH_UNDO = true;\n`,
+            summary: "Mark App for undo test",
+            reasoning: "e2e fixture",
+            risks: [],
+          },
+          diffStats: { added: 1, removed: 0, changed: true },
+        },
+        {
+          relPath: "src/components/History.tsx",
+          absPath: historyAbs,
+          selectionReason: "e2e",
+          planReason: "e2e",
+          status: "ready",
+          decision: "pending",
+          action: "create",
+          basisContent: "",
+          proposal: {
+            newContent: "export function History() { return null; }\n",
+            summary: "Create History",
+            reasoning: "e2e fixture",
+            risks: [],
+          },
+          diffStats: { added: 1, removed: 0, changed: true },
+        },
+      ],
+      phase: "waiting_for_review",
+      selectedRelPath: "src/App.tsx",
+      applyError: null,
+      verification: null,
+      totals: {
+        filesChanged: 2,
+        linesAdded: 2,
+        linesRemoved: 0,
+        filesApproved: 0,
+        filesApplied: 0,
+      },
+    });
+    releaseBuildRunForReview();
+    return { ok: true as const };
+  }, [
+    api,
+    projectPath,
+    greenfieldRun.projectPath,
+    setPlanApplySession,
+    releaseBuildRunForReview,
+  ]);
+
+  const applyApprovedReadyFiles = useCallback(
+    () => applyApprovedPlanFiles({ approveReadyFiles: true }),
+    [applyApprovedPlanFiles],
+  );
+
+  const getCanUndo = useCallback(() => canUndo, [canUndo]);
+
   const getFollowUpSettlementDiagnosticHook = useCallback(
     () => getFollowUpSettlementDiagnostic(),
     [],
@@ -280,6 +371,10 @@ export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput
     getPatchPipelineState,
     simulatePatchReadyForReview,
     simulatePreviewReady,
+    simulateMixedCreateEditReadyForReview,
+    applyApprovedReadyFiles,
+    undoLastEdit,
+    getCanUndo,
     getProviderSmokeState,
     checkConfiguredProviderHealth,
     runProviderSmokeTest,
