@@ -11,10 +11,13 @@ import {
   launchStudioApp,
   openFixtureProject,
   sendAgentPrompt,
+  sendAgentPromptHandlingSubmitGates,
   sudokuFixturePath,
   waitForComposerReady,
+  waitForFollowUpApplyTerminal,
   waitForWorkbenchDiffTab,
   assertNoRenderLoopConsoleErrors,
+  type AgentSubmitSnapshot,
 } from "./helpers/studio";
 
 const HISTORY_REL = "src/components/History.tsx";
@@ -23,13 +26,13 @@ const MIXED_PROMPT =
   "Add calculation history. Show last 10 calculations. Create a separate History component. Add a clear history button.";
 const TIMER_PROMPT = "Add a timer";
 
-async function copySudokuWorkspace(): Promise<string> {
-  const dest = await fs.mkdtemp(path.join(os.tmpdir(), "bl-review-first-e2e-"));
+async function copySudokuWorkspace(prefix = "bl-review-first-e2e-"): Promise<string> {
+  const dest = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   await fs.cp(sudokuFixturePath, dest, {
     recursive: true,
     filter: (src) => !src.includes(`${path.sep}node_modules`) && !src.includes(".bryantlabs"),
   });
-  return dest;
+  return fs.realpath(dest);
 }
 
 async function pathExists(target: string): Promise<boolean> {
@@ -41,13 +44,26 @@ async function pathExists(target: string): Promise<boolean> {
   }
 }
 
-async function readApp(projectDir: string): Promise<string> {
-  return fs.readFile(path.join(projectDir, APP_REL), "utf8");
+async function normalizeNewlines(text: string): Promise<string> {
+  return text.replace(/\r\n/g, "\n");
+}
+
+async function readAppAt(projectDir: string): Promise<string> {
+  const raw = await fs.readFile(path.join(projectDir, APP_REL), "utf8");
+  return normalizeNewlines(raw);
+}
+
+async function resolveOpenedProjectDir(page: Page, fallbackDir: string): Promise<string> {
+  const raw = await page.evaluate(
+    () => window.__studioTestHooks?.getReadinessState?.()?.projectPath ?? null,
+  );
+  const candidate = raw?.trim() ? raw : fallbackDir;
+  return fs.realpath(candidate);
 }
 
 async function expectUnchangedDisk(projectDir: string, originalApp: string): Promise<void> {
   expect(await pathExists(path.join(projectDir, HISTORY_REL))).toBe(false);
-  expect(await readApp(projectDir)).toBe(originalApp);
+  expect(await readAppAt(projectDir)).toBe(originalApp);
 }
 
 async function previewOrBuildStarted(page: Page): Promise<boolean> {
@@ -99,6 +115,18 @@ async function submitFollowUp(page: Page, prompt: string): Promise<void> {
     await resetAndStart.click();
   }
   await dismissBlockingDialogs(page);
+}
+
+async function submitFollowUpConfirmingGates(
+  page: Page,
+  prompt: string,
+): Promise<AgentSubmitSnapshot> {
+  await waitForComposerReady(page);
+  await resetForNewPrompt(page);
+  await fillAgentPrompt(page, prompt);
+  const before = await sendAgentPromptHandlingSubmitGates(page);
+  await dismissBlockingDialogs(page);
+  return before;
 }
 
 async function waitForMixedProposal(page: Page): Promise<void> {
@@ -153,6 +181,91 @@ async function undoViaAdvanced(page: Page): Promise<void> {
   await undo.click();
 }
 
+async function captureFollowUpApplyTrace(page: Page, submittedPrompt: string) {
+  return page.evaluate((prompt) => {
+    const hooks = window.__studioTestHooks;
+    const pipeline = hooks?.getPatchPipelineState?.();
+    const diagnostic = hooks?.getFollowUpSettlementDiagnostic?.();
+    const run = hooks?.getGreenfieldRunSnapshot?.();
+    const ready = hooks?.getReadinessState?.();
+    const verifyErrors =
+      run?.entries
+        ?.filter((entry) => entry.stage === "verification" && entry.status === "failed")
+        .map((entry) => entry.message) ?? [];
+    return {
+      submittedPrompt: prompt,
+      composerValue: (document.querySelector("#build-prompt") as HTMLTextAreaElement | null)?.value ?? null,
+      selectedRoute: diagnostic?.selectedRoutingDecision ?? run?.routeDecision?.selectedRoute ?? null,
+      routingReason: diagnostic?.routingReason ?? run?.routeDecision?.selectionReason ?? null,
+      runId: pipeline?.activeAgentRunId ?? diagnostic?.activeRunId ?? null,
+      submitEventId: diagnostic?.submitEventId ?? null,
+      applyPlanInvocations: diagnostic?.applyPlanInvocations ?? 0,
+      generateInvocations: diagnostic?.generateInvocations ?? 0,
+      planApplyPhase: pipeline?.planApplyPhase ?? null,
+      proposedFiles: (pipeline?.files ?? []).map((file) => ({
+        relPath: file.relPath,
+        status: file.status,
+        changed: file.changed,
+        error: file.error,
+      })),
+      autoContinue: hooks?.resolveFollowUpAutoContinue?.(prompt) ?? null,
+      reviewFirst: hooks?.getFollowUpReviewFirst?.() ?? null,
+      planApplyError: pipeline?.planApplyError ?? null,
+      buildError: pipeline?.buildError ?? null,
+      verifyErrors,
+      runResult: run?.runResult ?? null,
+      projectPath: ready?.projectPath ?? null,
+    };
+  }, submittedPrompt);
+}
+
+function attachMockApplyLogs(app: ElectronApplication): string[] {
+  const logs: string[] = [];
+  const collect = (chunk: Buffer | string) => {
+    const text = String(chunk);
+    if (text.includes("[mock:apply_plan]")) logs.push(text.trim());
+  };
+  app.process()?.stdout?.on("data", collect);
+  app.process()?.stderr?.on("data", collect);
+  return logs;
+}
+
+async function expectTimerAutoApplied(
+  page: Page,
+  projectDir: string,
+  before: AgentSubmitSnapshot,
+  mockLogs: string[],
+): Promise<void> {
+  const openedDir = await resolveOpenedProjectDir(page, projectDir);
+  expect(openedDir).toBe(projectDir);
+
+  const terminal = await waitForFollowUpApplyTerminal(page, before);
+  const trace = await captureFollowUpApplyTrace(page, TIMER_PROMPT);
+  const appFile = await readAppAt(openedDir);
+  const report = {
+    terminal,
+    mockApplyLogs: mockLogs,
+    trace,
+    appExcerpt: appFile.slice(-240),
+    hasMarker: appFile.includes("mock: timer"),
+  };
+
+  expect(trace.submittedPrompt).toBe(TIMER_PROMPT);
+  expect(trace.autoContinue).toBe(true);
+  expect(trace.reviewFirst).toBe(false);
+  expect(terminal, JSON.stringify(report)).not.toBe("waiting_for_review");
+  expect(terminal, JSON.stringify(report)).not.toBe("stale_gate");
+  expect(terminal, JSON.stringify(report)).toBe("applied");
+  expect(
+    trace.proposedFiles.some(
+      (file) => file.relPath.replaceAll("\\", "/") === APP_REL && file.changed,
+    ),
+    JSON.stringify(report),
+  ).toBe(true);
+  expect(report.hasMarker, JSON.stringify(report)).toBe(true);
+  await expect(page.getByRole("button", { name: "Accept all" })).toHaveCount(0);
+}
+
 test.describe("Review-first follow-up (mock provider)", () => {
   let app: ElectronApplication | undefined;
   let page: Page | undefined;
@@ -161,7 +274,7 @@ test.describe("Review-first follow-up (mock provider)", () => {
 
   test.beforeAll(async () => {
     projectDir = await copySudokuWorkspace();
-    originalApp = await readApp(projectDir);
+    originalApp = await readAppAt(projectDir);
     app = await launchStudioApp({ e2eProject: null });
     page = await getMainWindow(app);
     await dismissBlockingDialogs(page);
@@ -185,7 +298,7 @@ test.describe("Review-first follow-up (mock provider)", () => {
     }
   });
 
-  test("review-first mixed proposal, bulk actions, regenerate, and opt-out", async () => {
+  test("review-first mixed proposal, bulk actions, regenerate, reject, accept, and undo", async () => {
     test.setTimeout(240_000);
 
     await submitFollowUp(page, MIXED_PROMPT);
@@ -241,7 +354,7 @@ test.describe("Review-first follow-up (mock provider)", () => {
     await expect
       .poll(async () => {
         const created = await pathExists(path.join(projectDir, HISTORY_REL));
-        const appFile = await readApp(projectDir).catch(() => originalApp);
+        const appFile = await readAppAt(projectDir).catch(() => originalApp);
         return created && appFile !== originalApp;
       }, { timeout: 30_000 })
       .toBe(true);
@@ -262,52 +375,68 @@ test.describe("Review-first follow-up (mock provider)", () => {
     await expect
       .poll(async () => {
         const created = await pathExists(path.join(projectDir, HISTORY_REL));
-        const appFile = await readApp(projectDir).catch(() => "");
+        const appFile = await readAppAt(projectDir).catch(() => "");
         return { created, app: appFile };
       }, { timeout: 30_000 })
       .toEqual({ created: false, app: originalApp });
+  });
+});
 
-    await turnOffReviewFirst(page);
+test.describe("Review-first opt-out auto-apply (fresh app)", () => {
+  let app: ElectronApplication | undefined;
+  let page: Page | undefined;
+  let projectDir: string;
+  let userDataDir: string;
+  let originalApp: string;
+  let mockLogs: string[] = [];
+
+  test.beforeEach(async () => {
+    projectDir = await copySudokuWorkspace("bl-review-first-optout-");
+    userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "bl-review-first-optout-user-"));
+    originalApp = await readAppAt(projectDir);
+    app = await launchStudioApp({ e2eProject: null, userDataDir });
+    mockLogs = attachMockApplyLogs(app);
+    page = await getMainWindow(app);
+    await dismissBlockingDialogs(page);
+    await openFixtureProject(page, projectDir);
+    await waitForComposerReady(page);
+  });
+
+  test.afterEach(async () => {
+    try {
+      if (page) await assertNoRenderLoopConsoleErrors(page);
+    } finally {
+      await closeStudioApp(app);
+      app = undefined;
+      page = undefined;
+      if (projectDir) {
+        await fs.rm(projectDir, { recursive: true, force: true }).catch(() => undefined);
+      }
+      if (userDataDir) {
+        await fs.rm(userDataDir, { recursive: true, force: true }).catch(() => undefined);
+      }
+    }
+  });
+
+  test("opting out review-first auto-applies an ordinary timer follow-up", async () => {
+    test.setTimeout(180_000);
+
     await expect
       .poll(async () => {
         return page.evaluate(() => {
           const hooks = window.__studioTestHooks;
-          return (
-            hooks?.getFollowUpReviewFirst?.() === false &&
-            hooks?.resolveFollowUpAutoContinue?.("Add a timer") === true &&
-            localStorage.getItem("bryantlabs.followUpReviewFirst") === "0"
-          );
-        });
-      })
-      .toBe(true);
-    await submitFollowUp(page, TIMER_PROMPT);
-    await expect
-      .poll(async () => {
-        const snapshot = await page.evaluate(() => {
-          const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
-          const run = window.__studioTestHooks?.getGreenfieldRunSnapshot?.();
           return {
-            phase: pipeline?.planApplyPhase ?? null,
-            prompt: pipeline?.prompt ?? null,
-            planApplyError: pipeline?.planApplyError ?? null,
-            buildError: pipeline?.buildError ?? null,
-            files: pipeline?.files ?? [],
-            runResult: run?.runResult ?? null,
+            stored: localStorage.getItem("bryantlabs.followUpReviewFirst"),
+            reviewFirst: hooks?.getFollowUpReviewFirst?.() ?? null,
+            autoContinue: hooks?.resolveFollowUpAutoContinue?.("Add a timer") ?? null,
           };
         });
-        const appFile = await readApp(projectDir).catch(() => "");
-        return {
-          pausedForReview: snapshot.phase === "waiting_for_review",
-          hasMarker: appFile.includes("mock: timer"),
-          prompt: snapshot.prompt,
-          planApplyError: snapshot.planApplyError,
-          buildError: snapshot.buildError,
-          files: snapshot.files,
-          runResult: snapshot.runResult,
-          appExcerpt: appFile.slice(-240),
-        };
-      }, { timeout: 60_000 })
-      .toMatchObject({ pausedForReview: false, hasMarker: true });
-    await expect(page.getByRole("button", { name: "Accept all" })).toHaveCount(0);
+      })
+      .toEqual({ stored: null, reviewFirst: true, autoContinue: false });
+
+    await turnOffReviewFirst(page);
+    const before = await submitFollowUpConfirmingGates(page, TIMER_PROMPT);
+    await expectTimerAutoApplied(page, projectDir, before, mockLogs);
+    expect(await readAppAt(projectDir)).not.toBe(originalApp);
   });
 });

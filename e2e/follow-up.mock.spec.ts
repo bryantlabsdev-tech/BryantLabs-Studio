@@ -7,6 +7,7 @@ import {
   getMainWindow,
   launchStudioApp,
   sendAgentPrompt,
+  sendAgentPromptHandlingSubmitGates,
   waitForAgentReady,
   openFixtureProject,
   readCenterTab,
@@ -15,34 +16,6 @@ import {
   waitForWorkbenchDiffTab,
   assertNoRenderLoopConsoleErrors,
 } from "./helpers/studio";
-
-async function confirmStaleRunResetIfPresent(page: Page): Promise<void> {
-  const stale = page.getByRole("region", { name: "Stale run state" });
-  const deadline = Date.now() + 8_000;
-  while (Date.now() < deadline) {
-    if (await stale.isVisible().catch(() => false)) {
-      await expect(stale.getByRole("heading", { name: "Previous run state detected" })).toBeVisible();
-      await stale.getByRole("button", { name: /^Reset and start$/i }).click();
-      await expect(stale).toBeHidden();
-      return;
-    }
-    const runStarted = await page.evaluate(() => {
-      const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
-      const diagnostic = window.__studioTestHooks?.getFollowUpSettlementDiagnostic?.();
-      const greenfield = window.__studioTestHooks?.getReadinessState?.()?.greenfieldRun;
-      return Boolean(
-        pipeline?.activeAgentRunId ||
-          pipeline?.planApplyPhase ||
-          pipeline?.buildRunning ||
-          diagnostic?.submitEventId ||
-          greenfield?.active ||
-          greenfield?.runResult === "running",
-      );
-    });
-    if (runStarted) return;
-    await page.waitForTimeout(100);
-  }
-}
 
 async function resetAgentWorkspaceForNewPrompt(page: Page): Promise<void> {
   await dismissBlockingDialogs(page);
@@ -267,8 +240,7 @@ test.describe("Follow-up gameplay (mock provider)", () => {
     await resetAgentWorkspaceForNewPrompt(page);
 
     await fillAgentPrompt(page, "Upgrade Sudoku gameplay. Add notes mode and hints.");
-    await sendAgentPrompt(page);
-    await confirmStaleRunResetIfPresent(page);
+    await sendAgentPromptHandlingSubmitGates(page);
     await dismissBlockingDialogs(page);
 
     const outcome = await waitForGameplayFollowUpOutcome(page);

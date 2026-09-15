@@ -287,14 +287,24 @@ export function mockApplyPlanBatchPatch(
     const path = normalizeApplyPlanPath(file.path);
     out[path] = patchFileContent(path, file.content, promptLower);
   }
+  const patchKind = isGameplayPrompt(promptLower)
+    ? "gameplay"
+    : isTimerFollowUpPrompt(promptLower)
+      ? "timer"
+      : promptLower.includes("history")
+        ? "history"
+        : "generic";
   const rawText = Object.entries(out)
     .map(([p, c]) => `@@FILE:${p}\n${c}\n@@END`)
     .join("\n\n");
+  console.info(
+    `[mock:apply_plan] kind=${patchKind} files=${Object.keys(out).join(",") || "(none)"} promptLen=${userPrompt.length}`,
+  );
   return {
     ok: true,
     provider,
     model: MOCK_MODEL,
-    raw: { mock: true },
+    raw: { mock: true, patchKind },
     rawText,
     latencyMs: latencyMs(),
     files: out,
