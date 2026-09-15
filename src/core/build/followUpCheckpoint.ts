@@ -1,3 +1,4 @@
+import { consumeForcedUndoPathFailure } from "@/core/agent/runRecoveryTestSeams";
 import type { BryantLabsApi } from "@/types";
 
 export interface FollowUpCheckpointFile {
@@ -13,6 +14,8 @@ export interface FollowUpCheckpoint {
   readonly projectPath: string;
   readonly createdAt: number;
   readonly prompt: string;
+  /** Apply Plan run that produced this undo batch, when known. */
+  readonly applyRunId?: string;
   readonly files: readonly FollowUpCheckpointFile[];
 }
 
@@ -20,12 +23,14 @@ export function createFollowUpCheckpoint(input: {
   projectPath: string;
   prompt: string;
   files: readonly FollowUpCheckpointFile[];
+  applyRunId?: string;
 }): FollowUpCheckpoint {
   return {
     id: `follow-up-chk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     projectPath: input.projectPath,
     createdAt: Date.now(),
     prompt: input.prompt,
+    ...(input.applyRunId ? { applyRunId: input.applyRunId } : {}),
     files: input.files,
   };
 }
@@ -61,33 +66,75 @@ export function buildUndoBatchFromApprovedFiles(
   return batch;
 }
 
+export interface RestoreFollowUpFailure {
+  readonly relPath: string;
+  readonly error: string;
+}
+
+export interface RestoreFollowUpCheckpointResult {
+  readonly ok: boolean;
+  readonly error?: string;
+  readonly restored: readonly string[];
+  readonly failed: readonly RestoreFollowUpFailure[];
+}
+
 export async function restoreFollowUpCheckpoint(
   api: BryantLabsApi,
   checkpoint: FollowUpCheckpoint,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<RestoreFollowUpCheckpointResult> {
+  const restored: string[] = [];
+  const failed: RestoreFollowUpFailure[] = [];
+  const forcedFail = consumeForcedUndoPathFailure();
+
   for (const file of checkpoint.files) {
+    if (forcedFail && file.relPath === forcedFail) {
+      failed.push({
+        relPath: file.relPath,
+        error: "Forced undo restore failure",
+      });
+      continue;
+    }
     try {
       if (file.action === "create") {
         const del = await api.deleteProjectFile(file.absPath);
         if (!del.ok) {
-          return { ok: false, error: `${file.relPath}: ${del.reason ?? "Delete failed"}` };
+          failed.push({
+            relPath: file.relPath,
+            error: del.reason ?? "Delete failed",
+          });
+          continue;
         }
+        restored.push(file.relPath);
         continue;
       }
       const current = await api.readFile(file.absPath);
-      if ("error" in current && current.error) {
-        return { ok: false, error: `${file.relPath}: ${current.error}` };
+      if (!current.readable) {
+        failed.push({
+          relPath: file.relPath,
+          error: current.reason ?? "Read failed",
+        });
+        continue;
       }
       const before = "content" in current ? current.content : "";
       const res = await api.applyEdit(file.absPath, before, file.content, false);
       if (!res.ok) {
-        return { ok: false, error: `${file.relPath}: ${res.reason ?? "Restore failed"}` };
+        failed.push({
+          relPath: file.relPath,
+          error: res.reason ?? "Restore failed",
+        });
+        continue;
       }
+      restored.push(file.relPath);
     } catch {
-      return { ok: false, error: `${file.relPath}: Restore failed` };
+      failed.push({ relPath: file.relPath, error: "Restore failed" });
     }
   }
-  return { ok: true };
+
+  if (failed.length > 0) {
+    const error = failed.map((item) => `${item.relPath}: ${item.error}`).join("; ");
+    return { ok: false, error, restored, failed };
+  }
+  return { ok: true, restored, failed };
 }
 
 export interface PartialApplyRollbackEntry {

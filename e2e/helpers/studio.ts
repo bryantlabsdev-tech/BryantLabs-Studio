@@ -182,7 +182,7 @@ export async function dismissBlockingDialogs(page: Page): Promise<void> {
 
   const rejectAll = page.getByRole("button", { name: /reject all/i });
   if (await rejectAll.isVisible().catch(() => false)) {
-    await rejectAll.click();
+    await rejectAll.click({ timeout: 3_000 }).catch(() => undefined);
   }
 
   const dismissMemory = page.locator(".memory-suggest").getByRole("button", { name: /^Dismiss$/i });

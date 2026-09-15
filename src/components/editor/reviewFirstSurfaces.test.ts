@@ -83,6 +83,7 @@ describe("review-first surfaces", () => {
     const orchestration = source("../../app/orchestration/useBuildPipelineOrchestration.ts");
     assert.match(orchestration, /resolveFollowUpAutoContinue\(prompt\)/);
     assert.match(orchestration, /host\.cancelApplyPlan\(\)/);
+    assert.match(orchestration, /cancelApplyPlan\(\{ recoverUnapplied: true \}\)/);
     assert.match(orchestration, /shouldAutoPromoteFollowUpReview/);
   });
 });

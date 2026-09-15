@@ -13,6 +13,11 @@ import {
   hasStaleRunContext,
   isSuccessfulTerminalIdleContext,
   promptPreview,
+  classifyStaleRunArtifacts,
+  recoverObsoleteRunArtifacts,
+  applyObsoleteRunRecoveryToContext,
+  ownedApplyRunId,
+  UNDO_AFTER_VERIFY_FAILURE_MESSAGE,
 } from "@/core/agent/runContextReset";
 import { resolveUserPlanPrompt } from "@/core/planApply/prompt";
 import type { AIPlanResult } from "@/core/planner/aiTypes";
@@ -361,5 +366,160 @@ describe("runContextReset", () => {
     const withExplicit = resolveUserPlanPrompt(crudPlan, "Build CRUD app", supabasePrompt);
     assert.equal(withExplicit, supabasePrompt);
     assert.doesNotMatch(withExplicit ?? "", /CRUD app with list/i);
+  });
+});
+
+describe("obsolete run recovery after failed verification", () => {
+  const failedVerifyInput = staleInput({
+    plan: SAMPLE_PLAN,
+    aiPlan: SUCCESS_AI_PLAN,
+    aiPlanStatus: "done",
+    planApplyError: "Typecheck failed after apply.",
+    verification: { ok: false },
+    greenfieldRun: {
+      ...emptyGreenfieldRun(),
+      runResult: "failed",
+      failureReport: {
+        rootStage: "verification",
+        rootCauseLine: "Typecheck failed after apply.",
+        stages: [],
+      },
+    },
+  });
+
+  it("treats leftover errors after a failed applied verify as obsolete diagnostics", () => {
+    const classified = classifyStaleRunArtifacts(failedVerifyInput);
+    assert.equal(classified.planApplyError, "obsolete_diagnostic");
+    assert.equal(classified.verification, "obsolete_diagnostic");
+    assert.equal(classified.greenfieldRun, "obsolete_diagnostic");
+    assert.equal(classified.planApplySession, "obsolete_diagnostic");
+    assert.equal(hasStaleRunContext(failedVerifyInput), true);
+  });
+
+  it("successful undo recovery allows the next prompt without Reset", () => {
+    const result = recoverObsoleteRunArtifacts({
+      context: failedVerifyInput,
+      kind: "successful_undo",
+      recoveredRunId: "apply-1",
+      ownedRunId: "apply-1",
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const next = applyObsoleteRunRecoveryToContext(failedVerifyInput, result.next);
+    assert.equal(hasStaleRunContext(next), false);
+    assert.equal(isSuccessfulTerminalIdleContext(next), false);
+    assert.equal(next.planApplyError, null);
+    assert.equal(next.greenfieldRun.runResult, "idle");
+    assert.equal(next.greenfieldRun.latestAction?.summary, UNDO_AFTER_VERIFY_FAILURE_MESSAGE);
+    assert.equal(next.plan, null);
+  });
+
+  it("keeps chat-visible recovery text while dropping blocking artifacts", () => {
+    const result = recoverObsoleteRunArtifacts({
+      context: failedVerifyInput,
+      kind: "successful_undo",
+      recoveredRunId: "apply-1",
+      ownedRunId: "apply-1",
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(
+      result.next.greenfieldRunPatch.latestAction?.summary,
+      UNDO_AFTER_VERIFY_FAILURE_MESSAGE,
+    );
+    assert.equal(result.next.planApplyError, null);
+  });
+
+  it("refuses recovery when undo ownership does not match", () => {
+    const result = recoverObsoleteRunArtifacts({
+      context: failedVerifyInput,
+      kind: "successful_undo",
+      recoveredRunId: "apply-1",
+      ownedRunId: "apply-other",
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.retainStaleProtection, true);
+    assert.equal(hasStaleRunContext(failedVerifyInput), true);
+  });
+
+  it("pending review still blocks recovery and remains stale", () => {
+    const waiting = staleInput({
+      plan: SAMPLE_PLAN,
+      planApplySession: {
+        phase: "waiting_for_review",
+        files: [],
+        applyRunId: "apply-1",
+      } as unknown as PlanApplySession,
+      greenfieldRun: SUCCESS_GREENFIELD,
+    });
+    assert.equal(classifyStaleRunArtifacts(waiting).planApplySession, "recoverable_pending");
+    const result = recoverObsoleteRunArtifacts({
+      context: waiting,
+      kind: "successful_undo",
+      recoveredRunId: "apply-1",
+      ownedRunId: "apply-1",
+    });
+    assert.equal(result.ok, false);
+    assert.equal(hasStaleRunContext(waiting), true);
+  });
+
+  it("active run still blocks recovery", () => {
+    const active = staleInput({
+      plan: SAMPLE_PLAN,
+      planApplyError: "Typecheck failed after apply.",
+      mutex: { ...IDLE_MUTEX, buildRunning: true },
+    });
+    assert.equal(classifyStaleRunArtifacts(active).mutex, "active_work");
+    assert.equal(hasStaleRunContext(active), false);
+    const result = recoverObsoleteRunArtifacts({
+      context: active,
+      kind: "successful_undo",
+      recoveredRunId: "apply-1",
+      ownedRunId: "apply-1",
+    });
+    assert.equal(result.ok, false);
+  });
+
+  it("Reject/Cancel with no writes recovers and leaves no stale state", () => {
+    const waiting = staleInput({
+      plan: SAMPLE_PLAN,
+      aiPlan: SUCCESS_AI_PLAN,
+      aiPlanStatus: "done",
+      planApplySession: {
+        phase: "waiting_for_review",
+        files: [],
+        applyRunId: "apply-1",
+      } as unknown as PlanApplySession,
+      greenfieldRun: {
+        ...emptyGreenfieldRun(),
+        runResult: "running",
+      },
+    });
+    const withoutSession = { ...waiting, planApplySession: null };
+    const result = recoverObsoleteRunArtifacts({
+      context: withoutSession,
+      kind: "cancel_unapplied",
+      recoveredRunId: "apply-1",
+      ownedRunId: "apply-1",
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const next = applyObsoleteRunRecoveryToContext(withoutSession, result.next);
+    assert.equal(hasStaleRunContext(next), false);
+    assert.equal(hasAbandonedRunArtifacts(next) && !isSuccessfulTerminalIdleContext(next), false);
+  });
+
+  it("Reset still clears via the existing full clear path, not recovery", () => {
+    assert.equal(hasStaleRunContext(failedVerifyInput), true);
+    const reset = staleInput();
+    assert.equal(hasStaleRunContext(reset), false);
+    assert.equal(isSuccessfulTerminalIdleContext(reset), false);
+  });
+
+  it("ownedApplyRunId prefers the active apply run", () => {
+    assert.equal(ownedApplyRunId("active", "completed"), "active");
+    assert.equal(ownedApplyRunId(null, "completed"), "completed");
+    assert.equal(ownedApplyRunId(null, null), null);
   });
 });

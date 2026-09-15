@@ -69,7 +69,7 @@ export interface BuildPipelineHost {
     applied: readonly string[];
     error?: string;
   }>;
-  readonly cancelApplyPlan: () => void;
+  readonly cancelApplyPlan: (opts?: { recoverUnapplied?: boolean }) => void;
   readonly executeApplyPlan: (opts: {
     directRewrite: boolean;
     pipelineMode?: boolean;

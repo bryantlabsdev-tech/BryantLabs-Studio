@@ -3,12 +3,14 @@ import { afterEach, describe, it } from "node:test";
 import { applyApprovedPlanFilesOrchestration } from "@/app/orchestration/applyPlanApply";
 import type { ApplyPlanOrchestrationHost } from "@/app/orchestration/applyPlanTypes";
 import { clearPatchGeneratedWatchdog } from "@/core/agent/patchApplyWatchdog";
+import { setForcedVerificationResult } from "@/core/agent/runRecoveryTestSeams";
 import { emptySessionMemory } from "@/core/sessionMemory/store";
 import type { PlanApplyFileEntry, PlanApplySession } from "@/core/planApply";
 import type { VerificationResult } from "@/types";
 
 afterEach(() => {
   clearPatchGeneratedWatchdog();
+  setForcedVerificationResult(null);
 });
 
 function okVerification(): VerificationResult {
@@ -73,12 +75,26 @@ function applyHost(session: PlanApplySession | null): {
   readonly written: string[];
   readonly undoBatches: readonly { path: string; previousContent: string; created: boolean }[][];
   readonly canUndo: { value: boolean };
+  readonly state: {
+    planApplyError: string | null;
+    session: PlanApplySession | null;
+    verification: VerificationResult | null;
+    checkpoint: { applyRunId?: string } | null;
+    failureLine: string | null;
+  };
 } {
   const written: string[] = [];
   const undoBatches: { path: string; previousContent: string; created: boolean }[][] = [];
   const canUndo = { value: false };
   let persisted: PlanApplySession | null = session;
   let memory = emptySessionMemory("/tmp/project");
+  const state = {
+    planApplyError: null as string | null,
+    session,
+    verification: null as VerificationResult | null,
+    checkpoint: null as { applyRunId?: string } | null,
+    failureLine: null as string | null,
+  };
   const host = {
     api: {
       applyEdit: async (absPath: string) => {
@@ -109,24 +125,31 @@ function applyHost(session: PlanApplySession | null): {
     isStaleApplyPlanRun: () => false,
     ignoreStaleApplyPlanResult: () => {},
     completeApplyPlanRun: () => {},
-    setPlanApplyError: () => {},
+    setPlanApplyError: (value: string | null) => {
+      state.planApplyError = value;
+    },
     setPlanApplySession: (
       next: PlanApplySession | null | ((prev: PlanApplySession | null) => PlanApplySession | null),
     ) => {
       persisted = typeof next === "function" ? next(persisted) : next;
+      state.session = persisted;
     },
     setCenterTab: () => {},
     beginStudioAction: () => {},
     finishStudioAction: () => {},
     updateGreenfieldRun: () => {},
-    publishFailureReport: () => {},
+    publishFailureReport: (report: { rootCauseLine?: string } | null) => {
+      state.failureLine = report?.rootCauseLine ?? null;
+    },
     appendGreenfieldRunLog: () => {},
     setSessionMemory: (
       next: typeof memory | ((prev: typeof memory) => typeof memory),
     ) => {
       memory = typeof next === "function" ? next(memory) : next;
     },
-    setVerification: () => {},
+    setVerification: (value: VerificationResult | null) => {
+      state.verification = value;
+    },
     setVerifyStatus: () => {},
     runScan: () => {},
     requestPreviewTab: () => {},
@@ -141,8 +164,19 @@ function applyHost(session: PlanApplySession | null): {
       canUndo.value = value;
     },
     setLastEditedPath: () => {},
+    saveFollowUpCheckpoint: (checkpoint: { applyRunId?: string }) => {
+      state.checkpoint = checkpoint.applyRunId
+        ? { applyRunId: checkpoint.applyRunId }
+        : {};
+    },
   };
-  return { host: host as unknown as ApplyPlanOrchestrationHost, written, undoBatches, canUndo };
+  return {
+    host: host as unknown as ApplyPlanOrchestrationHost,
+    written,
+    undoBatches,
+    canUndo,
+    state,
+  };
 }
 
 describe("applyApprovedPlanFilesOrchestration accept all", () => {
@@ -287,5 +321,24 @@ describe("applyApprovedPlanFilesOrchestration undo batch", () => {
     const lastBatch = harness.undoBatches[harness.undoBatches.length - 1];
     assert.deepEqual(lastBatch, []);
     assert.equal(harness.canUndo.value, false);
+  });
+});
+
+describe("applyApprovedPlanFilesOrchestration verification failure", () => {
+  it("writes files, keeps undo, and clears the review session", async () => {
+    const harness = applyHost(pendingSession([readyFile("src/App.tsx")]));
+    setForcedVerificationResult({ error: "Forced verification failure" });
+    const result = await applyApprovedPlanFilesOrchestration(harness.host, {
+      approveReadyFiles: true,
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.applied, ["src/App.tsx"]);
+    assert.match(result.error ?? "", /Forced verification failure/);
+    assert.equal(harness.written.length, 1);
+    assert.equal(harness.state.session, null);
+    assert.match(harness.state.planApplyError ?? "", /Forced verification failure/);
+    assert.equal(harness.canUndo.value, true);
+    assert.equal(harness.state.checkpoint?.applyRunId, "run-accept-all");
+    assert.equal(harness.undoBatches.at(-1)?.length, 1);
   });
 });

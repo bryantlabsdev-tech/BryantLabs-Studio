@@ -54,6 +54,7 @@ import {
   recordVerificationFailure,
 } from "@/core/sessionMemory";
 import { verificationSummaryLines } from "@/core/studioRun/types";
+import { consumeForcedVerificationResult } from "@/core/agent/runRecoveryTestSeams";
 import type { BryantLabsApi, ProjectInfo, VerificationResult } from "@/types";
 
 export interface ApplyApprovedPlanOptions {
@@ -169,6 +170,7 @@ export async function applyApprovedPlanFilesOrchestration(
       createFollowUpCheckpoint({
         projectPath: resolved.project.path,
         prompt,
+        applyRunId: runId,
         files: approved.map((f) => {
           const action = f.action === "create" ? "create" as const : "modify" as const;
           return {
@@ -364,7 +366,7 @@ export async function applyApprovedPlanFilesOrchestration(
   let verification: VerificationResult | null = null;
   let verifyErr: string | null = null;
   try {
-    const res = await api.verify();
+    const res = consumeForcedVerificationResult() ?? (await api.verify());
     if ("error" in res) {
       verifyErr = res.error;
       recordRunTimelineStage("typescript_complete", "error");

@@ -25,6 +25,10 @@ import {
   appendFollowUpChatMessage,
   createFollowUpChatMessage,
 } from "@/core/build/followUpChat";
+import {
+  setForcedUndoPathFailure,
+  setForcedVerificationResult,
+} from "@/core/agent/runRecoveryTestSeams";
 
 export interface WorkspaceStudioTestHooksInput {
   readonly api: BryantLabsApi | undefined;
@@ -387,6 +391,14 @@ export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput
     [],
   );
 
+  const forceNextVerificationFailure = useCallback((message: string) => {
+    setForcedVerificationResult({ error: message });
+  }, []);
+
+  const forceNextUndoPathFailure = useCallback((relPath: string) => {
+    setForcedUndoPathFailure(relPath);
+  }, []);
+
   useStudioTestHooks({
     getReadinessState,
     getGreenfieldRunSnapshot,
@@ -405,5 +417,7 @@ export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput
     getFollowUpReviewFirst: getFollowUpReviewFirstHook,
     resolveFollowUpAutoContinue: resolveFollowUpAutoContinueHook,
     clearFollowUpReviewFirstPreference: clearFollowUpReviewFirstPreferenceHook,
+    forceNextVerificationFailure,
+    forceNextUndoPathFailure,
   });
 }

@@ -63,6 +63,8 @@ interface StudioTestHooks {
   getFollowUpReviewFirst(): boolean;
   resolveFollowUpAutoContinue(prompt: string): boolean;
   clearFollowUpReviewFirstPreference(): void;
+  forceNextVerificationFailure(message: string): void;
+  forceNextUndoPathFailure(relPath: string): void;
 }
 
 interface StudioReadinessState {
