@@ -195,9 +195,17 @@ describe("provider reliability", () => {
 
   it("redacts API keys from log text", () => {
     const redacted = redactProviderSecrets(
-      "Authorization failed sk-ant-api03-secretkey1234 x-api-key: abc123",
+      "Authorization failed sk-ant-secretkey1234 x-api-key: abc123 Bearer tok_live sk-or-openrouterkey gsk_groqkey AIzaSyabcd123456 ?key=querysecret",
     );
     assert.match(redacted, /sk-ant-••••/);
+    assert.match(redacted, /sk-or-••••/);
+    assert.match(redacted, /gsk_••••/);
+    assert.match(redacted, /AIza••••/);
+    assert.match(redacted, /Bearer ••••/);
+    assert.match(redacted, /key=••••/);
     assert.doesNotMatch(redacted, /secretkey1234/);
+    assert.doesNotMatch(redacted, /openrouterkey/);
+    assert.doesNotMatch(redacted, /groqkey/);
+    assert.doesNotMatch(redacted, /querysecret/);
   });
 });

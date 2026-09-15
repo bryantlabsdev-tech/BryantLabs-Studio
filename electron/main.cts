@@ -70,6 +70,7 @@ import {
   sanitizeProviderSettingsInput,
   revealApiKey,
   loadRawSettings,
+  ensureProviderSecretsMigrated,
   type ProviderId,
   type PlanContext,
   type PatchTargetFile,
@@ -1309,6 +1310,7 @@ if (!app || typeof app.whenReady !== "function") {
 app.whenReady().then(async () => {
   registerIpcHandlers();
 
+  await ensureProviderSecretsMigrated();
   await applyE2eRealProviderSettings();
 
   if (process.platform === "darwin" && app.dock) {

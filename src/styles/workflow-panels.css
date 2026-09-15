@@ -1831,6 +1831,13 @@ webview.preview-frame {
   color: var(--warning, #c9a227);
 }
 
+.prov-key-field__notice {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--warning, #c9a227);
+}
+
 .prov-key-field__row {
   display: flex;
   gap: var(--space-2);
