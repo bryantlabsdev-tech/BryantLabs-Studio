@@ -9,6 +9,16 @@ export interface ActivateProjectOptions {
   awaitPreviewStop?: boolean;
 }
 
+export const PROJECT_SWITCH_OPTIONS: ActivateProjectOptions = {
+  awaitPreviewStop: true,
+};
+
+/** Optional overrides for unit tests; production uses the real preview stoppers. */
+export interface ProjectSwitchRuntime {
+  stopPreviewAsync?: () => Promise<void>;
+  stopPreview?: () => void;
+}
+
 /**
  * Tear down project-scoped main-process resources before switching roots.
  * Kills PTYs first so shell/file-descriptor callbacks cannot race with new work.
@@ -16,16 +26,30 @@ export interface ActivateProjectOptions {
 export async function prepareProjectSwitch(
   nextRoot: string,
   opts?: ActivateProjectOptions,
+  runtime?: ProjectSwitchRuntime,
 ): Promise<void> {
   destroyAllTerminals();
   if (opts?.awaitPreviewStop) {
-    await stopPreviewAsync();
+    await (runtime?.stopPreviewAsync ?? stopPreviewAsync)();
   } else {
-    stopPreview();
+    (runtime?.stopPreview ?? stopPreview)();
   }
   await stopProjectIndex();
   clearSemanticIndex();
   noteActiveProject(nextRoot);
+}
+
+/**
+ * Production project switch: wait for the previous preview tree/port to settle
+ * before the next root is marked active.
+ */
+export async function switchToProjectRoot(
+  nextRoot: string,
+  onActivated: (root: string) => Promise<void> | void,
+  runtime?: ProjectSwitchRuntime,
+): Promise<void> {
+  await prepareProjectSwitch(nextRoot, PROJECT_SWITCH_OPTIONS, runtime);
+  await onActivated(nextRoot);
 }
 
 /** After {@link prepareProjectSwitch}, hydrate index for the new root. */
