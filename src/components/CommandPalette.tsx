@@ -29,7 +29,18 @@ export function CommandPalette() {
     greenfieldRun,
   } = useWorkspace();
   const [query, setQuery] = useState("");
+  const [reviewFirst, setReviewFirst] = useState(readFollowUpReviewFirst);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (commandPaletteOpen) setReviewFirst(readFollowUpReviewFirst());
+  }, [commandPaletteOpen]);
+
+  useEffect(() => {
+    const onToggle = () => setReviewFirst(readFollowUpReviewFirst());
+    window.addEventListener("bryantlabs:toggle-review-first", onToggle);
+    return () => window.removeEventListener("bryantlabs:toggle-review-first", onToggle);
+  }, []);
 
   const commands = useMemo((): CommandItem[] => {
     const go = (tool: RailTool, label: string, hint?: string): CommandItem => ({
@@ -70,13 +81,11 @@ export function CommandPalette() {
       },
       {
         id: "review:toggle",
-        label: readFollowUpReviewFirst() ? "Turn off review first" : "Turn on review first",
+        label: reviewFirst ? "Turn off review first" : "Turn on review first",
         hint: "Pause to review diffs before applying",
         section: "daily",
         run: () => {
-          const next = !readFollowUpReviewFirst();
-          writeFollowUpReviewFirst(next);
-          window.dispatchEvent(new CustomEvent("bryantlabs:toggle-review-first"));
+          writeFollowUpReviewFirst(!reviewFirst);
         },
       },
       go("providers", "Open Settings", "AI providers & API keys"),
@@ -133,6 +142,7 @@ export function CommandPalette() {
     runVerification,
     triggerGreenfieldRepair,
     greenfieldRun.setupStatus,
+    reviewFirst,
   ]);
 
   const filtered = useMemo(() => {
@@ -234,6 +244,13 @@ export function CommandPalette() {
                     .filter(Boolean)
                     .join(" ")}
                   onMouseEnter={() => setActiveIdx(idx)}
+                  onPointerDown={(event) => {
+                    // Activate on pointerdown so Linux/CI clicks are not lost when
+                    // the search input blurs and the list remounts before click.
+                    event.preventDefault();
+                    cmd.run();
+                    setCommandPaletteOpen(false);
+                  }}
                   onClick={() => {
                     cmd.run();
                     setCommandPaletteOpen(false);

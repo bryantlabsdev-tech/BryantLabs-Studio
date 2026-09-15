@@ -345,11 +345,7 @@ export function BuildView() {
       });
     };
     const onToggleReviewFirst = () => {
-      setReviewFirst((prev) => {
-        const next = !prev;
-        writeFollowUpReviewFirst(next);
-        return next;
-      });
+      setReviewFirst(readFollowUpReviewFirst());
     };
     window.addEventListener("bryantlabs:focus-composer", onFocusComposer);
     window.addEventListener("bryantlabs:fill-prompt", onFillPrompt);

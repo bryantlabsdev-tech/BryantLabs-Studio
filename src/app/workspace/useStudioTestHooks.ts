@@ -19,6 +19,13 @@ export interface StudioTestHookCallbacks {
     aiPlanStatus: string;
     centerTab: string;
     activeAgentRunId: string | null;
+    prompt: string | null;
+    files: readonly {
+      relPath: string;
+      status: string;
+      error: string | null;
+      changed: boolean;
+    }[];
   };
   readonly simulatePatchReadyForReview: () =>
     | { ok: true }
@@ -42,6 +49,9 @@ export interface StudioTestHookCallbacks {
   };
   readonly checkConfiguredProviderHealth: () => Promise<HealthResult>;
   readonly runProviderSmokeTest: (prompt: string) => Promise<ProviderResponse>;
+  readonly getFollowUpReviewFirst: () => boolean;
+  readonly resolveFollowUpAutoContinue: (prompt: string) => boolean;
+  readonly clearFollowUpReviewFirstPreference: () => void;
 }
 
 export function useStudioTestHooks(callbacks: StudioTestHookCallbacks): void {
@@ -74,6 +84,11 @@ export function useStudioTestHooks(callbacks: StudioTestHookCallbacks): void {
         callbacksRef.current.checkConfiguredProviderHealth(),
       runProviderSmokeTest: (prompt: string) =>
         callbacksRef.current.runProviderSmokeTest(prompt),
+      getFollowUpReviewFirst: () => callbacksRef.current.getFollowUpReviewFirst(),
+      resolveFollowUpAutoContinue: (prompt: string) =>
+        callbacksRef.current.resolveFollowUpAutoContinue(prompt),
+      clearFollowUpReviewFirstPreference: () =>
+        callbacksRef.current.clearFollowUpReviewFirstPreference(),
     };
 
     (window as Window & { __studioTestHooks?: typeof hooks }).__studioTestHooks = hooks;

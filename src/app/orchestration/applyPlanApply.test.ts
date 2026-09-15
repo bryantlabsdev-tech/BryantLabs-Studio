@@ -159,6 +159,24 @@ describe("applyApprovedPlanFilesOrchestration accept all", () => {
     assert.match(harness.written[0] ?? "", /src\/App\.tsx$/);
   });
 
+  it("waiting_for_review does not write until approveReadyFiles", async () => {
+    const harness = applyHost(pendingSession([readyFile("src/App.tsx")]));
+    const result = await applyApprovedPlanFilesOrchestration(harness.host);
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "No approved files");
+    assert.equal(harness.written.length, 0);
+  });
+
+  it("rejecting review (no session) writes nothing", async () => {
+    const harness = applyHost(null);
+    const result = await applyApprovedPlanFilesOrchestration(harness.host, {
+      approveReadyFiles: true,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "No apply session");
+    assert.equal(harness.written.length, 0);
+  });
+
   it("refuses pending files without approveReadyFiles", async () => {
     const harness = applyHost(pendingSession([readyFile("src/App.tsx")]));
     const result = await applyApprovedPlanFilesOrchestration(harness.host, {

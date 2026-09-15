@@ -21,7 +21,7 @@ import type { PipelineReviewGates } from "@/app/orchestration/pipelineGates";
 import type { BryantLabsApi, ProjectInfo, ProjectScan } from "@/types";
 import type { BuildPipelineHost } from "@/app/orchestration/types";
 import type { PipelineRunnerDeps } from "@/app/multiAgentPipeline";
-import { AUTO_APPLY_FOLLOW_UP_PATCHES } from "@/core/build/followUpPrefs";
+import { awaitFollowUpPipelineReviewApproval } from "@/core/build/followUpPrefs";
 
 type ResolvedPipelineHost = BuildPipelineHost & {
   api: BryantLabsApi;
@@ -199,7 +199,7 @@ export function buildPipelineRunnerDeps(
       };
     },
     awaitReviewApproval: () =>
-      AUTO_APPLY_FOLLOW_UP_PATCHES ? Promise.resolve(true) : gates.awaitReviewApproval(),
+      awaitFollowUpPipelineReviewApproval(() => gates.awaitReviewApproval()),
     awaitRepairApproval: () => gates.awaitRepairApproval(),
     getMaxRepairAttempts: () => effectiveMaxRepairAttempts(settings),
   };

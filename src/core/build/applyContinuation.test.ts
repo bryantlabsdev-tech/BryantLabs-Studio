@@ -15,6 +15,10 @@ describe("applyContinuation", () => {
     assert.equal(shouldAutoContinueFollowUpApply(prompt), true);
   });
 
+  it("does not auto-continue ordinary follow-up prompts", () => {
+    assert.equal(shouldAutoContinueFollowUpApply("Add a timer"), false);
+  });
+
   it("reports when apply never starts after planning", () => {
     const message = formatApplyContinuationFailure({
       applyResult: { validReady: 0, autoContinued: false },

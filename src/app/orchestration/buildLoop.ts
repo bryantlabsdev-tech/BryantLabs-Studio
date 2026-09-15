@@ -20,10 +20,7 @@ import { deriveBuildPhase, type BuildLoopMode, type BuildLoopStatus } from "@/co
 import { readUseAgentLoopForEdits } from "@/core/build/followUpAgentLoop";
 import { formatApplyContinuationFailure } from "@/core/build/applyContinuation";
 import { buildFollowUpActivityStream } from "@/core/build/followUpRun";
-import {
-  readFollowUpReviewFirst,
-  shouldAutoContinueFollowUpApply,
-} from "@/core/build/followUpPrefs";
+import { resolveFollowUpAutoContinue } from "@/core/build/followUpPrefs";
 import { modelForProvider } from "@/core/providers/AnthropicProvider";
 import { logProviderSelected } from "@/core/providers/providerDiagnostics";
 import {
@@ -129,8 +126,7 @@ async function executeSingleAgentFollowUp(
     failRunTimeline(err);
     return err;
   }
-  const autoContinue =
-    shouldAutoContinueFollowUpApply(trimmed) || !readFollowUpReviewFirst();
+  const autoContinue = resolveFollowUpAutoContinue(trimmed);
   const applyResult = await host.startApplyPlan({ autoContinue, prompt: trimmed });
   if (applyResult.waitingForReview) {
     recordRunTimelineStage("waiting_for_review", `${applyResult.validReady} file(s)`);

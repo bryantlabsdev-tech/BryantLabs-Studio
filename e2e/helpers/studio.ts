@@ -4,6 +4,7 @@ import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { expect } from "@playwright/test";
 import type { ElectronApplication, Page } from "playwright";
 import { _electron as electron } from "playwright";
 import {
@@ -326,7 +327,7 @@ export async function openFixtureProject(
     localStorage.removeItem("bryantlabs.agentRunHistory.__bryantlabs-session__");
     localStorage.removeItem(`bryantlabs.followUpChat.${targetPath}`);
     localStorage.removeItem("bryantlabs.providerCircuit.v1");
-    localStorage.removeItem("bryantlabs.followUpReviewFirst");
+    window.__studioTestHooks?.clearFollowUpReviewFirstPreference?.();
     localStorage.setItem("bryantlabs.useAgentLoopForEdits", "0");
     const hooks = window.__studioTestHooks;
     if (!hooks?.openProjectAt) {
@@ -357,6 +358,203 @@ export async function fillAgentPrompt(page: Page, text: string): Promise<void> {
 
 export async function sendAgentPrompt(page: Page): Promise<void> {
   await page.getByTestId("agent-send").click({ timeout: READINESS_TIMEOUT_MS });
+}
+
+export interface AgentSubmitSnapshot {
+  submitEventId: string | null;
+  activeAgentRunId: string | null;
+  applyPlanInvocations: number;
+}
+
+export async function snapshotAgentSubmit(page: Page): Promise<AgentSubmitSnapshot> {
+  return page.evaluate(() => {
+    const diagnostic = window.__studioTestHooks?.getFollowUpSettlementDiagnostic?.();
+    const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+    return {
+      submitEventId: diagnostic?.submitEventId ?? null,
+      activeAgentRunId: pipeline?.activeAgentRunId ?? null,
+      applyPlanInvocations: diagnostic?.applyPlanInvocations ?? 0,
+    };
+  });
+}
+
+async function readSubmitGateProgress(
+  page: Page,
+  before: AgentSubmitSnapshot,
+): Promise<"stale" | "feasibility" | "started" | "pending"> {
+  const started = await page.evaluate((baseline) => {
+    const diagnostic = window.__studioTestHooks?.getFollowUpSettlementDiagnostic?.();
+    const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+    if (
+      diagnostic?.submitEventId &&
+      diagnostic.submitEventId !== baseline.submitEventId
+    ) {
+      return true;
+    }
+    if (
+      pipeline?.activeAgentRunId &&
+      pipeline.activeAgentRunId !== baseline.activeAgentRunId
+    ) {
+      return true;
+    }
+    return false;
+  }, before);
+  if (started) return "started";
+  const stale = page.getByRole("region", { name: "Stale run state" });
+  const proceed = page.getByRole("button", { name: /^Proceed anyway$/i });
+  if (await stale.isVisible().catch(() => false)) return "stale";
+  if (await proceed.isVisible().catch(() => false)) return "feasibility";
+  return "pending";
+}
+
+/**
+ * After send, wait for a new submit/run or the stale-run gate.
+ * Leftover planApplyPhase/submitEventId from a prior run is not treated as start.
+ */
+export async function confirmStaleRunResetIfPresent(
+  page: Page,
+  before: AgentSubmitSnapshot,
+): Promise<void> {
+  const stale = page.getByRole("region", { name: "Stale run state" });
+  const proceed = page.getByRole("button", { name: /^Proceed anyway$/i });
+  let progress: "stale" | "feasibility" | "started" | "pending" = "pending";
+  try {
+    await expect
+      .poll(async () => {
+        progress = await readSubmitGateProgress(page, before);
+        return progress;
+      }, {
+        timeout: READINESS_TIMEOUT_MS,
+      })
+      .not.toBe("pending");
+  } catch (error) {
+    const debug = await page.evaluate(() => {
+      const diagnostic = window.__studioTestHooks?.getFollowUpSettlementDiagnostic?.();
+      const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+      const ready = window.__studioTestHooks?.getReadinessState?.();
+      return {
+        diagnostic,
+        pipeline,
+        projectPath: ready?.projectPath ?? null,
+        composerBlockReason: ready?.composerBlockReason ?? null,
+      };
+    });
+    throw new Error(
+      `Submit did not start a new run or show the stale-run gate. before=${JSON.stringify(before)} debug=${JSON.stringify(debug)} cause=${String(error)}`,
+    );
+  }
+
+  if (progress === "stale") {
+    await stale.getByRole("button", { name: /^Reset and start$/i }).click();
+    await expect(stale).toBeHidden();
+  } else if (progress === "feasibility") {
+    await proceed.click();
+  }
+
+  if (progress === "started") {
+    return;
+  }
+
+  try {
+    await expect
+      .poll(async () => {
+        const progress = await readSubmitGateProgress(page, before);
+        return progress === "stale" || progress === "feasibility" ? "pending" : progress;
+      }, { timeout: READINESS_TIMEOUT_MS })
+      .toBe("started");
+  } catch (error) {
+    const debug = await page.evaluate(() => {
+      const diagnostic = window.__studioTestHooks?.getFollowUpSettlementDiagnostic?.();
+      const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+      return { diagnostic, pipeline };
+    });
+    throw new Error(
+      `Stale-run reset did not start a new run. before=${JSON.stringify(before)} debug=${JSON.stringify(debug)} cause=${String(error)}`,
+    );
+  }
+}
+
+export async function sendAgentPromptHandlingSubmitGates(page: Page): Promise<AgentSubmitSnapshot> {
+  const before = await snapshotAgentSubmit(page);
+  await sendAgentPrompt(page);
+  await confirmStaleRunResetIfPresent(page, before);
+  return before;
+}
+
+export type FollowUpApplyTerminal =
+  | "waiting_for_review"
+  | "applied"
+  | "apply_failed"
+  | "stale_gate";
+
+/** Wait until this follow-up proposes/applies, fails apply, or pauses for review. */
+export async function waitForFollowUpApplyTerminal(
+  page: Page,
+  before: AgentSubmitSnapshot,
+): Promise<FollowUpApplyTerminal> {
+  const readTerminal = async (): Promise<FollowUpApplyTerminal | "pending"> => {
+    if (await page.getByRole("region", { name: "Stale run state" }).isVisible().catch(() => false)) {
+      return "stale_gate";
+    }
+    return page.evaluate((baseline) => {
+      const diagnostic = window.__studioTestHooks?.getFollowUpSettlementDiagnostic?.();
+      const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+      if (!pipeline) return "pending";
+      const newSubmit =
+        Boolean(diagnostic?.submitEventId) &&
+        diagnostic?.submitEventId !== baseline.submitEventId;
+      const applyStarted =
+        (diagnostic?.applyPlanInvocations ?? 0) > baseline.applyPlanInvocations;
+      if (pipeline.planApplyPhase === "waiting_for_review" && newSubmit) {
+        return "waiting_for_review";
+      }
+      if (applyStarted && pipeline.planApplyError) return "apply_failed";
+      if (
+        applyStarted &&
+        pipeline.files?.some((file) => file.status === "applied" || file.status === "verified")
+      ) {
+        return "applied";
+      }
+      if (
+        applyStarted &&
+        (pipeline.planApplyPhase === "verifying" || pipeline.planApplyPhase === "done")
+      ) {
+        return "applied";
+      }
+      return "pending";
+    }, before);
+  };
+
+  try {
+    await expect
+      .poll(readTerminal, { timeout: PATCH_PIPELINE_TIMEOUT_MS })
+      .not.toBe("pending");
+  } catch (error) {
+    const debug = await page.evaluate(() => {
+      const diagnostic = window.__studioTestHooks?.getFollowUpSettlementDiagnostic?.();
+      const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+      const run = window.__studioTestHooks?.getGreenfieldRunSnapshot?.();
+      const ready = window.__studioTestHooks?.getReadinessState?.();
+      return {
+        diagnostic,
+        pipeline,
+        runResult: run?.runResult ?? null,
+        entries: run?.entries?.slice(-12) ?? [],
+        projectPath: ready?.projectPath ?? null,
+        autoContinue: window.__studioTestHooks?.resolveFollowUpAutoContinue?.("Add a timer") ?? null,
+        reviewFirst: window.__studioTestHooks?.getFollowUpReviewFirst?.() ?? null,
+      };
+    });
+    throw new Error(
+      `Follow-up apply did not reach a terminal state. before=${JSON.stringify(before)} debug=${JSON.stringify(debug)} cause=${String(error)}`,
+    );
+  }
+
+  const terminal = await readTerminal();
+  if (terminal === "pending") {
+    throw new Error("Follow-up apply poll ended without a terminal state.");
+  }
+  return terminal;
 }
 
 export async function waitForPreviewPanelUrl(

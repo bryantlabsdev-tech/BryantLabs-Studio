@@ -13,16 +13,28 @@ function isGameplayPrompt(promptLower: string): boolean {
   );
 }
 
+const MOCK_TIMER_MARKER = "// mock: timer enhancement";
+
+function isTimerFollowUpPrompt(promptLower: string): boolean {
+  if (isGameplayPrompt(promptLower)) return false;
+  return /\badd a timer\b/.test(promptLower) || /\btimer\b/.test(promptLower);
+}
+
+function applyTimerAppPatch(content: string): string {
+  if (content.includes(MOCK_TIMER_MARKER)) {
+    return `${content.trimEnd()}\nexport const MOCK_TIMER_BUMP = true;\n`;
+  }
+  return `${content.trimEnd()}\n${MOCK_TIMER_MARKER}\nexport const MOCK_TIMER = true;\n`;
+}
+
 function patchAppTsx(content: string, promptLower: string): string {
+  if (isTimerFollowUpPrompt(promptLower)) {
+    return applyTimerAppPatch(content);
+  }
   if (isGameplayPrompt(promptLower)) {
     const marker = "// mock: gameplay upgrade";
     if (content.includes(marker)) return content;
     return `${content.trimEnd()}\n${marker}\nexport const MOCK_GAMEPLAY = true;\n`;
-  }
-  if (promptLower.includes("timer")) {
-    const marker = "// mock: timer enhancement";
-    if (content.includes(marker)) return content;
-    return content.replace(/export function App\(\)/, `${marker}\nexport function App()`);
   }
   if (/\b(mobile|responsive|layout)\b/.test(promptLower)) {
     const marker = "/* mock: responsive layout */";
@@ -71,6 +83,11 @@ export function mockApplyPlanBatchPatch(
       out[path] = patchAppTsx(file.content, promptLower);
     } else if (path === "src/index.css") {
       out[path] = patchIndexCss(file.content, promptLower);
+    } else if (path === "src/components/History.tsx" || path.endsWith("/History.tsx")) {
+      out[path] = `export function History() {
+  return <section aria-label="calculation history">History</section>;
+}
+`;
     } else if (path.endsWith(".tsx") || path.endsWith(".ts")) {
       out[path] = patchPageTsx(file.content);
     } else {

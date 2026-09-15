@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, it } from "node:test";
 import {
   isMockProviderEnabled,
@@ -6,6 +8,11 @@ import {
   mockRunPlan,
   mockGreenfieldGenerate,
 } from "./mockProvider.cjs";
+
+const sudokuApp = readFileSync(
+  path.join(process.cwd(), "e2e/fixtures/sudoku-vite/src/App.tsx"),
+  "utf8",
+);
 
 describe("mock provider", () => {
   it("is disabled unless BRYANTLABS_MOCK_PROVIDER=1", () => {
@@ -40,6 +47,63 @@ describe("mock provider", () => {
     assert.equal(result.ok, true);
     assert.match(result.rawText ?? "", /@@FILE:src\/App\.tsx/);
     assert.match(result.files?.["src/App.tsx"] ?? "", /mock: gameplay upgrade/);
+  });
+
+  it("mockApplyPlanBatchPatch always mutates App.tsx for Add a timer", () => {
+    const namedExport = mockApplyPlanBatchPatch(
+      "anthropic",
+      "Add a timer",
+      [{ path: "src/App.tsx", content: sudokuApp }],
+      {
+        planSummary: "Timer",
+        targetPaths: ["src/App.tsx"],
+        slimContext: false,
+        directRewrite: false,
+        repair: false,
+      },
+    );
+    assert.equal(namedExport.ok, true);
+    assert.notEqual(namedExport.files?.["src/App.tsx"], sudokuApp);
+    assert.match(namedExport.files?.["src/App.tsx"] ?? "", /mock: timer enhancement/);
+    assert.match(namedExport.files?.["src/App.tsx"] ?? "", /MOCK_TIMER/);
+
+    const defaultExport = "export default function App() { return <h2>Timer</h2>; }\n";
+    const defaultResult = mockApplyPlanBatchPatch(
+      "anthropic",
+      "Previous: Add calculation history.\nCurrent: Add a timer",
+      [{ path: "src/App.tsx", content: defaultExport }],
+      {
+        planSummary: "Timer",
+        targetPaths: ["src/App.tsx"],
+        slimContext: false,
+        directRewrite: false,
+        repair: false,
+      },
+    );
+    assert.equal(defaultResult.ok, true);
+    assert.notEqual(defaultResult.files?.["src/App.tsx"], defaultExport);
+    assert.match(defaultResult.files?.["src/App.tsx"] ?? "", /mock: timer enhancement/);
+  });
+
+  it("mockApplyPlanBatchPatch creates a valid History component", () => {
+    const result = mockApplyPlanBatchPatch(
+      "anthropic",
+      "Add calculation history. Create a separate History component.",
+      [
+        { path: "src/App.tsx", content: "export function App() { return null; }\n" },
+        { path: "src/components/History.tsx", content: "" },
+      ],
+      {
+        planSummary: "History",
+        targetPaths: ["src/App.tsx", "src/components/History.tsx"],
+        slimContext: false,
+        directRewrite: false,
+        repair: false,
+      },
+    );
+    assert.equal(result.ok, true);
+    assert.match(result.files?.["src/App.tsx"] ?? "", /MOCK_CALC_HISTORY/);
+    assert.match(result.files?.["src/components/History.tsx"] ?? "", /export function History/);
   });
 
   it("mockGreenfieldGenerate returns seven scaffold files", () => {

@@ -30,6 +30,21 @@ function isGameplayPrompt(promptLower: string): boolean {
   );
 }
 
+const MOCK_TIMER_MARKER = "// mock: timer enhancement";
+
+/** Ordinary "Add a timer" follow-ups, including wrapped apply-plan prompts. */
+function isTimerFollowUpPrompt(promptLower: string): boolean {
+  if (isGameplayPrompt(promptLower)) return false;
+  return /\badd a timer\b/.test(promptLower) || /\btimer\b/.test(promptLower);
+}
+
+function applyTimerAppPatch(content: string): string {
+  if (content.includes(MOCK_TIMER_MARKER)) {
+    return `${content.trimEnd()}\nexport const MOCK_TIMER_BUMP = true;\n`;
+  }
+  return `${content.trimEnd()}\n${MOCK_TIMER_MARKER}\nexport const MOCK_TIMER = true;\n`;
+}
+
 function planFilesForPrompt(userPrompt: string): AIPlan["files"] {
   const lower = userPrompt.toLowerCase();
   if (isGameplayPrompt(lower)) {
@@ -38,7 +53,7 @@ function planFilesForPrompt(userPrompt: string): AIPlan["files"] {
       { path: "src/index.css", reason: "Modal and panel styles" },
     ];
   }
-  if (lower.includes("timer")) {
+  if (isTimerFollowUpPrompt(lower)) {
     return [{ path: "src/App.tsx", reason: "Add timer UI and state" }];
   }
   if (
@@ -185,6 +200,9 @@ export function mockRunPlan(
 }
 
 function patchAppTsx(content: string, promptLower: string): string {
+  if (isTimerFollowUpPrompt(promptLower)) {
+    return applyTimerAppPatch(content);
+  }
   if (
     /\b(priority|due date|due dates|overdue|filter|clear completed|confirm)\b/.test(
       promptLower,
@@ -201,13 +219,10 @@ function patchAppTsx(content: string, promptLower: string): string {
     if (content.includes(marker)) return content;
     return `${content.trimEnd()}\n${marker}\nexport const MOCK_GAMEPLAY = true;\n`;
   }
-  if (promptLower.includes("timer")) {
-    const marker = "// mock: timer enhancement";
+  if (promptLower.includes("history")) {
+    const marker = "// mock: calculator history";
     if (content.includes(marker)) return content;
-    return content.replace(
-      /export function App\(\)/,
-      `${marker}\nexport function App()`,
-    );
+    return `${content.trimEnd()}\n${marker}\nexport const MOCK_CALC_HISTORY = true;\n`;
   }
   if (promptLower.includes("blue") || promptLower.includes("dark mode") || promptLower.includes("visually")) {
     if (content.includes('className="blue-theme"') || content.includes("dark-mode-toggle")) {
@@ -236,6 +251,12 @@ function patchFileContent(
   const norm = normalizeApplyPlanPath(relPath);
   if (norm === "src/App.tsx") return patchAppTsx(content, promptLower);
   if (norm === "src/index.css") return patchIndexCss(content, promptLower);
+  if (norm === "src/components/History.tsx") {
+    return `export function History() {
+  return <section aria-label="calculation history">History</section>;
+}
+`;
+  }
   return `${content.trimEnd()}\n/* mock patch */\n`;
 }
 
@@ -266,14 +287,24 @@ export function mockApplyPlanBatchPatch(
     const path = normalizeApplyPlanPath(file.path);
     out[path] = patchFileContent(path, file.content, promptLower);
   }
+  const patchKind = isGameplayPrompt(promptLower)
+    ? "gameplay"
+    : isTimerFollowUpPrompt(promptLower)
+      ? "timer"
+      : promptLower.includes("history")
+        ? "history"
+        : "generic";
   const rawText = Object.entries(out)
     .map(([p, c]) => `@@FILE:${p}\n${c}\n@@END`)
     .join("\n\n");
+  console.info(
+    `[mock:apply_plan] kind=${patchKind} files=${Object.keys(out).join(",") || "(none)"} promptLen=${userPrompt.length}`,
+  );
   return {
     ok: true,
     provider,
     model: MOCK_MODEL,
-    raw: { mock: true },
+    raw: { mock: true, patchKind },
     rawText,
     latencyMs: latencyMs(),
     files: out,
