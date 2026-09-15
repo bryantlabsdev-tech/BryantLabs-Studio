@@ -707,6 +707,12 @@ export function ProvidersView() {
 
       <section className="prov-block">
         <h3 className="prov-heading">Settings</h3>
+        {settings.secretProtection?.fileStatus === "quarantined" ||
+        settings.secretProtection?.fileStatus === "unsupported_schema" ? (
+          <p className="prov-key-field__notice" role="status">
+            {settings.secretProtection.userMessage}
+          </p>
+        ) : null}
 
         <label className="prov-label" htmlFor="prov-select">
           Provider

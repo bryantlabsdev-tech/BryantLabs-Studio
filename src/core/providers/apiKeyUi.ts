@@ -2,6 +2,37 @@ import { healthToReliabilityStatus } from "@/core/providers/reliability";
 import { hasStoredApiKey } from "@/core/providers/AnthropicProvider";
 import type { HealthResult, ProviderId, ProviderSettings } from "@/core/providers/types";
 
+export function providerSecretNotice(
+  settings: ProviderSettings,
+  provider: ProviderId,
+): string | null {
+  const protection = settings.secretProtection;
+  if (!protection) return null;
+  if (
+    protection.fileStatus === "quarantined" ||
+    protection.fileStatus === "unsupported_schema"
+  ) {
+    return protection.userMessage;
+  }
+  const state =
+    provider === "gemini"
+      ? protection.gemini
+      : provider === "anthropic"
+        ? protection.anthropic
+        : provider === "groq"
+          ? protection.groq
+          : provider === "openrouter"
+            ? protection.openrouter
+            : "empty";
+  if (state === "undecryptable") {
+    return "This API key cannot be decrypted. Replace it in Settings.";
+  }
+  if (state === "plaintext-legacy" && !protection.encryptionAvailable) {
+    return "API keys are stored with reduced protection on this device.";
+  }
+  return null;
+}
+
 export type ProviderKeyTestPhase = "idle" | "loading" | "done" | "error";
 
 export function apiKeySavedIndicator(

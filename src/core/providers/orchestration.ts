@@ -349,6 +349,9 @@ export function normalizeProviderSettings(
     plannerMaxOutputTokens: coercePlannerMaxOutputTokens(settings.plannerMaxOutputTokens),
     providerEnabled: normalizeProviderEnabled(settings.providerEnabled),
     costMode: settings.costMode ?? COST_MODE_DEFAULT,
+    ...(settings.secretProtection
+      ? { secretProtection: settings.secretProtection }
+      : {}),
   };
   return coerceSettingsToEnabledProviders(normalized).settings;
 }

@@ -82,6 +82,30 @@ export interface ProviderSettings {
   providerEnabled?: Partial<Record<ProviderId, boolean>>;
   /** Economy uses cheaper coder/repair models and skips planner when possible. */
   costMode?: CostMode;
+  /** Sanitized secret-storage status for Settings (never includes secrets). */
+  secretProtection?: ProviderSecretsStatus;
+}
+
+export type ProviderSecretRecordState =
+  | "empty"
+  | "encrypted"
+  | "plaintext-legacy"
+  | "undecryptable";
+
+export type ProviderSettingsFileStatus =
+  | "ok"
+  | "missing"
+  | "quarantined"
+  | "unsupported_schema";
+
+export interface ProviderSecretsStatus {
+  encryptionAvailable: boolean;
+  fileStatus: ProviderSettingsFileStatus;
+  gemini: ProviderSecretRecordState;
+  anthropic: ProviderSecretRecordState;
+  groq: ProviderSecretRecordState;
+  openrouter: ProviderSecretRecordState;
+  userMessage: string | null;
 }
 
 /** Partial update from the renderer. A provided `geminiApiKey` is stored as-is. */

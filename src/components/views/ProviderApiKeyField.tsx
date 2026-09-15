@@ -8,6 +8,7 @@ import {
   apiKeySavedIndicator,
   providerConnectionTestLabel,
   providerConnectionTestTone,
+  providerSecretNotice,
   type ProviderKeyTestPhase,
 } from "@/core/providers/apiKeyUi";
 import {
@@ -49,6 +50,7 @@ export function ProviderApiKeyField({
   const hasKey = hasStoredApiKey(settings, provider);
   const maskedPreview = apiKeyPreviewForProvider(settings, provider);
   const keyStatus = apiKeySavedIndicator(settings, provider);
+  const secretNotice = providerSecretNotice(settings, provider);
   const testLabel = providerConnectionTestLabel(provider, settings, testHealth, testPhase);
   const testTone = providerConnectionTestTone(testHealth, testPhase);
 
@@ -164,6 +166,11 @@ export function ProviderApiKeyField({
           {keyStatus.label}
         </span>
       </div>
+      {secretNotice ? (
+        <p className="prov-key-field__notice" role="status">
+          {secretNotice}
+        </p>
+      ) : null}
 
       <div className="prov-key-field__row">
         <input

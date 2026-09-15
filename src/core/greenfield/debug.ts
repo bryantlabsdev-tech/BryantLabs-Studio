@@ -2,6 +2,8 @@
  * Greenfield debug diagnostics — never include API keys or secrets.
  */
 
+import { redactProviderSecrets } from "@/core/providers/secretRedact";
+
 export type GreenfieldDebugStage =
   | "greenfield:generate"
   | "greenfield:generate / provider"
@@ -33,19 +35,10 @@ export interface GreenfieldDebugReport {
   parseTrace?: import("@/core/greenfield/types").GreenfieldParseTrace;
 }
 
-const SECRET_PATTERNS = [
-  /key=[^&\s]+/gi,
-  /geminiApiKey["']?\s*:\s*["'][^"']+["']/gi,
-  /api[_-]?key["']?\s*:\s*["'][^"']+["']/gi,
-  /Bearer\s+\S+/gi,
-];
-
 export function redactSecrets(text: string): string {
-  let out = text;
-  for (const pattern of SECRET_PATTERNS) {
-    out = out.replace(pattern, "[REDACTED]");
-  }
-  return out;
+  return redactProviderSecrets(text)
+    .replace(/geminiApiKey["']?\s*:\s*["'][^"']+["']/gi, "geminiApiKey:[REDACTED]")
+    .replace(/api[_-]?key["']?\s*:\s*["'][^"']+["']/gi, "api_key:[REDACTED]");
 }
 
 export function sanitizeDebugPayload(value: unknown): unknown {

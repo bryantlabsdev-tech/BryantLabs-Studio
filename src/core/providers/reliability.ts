@@ -3,6 +3,7 @@ import { modelForProvider } from "@/core/providers/AnthropicProvider";
 import { isProviderEnabled } from "@/core/providers/providerEnablement";
 import type { HealthResult, ProviderId, ProviderSettings } from "@/core/providers/types";
 import type { AgentStage } from "@/core/providers/orchestration";
+import { redactProviderSecrets as redactCanonicalSecrets } from "@/core/providers/secretRedact";
 
 /** Phase 24 — unified provider reliability status. */
 export type ProviderReliabilityStatus =
@@ -473,11 +474,7 @@ export function healthToReliabilityStatus(
 }
 
 export function redactProviderSecrets(text: string): string {
-  return text
-    .replace(/sk-ant-[A-Za-z0-9_-]+/g, "sk-ant-••••")
-    .replace(/sk-[A-Za-z0-9_-]{8,}/g, "sk-••••")
-    .replace(/key=[^&\s]+/gi, "key=••••")
-    .replace(/x-api-key:\s*\S+/gi, "x-api-key: ••••");
+  return redactCanonicalSecrets(text);
 }
 
 /** Prefer a recent successful health result over a stale timeout/offline blip. */

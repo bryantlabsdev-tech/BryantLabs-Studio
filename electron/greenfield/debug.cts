@@ -4,6 +4,7 @@
 
 import type { GreenfieldGenerationMetrics } from "./metrics.cjs";
 import type { GreenfieldMarkerAudit } from "./promptAudit.cjs";
+import { redactProviderSecrets } from "../providers/secretRedact.cjs";
 
 export interface GreenfieldDebugReport {
   stage: string;
@@ -25,19 +26,8 @@ export interface GreenfieldDebugReport {
   markerAudit?: GreenfieldMarkerAudit;
 }
 
-const SECRET_PATTERNS = [
-  /key=[^&\s]+/gi,
-  /geminiApiKey["']?\s*:\s*["'][^"']+["']/gi,
-  /api[_-]?key["']?\s*:\s*["'][^"']+["']/gi,
-  /Bearer\s+\S+/gi,
-];
-
 export function redactSecrets(text: string): string {
-  let out = text;
-  for (const pattern of SECRET_PATTERNS) {
-    out = out.replace(pattern, "[REDACTED]");
-  }
-  return out;
+  return redactProviderSecrets(text);
 }
 
 export function sanitizeDebugPayload(value: unknown): unknown {

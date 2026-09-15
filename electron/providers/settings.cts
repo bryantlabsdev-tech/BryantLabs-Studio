@@ -1,8 +1,17 @@
-import { app } from "electron";
+import { app, safeStorage } from "electron";
 import * as path from "node:path";
-import { promises as fs } from "node:fs";
-import { writeJsonAtomic } from "../safeFs.cjs";
 import { formatMaskedApiKeyPreview } from "./apiKeyFormat.cjs";
+import { createElectronSafeStorageAdapter } from "./safeStorageAdapter.cjs";
+import {
+  createProviderSecretStore,
+  PROVIDER_SECRET_STATUS_MESSAGES,
+  secretHasStoredKey,
+  statusFromDocument,
+  type ProviderSecretStore,
+  type ProviderSecretsStatus,
+  type SecretMap,
+  type SecretRecord,
+} from "./providerSecretStore.cjs";
 import {
   coercePlannerMaxOutputTokens,
   DEFAULT_PLANNER_MAX_OUTPUT_TOKENS,
@@ -117,7 +126,10 @@ export interface ProviderSettingsView {
   plannerMaxOutputTokens: number;
   providerEnabled: Partial<Record<ProviderId, boolean>>;
   costMode: CostMode;
+  secretProtection: ProviderSecretsStatus;
 }
+
+export type { ProviderSecretsStatus };
 
 export interface ProviderSettingsInput {
   provider?: ProviderId;
@@ -414,21 +426,108 @@ function normalizeLoaded(raw: RawProviderSettings): RawProviderSettings {
   return coerceRawToEnabledProviders(normalized);
 }
 
-function settingsFile(): string {
-  return path.join(app.getPath("userData"), "provider-settings.json");
+let testStore: ProviderSecretStore | null = null;
+let defaultStore: ProviderSecretStore | null = null;
+let lastSecrets: SecretMap | null = null;
+let lastSecretProtection: ProviderSecretsStatus | null = null;
+
+export function setProviderSettingsStoreForTests(
+  store: ProviderSecretStore | null,
+): void {
+  testStore = store;
+  if (!store) defaultStore = null;
+  lastSecrets = null;
+  lastSecretProtection = null;
+}
+
+function getStore(): ProviderSecretStore {
+  if (testStore) return testStore;
+  if (!defaultStore) {
+    defaultStore = createProviderSecretStore({
+      settingsFile: path.join(app.getPath("userData"), "provider-settings.json"),
+      adapter: createElectronSafeStorageAdapter({ app, safeStorage }),
+      isAppReady: () => app.isReady(),
+    });
+  }
+  return defaultStore;
+}
+
+function emptySecretMap(): SecretMap {
+  return {
+    gemini: { state: "empty" },
+    anthropic: { state: "empty" },
+    groq: { state: "empty" },
+    openrouter: { state: "empty" },
+  };
+}
+
+function defaultSecretProtection(): ProviderSecretsStatus {
+  return {
+    encryptionAvailable: false,
+    fileStatus: "missing",
+    gemini: "empty",
+    anthropic: "empty",
+    groq: "empty",
+    openrouter: "empty",
+    userMessage: null,
+  };
+}
+
+function rawFromDocument(
+  nonSecret: Record<string, unknown>,
+  secrets: SecretMap,
+): RawProviderSettings {
+  return normalizeLoaded({
+    ...defaults(),
+    ...nonSecret,
+    geminiApiKey: secrets.gemini.plaintext ?? "",
+    anthropicApiKey: secrets.anthropic.plaintext ?? "",
+    groqApiKey: secrets.groq.plaintext ?? "",
+    openrouterApiKey: secrets.openrouter.plaintext ?? "",
+  });
+}
+
+function nonSecretFromRaw(raw: RawProviderSettings): Record<string, unknown> {
+  const { geminiApiKey, anthropicApiKey, groqApiKey, openrouterApiKey, ...rest } =
+    raw;
+  void geminiApiKey;
+  void anthropicApiKey;
+  void groqApiKey;
+  void openrouterApiKey;
+  return rest;
+}
+
+export async function ensureProviderSecretsMigrated(): Promise<void> {
+  await getStore().ensureMigrated();
 }
 
 export async function loadRawSettings(): Promise<RawProviderSettings> {
-  try {
-    const text = await fs.readFile(settingsFile(), "utf8");
-    const parsed = JSON.parse(text) as Partial<RawProviderSettings>;
-    return normalizeLoaded({ ...defaults(), ...parsed });
-  } catch {
-    return defaults();
-  }
+  const doc = await getStore().load();
+  lastSecrets = doc.secrets;
+  lastSecretProtection = statusFromDocument(doc);
+  return rawFromDocument(doc.nonSecret, doc.secrets);
 }
 
-function sanitize(raw: RawProviderSettings): ProviderSettingsView {
+export async function getDecryptedApiKey(
+  provider: ProviderId,
+): Promise<string | null> {
+  if (
+    provider !== "gemini" &&
+    provider !== "anthropic" &&
+    provider !== "groq" &&
+    provider !== "openrouter"
+  ) {
+    return null;
+  }
+  return getStore().getDecryptedApiKey(provider);
+}
+
+function sanitize(
+  raw: RawProviderSettings,
+  secrets: SecretMap = lastSecrets ?? emptySecretMap(),
+  secretProtection: ProviderSecretsStatus = lastSecretProtection ??
+    defaultSecretProtection(),
+): ProviderSettingsView {
   const geminiKey = coerceApiKey(raw.geminiApiKey);
   const anthropicKey = coerceApiKey(raw.anthropicApiKey);
   const groqKey = coerceApiKey(raw.groqApiKey);
@@ -441,10 +540,12 @@ function sanitize(raw: RawProviderSettings): ProviderSettingsView {
     anthropicModel: raw.anthropicModel,
     groqModel: raw.groqModel,
     openrouterModel: raw.openrouterModel,
-    hasGeminiKey: geminiKey.trim().length > 0,
-    hasAnthropicKey: anthropicKey.trim().length > 0,
-    hasGroqKey: groqKey.trim().length > 0,
-    hasOpenRouterKey: openrouterKey.trim().length > 0,
+    hasGeminiKey: secretHasStoredKey(secrets.gemini) || geminiKey.trim().length > 0,
+    hasAnthropicKey:
+      secretHasStoredKey(secrets.anthropic) || anthropicKey.trim().length > 0,
+    hasGroqKey: secretHasStoredKey(secrets.groq) || groqKey.trim().length > 0,
+    hasOpenRouterKey:
+      secretHasStoredKey(secrets.openrouter) || openrouterKey.trim().length > 0,
     geminiKeyPreview: formatStoredApiKeyPreview(geminiKey),
     anthropicKeyPreview: formatStoredApiKeyPreview(anthropicKey),
     groqKeyPreview: formatStoredApiKeyPreview(groqKey),
@@ -466,11 +567,13 @@ function sanitize(raw: RawProviderSettings): ProviderSettingsView {
     plannerMaxOutputTokens: raw.plannerMaxOutputTokens,
     providerEnabled: normalizeProviderEnabled(raw.providerEnabled),
     costMode: raw.costMode,
+    secretProtection,
   };
 }
 
 export async function getSettingsView(): Promise<ProviderSettingsView> {
-  return sanitize(await loadRawSettings());
+  const raw = await loadRawSettings();
+  return sanitize(raw);
 }
 
 function isProviderId(value: unknown): value is ProviderId {
@@ -554,10 +657,27 @@ export function sanitizeProviderSettingsInput(
   return out;
 }
 
+async function nextSecretRecord(
+  store: ProviderSecretStore,
+  input: ProviderSettingsInput,
+  field: "geminiApiKey" | "anthropicApiKey" | "groqApiKey" | "openrouterApiKey",
+  current: SecretRecord,
+): Promise<SecretRecord> {
+  if (!(field in input)) return current;
+  const raw = input[field];
+  if (raw === undefined || raw === null) return current;
+  const trimmed = String(raw).trim();
+  if (isMaskedKeyDraft(trimmed)) return current;
+  if (!trimmed) return { state: "empty" };
+  return store.encryptOrLegacy(trimmed);
+}
+
 export async function saveSettings(
   input: ProviderSettingsInput,
 ): Promise<ProviderSettingsView> {
-  const current = await loadRawSettings();
+  const store = getStore();
+  const currentDoc = await store.load();
+  const current = rawFromDocument(currentDoc.nonSecret, currentDoc.secrets);
   const nextProvider = input.provider ?? current.provider;
   const providerChanged =
     input.provider !== undefined && input.provider !== current.provider;
@@ -630,26 +750,50 @@ export async function saveSettings(
         : current.costMode,
   };
   const coerced = coerceRawToEnabledProviders(next);
-  const saved = await writeJsonAtomic(settingsFile(), coerced, "filesystem");
-  if (!saved.ok) {
-    throw new Error(saved.reason ?? "Could not save provider settings.");
+  if (currentDoc.fileStatus === "unsupported_schema") {
+    throw new Error(PROVIDER_SECRET_STATUS_MESSAGES.unsupportedSchema);
   }
-  return sanitize(coerced);
-}
-
-function readApiKeyFromRaw(raw: RawProviderSettings, provider: ProviderId): string {
-  switch (provider) {
-    case "gemini":
-      return coerceApiKey(raw.geminiApiKey).trim();
-    case "anthropic":
-      return coerceApiKey(raw.anthropicApiKey).trim();
-    case "groq":
-      return coerceApiKey(raw.groqApiKey).trim();
-    case "openrouter":
-      return coerceApiKey(raw.openrouterApiKey).trim();
-    default:
-      return "";
+  const keyTouched =
+    "geminiApiKey" in input ||
+    "anthropicApiKey" in input ||
+    "groqApiKey" in input ||
+    "openrouterApiKey" in input;
+  if (currentDoc.fileStatus === "quarantined" && !keyTouched) {
+    lastSecrets = currentDoc.secrets;
+    lastSecretProtection = statusFromDocument(currentDoc);
+    return sanitize(coerced, currentDoc.secrets, lastSecretProtection);
   }
+  const nextSecrets: SecretMap = {
+    gemini: await nextSecretRecord(
+      store,
+      input,
+      "geminiApiKey",
+      currentDoc.secrets.gemini,
+    ),
+    anthropic: await nextSecretRecord(
+      store,
+      input,
+      "anthropicApiKey",
+      currentDoc.secrets.anthropic,
+    ),
+    groq: await nextSecretRecord(
+      store,
+      input,
+      "groqApiKey",
+      currentDoc.secrets.groq,
+    ),
+    openrouter: await nextSecretRecord(
+      store,
+      input,
+      "openrouterApiKey",
+      currentDoc.secrets.openrouter,
+    ),
+  };
+  const savedDoc = await store.persist(nonSecretFromRaw(coerced), nextSecrets);
+  lastSecrets = savedDoc.secrets;
+  lastSecretProtection = statusFromDocument(savedDoc);
+  const raw = rawFromDocument(savedDoc.nonSecret, savedDoc.secrets);
+  return sanitize(raw, savedDoc.secrets, lastSecretProtection);
 }
 
 export async function revealApiKey(
@@ -663,8 +807,15 @@ export async function revealApiKey(
   ) {
     return { ok: false, error: "This provider does not use an API key." };
   }
-  const raw = await loadRawSettings();
-  const key = readApiKeyFromRaw(raw, provider);
+  await loadRawSettings();
+  const stored = lastSecrets?.[provider];
+  if (stored && stored.state === "undecryptable") {
+    return {
+      ok: false,
+      error: "This API key cannot be decrypted. Replace it in Settings.",
+    };
+  }
+  const key = await getDecryptedApiKey(provider);
   if (!key) {
     return { ok: false, error: "No API key stored." };
   }

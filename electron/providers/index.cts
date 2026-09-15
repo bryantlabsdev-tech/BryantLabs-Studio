@@ -1,8 +1,10 @@
 import {
+  getDecryptedApiKey,
   loadRawSettings,
   type ProviderId,
   type ProviderSettingsInput,
   type ProviderSettingsView,
+  type RawProviderSettings,
 } from "./settings.cjs";
 import type { HealthResult, ProviderResponse } from "./types.cjs";
 import * as anthropic from "./anthropic.cjs";
@@ -10,6 +12,7 @@ import * as gemini from "./gemini.cjs";
 import * as groq from "./groq.cjs";
 import * as ollama from "./ollama.cjs";
 import * as openrouter from "./openrouter.cjs";
+import { redactProviderSecrets } from "./secretRedact.cjs";
 import { PROVIDER_TIMEOUT_MS } from "./timeouts.cjs";
 import {
   buildPlanPrompt,
@@ -81,6 +84,8 @@ export {
   saveSettings,
   sanitizeProviderSettingsInput,
   revealApiKey,
+  getDecryptedApiKey,
+  ensureProviderSecretsMigrated,
 } from "./settings.cjs";
 export { runAgentStep, type AgentStepResult } from "./agentStep.cjs";
 
@@ -103,9 +108,29 @@ import {
 
 const IMPLS = { gemini, ollama, anthropic, groq, openrouter } as const;
 
+async function loadRawSettingsWithDecryptedKey(
+  provider: ProviderId,
+): Promise<RawProviderSettings> {
+  const raw = await loadRawSettings();
+  const key = await getDecryptedApiKey(provider);
+  if (!key) return raw;
+  switch (provider) {
+    case "gemini":
+      return { ...raw, geminiApiKey: key };
+    case "anthropic":
+      return { ...raw, anthropicApiKey: key };
+    case "groq":
+      return { ...raw, groqApiKey: key };
+    case "openrouter":
+      return { ...raw, openrouterApiKey: key };
+    default:
+      return raw;
+  }
+}
+
 export async function checkHealth(provider: ProviderId): Promise<HealthResult> {
   if (isMockProviderEnabled()) return mockHealth(provider);
-  const raw = await loadRawSettings();
+  const raw = await loadRawSettingsWithDecryptedKey(provider);
   const impl = IMPLS[provider];
   if (!impl) {
     return {
@@ -116,7 +141,15 @@ export async function checkHealth(provider: ProviderId): Promise<HealthResult> {
       error: `Unknown provider: ${provider}`,
     };
   }
-  return impl.health(raw);
+  const result = await impl.health(raw);
+  return {
+    ...result,
+    error: result.error ? redactProviderSecrets(result.error) : result.error,
+    checks: result.checks.map((check) => ({
+      ...check,
+      detail: check.detail ? redactProviderSecrets(check.detail) : check.detail,
+    })),
+  };
 }
 
 export async function runTest(
@@ -124,7 +157,7 @@ export async function runTest(
   prompt: string,
 ): Promise<ProviderResponse> {
   if (isMockProviderEnabled()) return mockTest(provider, prompt);
-  const raw = await loadRawSettings();
+  const raw = await loadRawSettingsWithDecryptedKey(provider);
   const impl = IMPLS[provider];
   if (!impl) {
     return {
@@ -259,7 +292,7 @@ export async function runPlan(
   context: PlanContext,
 ): Promise<AIPlanResult> {
   if (isMockProviderEnabled()) return mockRunPlan(provider, userPrompt, context) as AIPlanResult;
-  const raw = await loadRawSettings();
+  const raw = await loadRawSettingsWithDecryptedKey(provider);
   const impl = IMPLS[provider];
   if (!impl) {
     return {
@@ -584,7 +617,7 @@ export async function runPatch(
   symbols: PatchSymbol[],
   planMeta?: PlanPatchMeta,
 ): Promise<AIPatchResult> {
-  const raw = await loadRawSettings();
+  const raw = await loadRawSettingsWithDecryptedKey(provider);
   const impl = IMPLS[provider];
   if (!impl) {
     return {
@@ -698,7 +731,7 @@ export async function runApplyPlanBatchPatch(
       meta,
     ) as ApplyPlanBatchPatchResult;
   }
-  const raw = await loadRawSettings();
+  const raw = await loadRawSettingsWithDecryptedKey(provider);
   const impl = IMPLS[provider];
   const hydratedFiles = hydrated.files;
   const batchFiles = meta.directRewrite
@@ -865,7 +898,7 @@ export async function runAutoFix(
   context: AutoFixContextPayload,
   file: PatchTargetFile,
 ): Promise<AIPatchResult> {
-  const raw = await loadRawSettings();
+  const raw = await loadRawSettingsWithDecryptedKey(provider);
   const impl = IMPLS[provider];
   if (!impl) {
     return {
