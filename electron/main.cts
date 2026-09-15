@@ -119,8 +119,12 @@ import {
 import { relPathFromAbs } from "./projectIndex/deltaScanner.cjs";
 import {
   hydrateProjectAfterSwitch,
-  prepareProjectSwitch,
+  switchToProjectRoot,
 } from "./projectActivate.cjs";
+import {
+  createQuitTeardownCoordinator,
+  shouldQuitWhenAllWindowsClosed,
+} from "./quitTeardown.cjs";
 import {
   clearRunCheckpointForProject,
   loadRunCheckpointForProject,
@@ -284,11 +288,12 @@ function createWindow(): void {
 /** Switch the open project — tears down PTYs, preview, and stale index work first. */
 async function switchProjectRoot(selected: string): Promise<void> {
   const approved = approveWorkspaceRoot(selected);
-  await prepareProjectSwitch(approved);
-  projectRoot = approved;
-  lastEditStore.clear();
-  hydrateProjectAfterSwitch(approved);
-  await activateProjectIndex(approved, () => mainWindow);
+  await switchToProjectRoot(approved, async (root) => {
+    projectRoot = root;
+    lastEditStore.clear();
+    hydrateProjectAfterSwitch(root);
+    await activateProjectIndex(root, () => mainWindow);
+  });
 }
 
 function notifyIndexFileChange(filePath: string, deleted = false): void {
@@ -1327,15 +1332,26 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("window-all-closed", () => {
-  stopPreview();
-  destroyAllTerminals();
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+const quitTeardown = createQuitTeardownCoordinator({
+  stopPreviewAsync,
+  destroyAllTerminals,
+  quit: () => app.quit(),
 });
 
-app.on("before-quit", () => {
+app.on("window-all-closed", () => {
+  if (shouldQuitWhenAllWindowsClosed()) {
+    app.quit();
+    return;
+  }
+  // macOS may keep the app alive; do not force termination on last window close.
   stopPreview();
   destroyAllTerminals();
+});
+
+app.on("before-quit", (event) => {
+  quitTeardown.intercept(event);
+});
+
+app.on("will-quit", (event) => {
+  quitTeardown.intercept(event);
 });
