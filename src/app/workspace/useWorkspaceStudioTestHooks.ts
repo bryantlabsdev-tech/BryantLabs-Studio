@@ -141,9 +141,18 @@ export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput
       aiPlanStatus,
       centerTab,
       activeAgentRunId,
+      prompt: planApplySession?.prompt ?? null,
+      files: (planApplySession?.files ?? []).map((file) => ({
+        relPath: file.relPath,
+        status: file.status,
+        error: file.error ?? null,
+        changed: Boolean(file.diffStats?.changed),
+      })),
     }),
     [
       planApplySession?.phase,
+      planApplySession?.prompt,
+      planApplySession?.files,
       buildRunning,
       buildStatusPhase,
       planApplyError,

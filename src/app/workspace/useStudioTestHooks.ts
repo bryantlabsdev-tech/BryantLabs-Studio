@@ -19,6 +19,13 @@ export interface StudioTestHookCallbacks {
     aiPlanStatus: string;
     centerTab: string;
     activeAgentRunId: string | null;
+    prompt: string | null;
+    files: readonly {
+      relPath: string;
+      status: string;
+      error: string | null;
+      changed: boolean;
+    }[];
   };
   readonly simulatePatchReadyForReview: () =>
     | { ok: true }

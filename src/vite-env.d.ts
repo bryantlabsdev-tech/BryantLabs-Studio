@@ -18,6 +18,13 @@ interface PatchPipelineState {
   aiPlanStatus: string;
   centerTab: string;
   activeAgentRunId: string | null;
+  prompt: string | null;
+  files: readonly {
+    relPath: string;
+    status: string;
+    error: string | null;
+    changed: boolean;
+  }[];
 }
 
 interface RoutingIntentState {

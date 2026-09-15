@@ -285,17 +285,26 @@ test.describe("Review-first follow-up (mock provider)", () => {
       .poll(async () => {
         const snapshot = await page.evaluate(() => {
           const pipeline = window.__studioTestHooks?.getPatchPipelineState?.();
+          const run = window.__studioTestHooks?.getGreenfieldRunSnapshot?.();
           return {
             phase: pipeline?.planApplyPhase ?? null,
-            buildError: pipeline?.buildError ?? null,
+            prompt: pipeline?.prompt ?? null,
             planApplyError: pipeline?.planApplyError ?? null,
+            buildError: pipeline?.buildError ?? null,
+            files: pipeline?.files ?? [],
+            runResult: run?.runResult ?? null,
           };
         });
-        const hasMarker = (await readApp(projectDir).catch(() => "")).includes("mock: timer");
+        const appFile = await readApp(projectDir).catch(() => "");
         return {
           pausedForReview: snapshot.phase === "waiting_for_review",
-          hasMarker,
-          phase: snapshot.phase,
+          hasMarker: appFile.includes("mock: timer"),
+          prompt: snapshot.prompt,
+          planApplyError: snapshot.planApplyError,
+          buildError: snapshot.buildError,
+          files: snapshot.files,
+          runResult: snapshot.runResult,
+          appExcerpt: appFile.slice(-240),
         };
       }, { timeout: 60_000 })
       .toMatchObject({ pausedForReview: false, hasMarker: true });
