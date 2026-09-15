@@ -87,6 +87,9 @@ export function useWorkspaceFollowUpRecording(input: {
     detailsOrOpts?: string | import("@/core/greenfield/runLog").RunLogEntryOptions,
   ) => void;
   readonly runScan: () => Promise<void>;
+  readonly recoverAfterSuccessfulUndo?: (
+    recoveredRunId: string | null,
+  ) => { ok: true } | { ok: false; reason: string };
 }) {
   const finalizeFollowUpActivityRun = useCallback(
     (items: import("@/core/build/followUpRun").FollowUpActivityItem[]) => {
@@ -213,16 +216,30 @@ export function useWorkspaceFollowUpRecording(input: {
 
   const undoFollowUpChange = useCallback(async () => {
     if (!input.api || !input.followUpCheckpoint) return;
-    const result = await restoreFollowUpCheckpoint(input.api, input.followUpCheckpoint);
+    const checkpoint = input.followUpCheckpoint;
+    const result = await restoreFollowUpCheckpoint(input.api, checkpoint);
     if (!result.ok) {
-      input.appendGreenfieldRunLog("error", "failed", result.error ?? "Undo failed.");
+      const detail = result.error ?? "Undo failed.";
+      input.appendGreenfieldRunLog("error", "failed", detail);
       return;
     }
     input.setFollowUpCheckpoint(null);
     input.setCanUndo(false);
     input.setFollowUpSuccess(null);
+    const recovery = input.recoverAfterSuccessfulUndo?.(checkpoint.applyRunId ?? null);
     void input.runScan();
-    recordFollowUpStudioMessage("Reverted the last AI changes.");
+    if (recovery && !recovery.ok) {
+      recordFollowUpStudioMessage(
+        `Reverted the last AI changes, but leftover run state could not be cleared: ${recovery.reason ?? "unknown error"}`,
+      );
+      return;
+    }
+    recordFollowUpStudioMessage(
+      input.greenfieldRun.runResult === "failed" ||
+        input.greenfieldRun.failureReport != null
+        ? "Reverted the last AI changes after verification failed."
+        : "Reverted the last AI changes.",
+    );
   }, [input, recordFollowUpStudioMessage]);
 
   const restoreFollowUpSnapshotFn = useCallback(

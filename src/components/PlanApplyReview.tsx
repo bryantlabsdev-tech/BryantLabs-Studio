@@ -37,7 +37,7 @@ export function PlanApplyReview() {
       onAcceptAll={() => {
         void applyApprovedPlanFiles({ approveReadyFiles: true });
       }}
-      onRejectAll={() => cancelApplyPlan()}
+      onRejectAll={() => cancelApplyPlan({ recoverUnapplied: true })}
       onRegenerate={() => void startApplyPlan()}
       onApplyApproved={() => void applyApprovedPlanFiles()}
       onSelectFile={selectPlanApplyFile}

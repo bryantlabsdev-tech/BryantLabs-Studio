@@ -25,6 +25,7 @@ export function useWorkspacePlanApplyControls(input: {
   readonly scan: ProjectScan | null;
   readonly plan: Plan | null;
   readonly planApplySession: import("@/core/planApply").PlanApplySession | null;
+  readonly recoverUnappliedReview?: (runId: string | null) => void;
   readonly planState: Pick<
     WorkspacePlanState,
     | "planRef"
@@ -46,15 +47,22 @@ export function useWorkspacePlanApplyControls(input: {
     autoContinue?: boolean;
   }) => Promise<ExecuteApplyPlanResult>;
 }) {
-  const cancelApplyPlan = useCallback(() => {
-    void input.api?.cancelActiveProviderRequests?.();
-    const runId = input.planApplySession?.applyRunId;
-    void discardPlanApplyShadowRun(input.api ?? undefined, runId);
-    input.planState.applyPlanActiveRunIdRef.current = null;
-    input.planState.applyPlanCompletedRunIdRef.current = null;
-    input.planState.setPlanApplySession(null);
-    input.planState.setPlanApplyError(null);
-  }, [input.api, input.planApplySession?.applyRunId, input.planState]);
+  const cancelApplyPlan = useCallback(
+    (opts?: { recoverUnapplied?: boolean }) => {
+      void input.api?.cancelActiveProviderRequests?.();
+      const runId = input.planApplySession?.applyRunId ?? null;
+      void discardPlanApplyShadowRun(input.api ?? undefined, runId ?? undefined);
+      if (opts?.recoverUnapplied) {
+        input.recoverUnappliedReview?.(runId);
+        return;
+      }
+      input.planState.applyPlanActiveRunIdRef.current = null;
+      input.planState.applyPlanCompletedRunIdRef.current = null;
+      input.planState.setPlanApplySession(null);
+      input.planState.setPlanApplyError(null);
+    },
+    [input.api, input.planApplySession?.applyRunId, input.planState, input.recoverUnappliedReview],
+  );
 
   const selectPlanApplyFile = useCallback((relPath: string) => {
     input.planState.setPlanApplySession((prev) =>

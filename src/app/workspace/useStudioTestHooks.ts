@@ -52,6 +52,8 @@ export interface StudioTestHookCallbacks {
   readonly getFollowUpReviewFirst: () => boolean;
   readonly resolveFollowUpAutoContinue: (prompt: string) => boolean;
   readonly clearFollowUpReviewFirstPreference: () => void;
+  readonly forceNextVerificationFailure: (message: string) => void;
+  readonly forceNextUndoPathFailure: (relPath: string) => void;
 }
 
 export function useStudioTestHooks(callbacks: StudioTestHookCallbacks): void {
@@ -89,6 +91,10 @@ export function useStudioTestHooks(callbacks: StudioTestHookCallbacks): void {
         callbacksRef.current.resolveFollowUpAutoContinue(prompt),
       clearFollowUpReviewFirstPreference: () =>
         callbacksRef.current.clearFollowUpReviewFirstPreference(),
+      forceNextVerificationFailure: (message: string) =>
+        callbacksRef.current.forceNextVerificationFailure(message),
+      forceNextUndoPathFailure: (relPath: string) =>
+        callbacksRef.current.forceNextUndoPathFailure(relPath),
     };
 
     (window as Window & { __studioTestHooks?: typeof hooks }).__studioTestHooks = hooks;

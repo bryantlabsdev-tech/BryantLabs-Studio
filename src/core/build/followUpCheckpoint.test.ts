@@ -6,6 +6,7 @@ import {
   restoreFollowUpCheckpoint,
   rollbackPartialApply,
 } from "./followUpCheckpoint.ts";
+import { setForcedUndoPathFailure } from "@/core/agent/runRecoveryTestSeams";
 import type { BryantLabsApi } from "@/types";
 
 function mockDisk(initial: Record<string, string | null>) {
@@ -169,5 +170,74 @@ describe("followUpCheckpoint undo", () => {
     assert.equal(disk.get("/tmp/p/src/App.tsx"), "old app");
     assert.equal(disk.has("/tmp/p/src/components/History.tsx"), false);
     assert.equal(applyCalls[0]?.recordUndo, false);
+  });
+
+  it("partial undo reports failed paths and does not claim success", async () => {
+    const { disk, api } = mockDisk({
+      "/tmp/p/src/App.tsx": "new app",
+      "/tmp/p/src/components/History.tsx": "created",
+    });
+    api.deleteProjectFile = async () => ({
+      ok: false,
+      reason: "locked",
+    });
+    const checkpoint = createFollowUpCheckpoint({
+      projectPath: "/tmp/p",
+      prompt: "add history",
+      applyRunId: "apply-1",
+      files: [
+        {
+          relPath: "src/App.tsx",
+          absPath: "/tmp/p/src/App.tsx",
+          content: "old app",
+          action: "modify",
+        },
+        {
+          relPath: "src/components/History.tsx",
+          absPath: "/tmp/p/src/components/History.tsx",
+          content: "",
+          action: "create",
+        },
+      ],
+    });
+    const result = await restoreFollowUpCheckpoint(api, checkpoint);
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.restored, ["src/App.tsx"]);
+    assert.equal(result.failed[0]?.relPath, "src/components/History.tsx");
+    assert.match(result.error ?? "", /History\.tsx: locked/);
+    assert.equal(disk.get("/tmp/p/src/App.tsx"), "old app");
+    assert.equal(disk.has("/tmp/p/src/components/History.tsx"), true);
+  });
+
+  it("forced undo path failure keeps remaining files and reports the path", async () => {
+    const { disk, api } = mockDisk({
+      "/tmp/p/src/App.tsx": "new",
+      "/tmp/p/src/components/History.tsx": "created",
+    });
+    setForcedUndoPathFailure("src/components/History.tsx");
+    const checkpoint = createFollowUpCheckpoint({
+      projectPath: "/tmp/p",
+      prompt: "add history",
+      applyRunId: "apply-1",
+      files: [
+        {
+          relPath: "src/App.tsx",
+          absPath: "/tmp/p/src/App.tsx",
+          content: "old",
+          action: "modify",
+        },
+        {
+          relPath: "src/components/History.tsx",
+          absPath: "/tmp/p/src/components/History.tsx",
+          content: "",
+          action: "create",
+        },
+      ],
+    });
+    const result = await restoreFollowUpCheckpoint(api, checkpoint);
+    assert.equal(result.ok, false);
+    assert.equal(result.failed[0]?.relPath, "src/components/History.tsx");
+    assert.equal(disk.get("/tmp/p/src/App.tsx"), "old");
+    assert.equal(disk.has("/tmp/p/src/components/History.tsx"), true);
   });
 });

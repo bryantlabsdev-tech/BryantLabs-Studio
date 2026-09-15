@@ -172,7 +172,7 @@ export function useBuildPipelineOrchestration(
       cancelMultiAgentPipeline();
     }
     if (phaseInputs.planApplySession) {
-      hostRef.current?.cancelApplyPlan();
+      hostRef.current?.cancelApplyPlan({ recoverUnapplied: true });
     }
     setBuildRunning(false);
     setBuildError(null);
@@ -286,6 +286,7 @@ export function useBuildPipelineOrchestration(
     pipelineSession,
     pipelineRunning,
     pipelineError,
+    setPipelineError,
     pipelineRunActiveRef,
     buildRunning,
     buildError,

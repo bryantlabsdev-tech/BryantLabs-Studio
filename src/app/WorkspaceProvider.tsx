@@ -539,6 +539,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     pipelineSession,
     pipelineRunning,
     pipelineError,
+    setPipelineError,
     pipelineRunActiveRef,
     buildRunning,
     buildError,
@@ -731,8 +732,37 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     [openPath, setCenterTab, setEditorReveal],
   );
 
-  const { clearPlan, clearRunContextForNewSubmit, archiveActiveRunContextAfterSuccess } =
-    useWorkspaceRunContextReset({
+  const staleRecoveryContext = {
+    plan,
+    aiPlan,
+    aiPlanStatus,
+    planApplySession,
+    buildError,
+    planApplyError,
+    pipelineError,
+    verification,
+    builderSession,
+    executionSession,
+    followUpEscalation,
+    greenfieldRun,
+    mutex: {
+      greenfieldRun,
+      greenfieldPanelActive: agentGreenfieldPanelActive,
+      buildRunning,
+      pipelineRunning,
+      aiPlanStatus,
+      planApplyPhase: planApplySession?.phase ?? null,
+      autoFixPhase: autoFixSession?.phase ?? null,
+    },
+  };
+
+  const {
+    clearPlan,
+    clearRunContextForNewSubmit,
+    archiveActiveRunContextAfterSuccess,
+    recoverAfterSuccessfulUndo,
+    recoverUnappliedReview,
+  } = useWorkspaceRunContextReset({
       plan: {
         setPlan,
         planRef,
@@ -767,9 +797,11 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
       setSmartFileSelection,
       setSessionMemoryDiagnostics,
       setBuildError,
+      setPipelineError,
       setFollowUpEscalation,
       setFollowUpSuccess,
       setFollowUpCheckpoint,
+      followUpCheckpoint,
       setVerification,
       setVerifyStatus,
       setVerifyError,
@@ -778,6 +810,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
       setReviewing,
       restorePipelineCheckpoint,
       updateGreenfieldRun,
+      staleContext: staleRecoveryContext,
     });
 
   const lastGoodScanRef = useRef<import("@/types").ProjectScan | null>(null);
@@ -1453,6 +1486,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     greenfieldRun,
     appendGreenfieldRunLog,
     executeApplyPlan,
+    recoverUnappliedReview,
   });
 
   useWorkspaceStudioTestHooks({
@@ -1552,6 +1586,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     refreshProviderStatus,
     appendGreenfieldRunLog,
     runScan,
+    recoverAfterSuccessfulUndo,
   });
 
   const {

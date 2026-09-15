@@ -237,7 +237,7 @@ export interface WorkspaceState {
   startApplyPlan(opts?: { autoContinue?: boolean; prompt?: string }): Promise<ExecuteApplyPlanResult>;
   /** Shorter @@FILE-only rewrite after format repair failed. */
   runApplyPlanDirectRewrite(): Promise<void>;
-  cancelApplyPlan(): void;
+  cancelApplyPlan(opts?: { recoverUnapplied?: boolean }): void;
   selectPlanApplyFile(relPath: string): void;
   setPlanApplyFileDecision(
     relPath: string,
