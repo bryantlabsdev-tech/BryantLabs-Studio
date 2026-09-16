@@ -28,6 +28,7 @@
     "bench": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/run-benchmarks.mjs",
     "bench:json": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/run-benchmarks.mjs --json",
     "bench:unit": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs --test 'benchmarks/**/*.test.ts'",
+    "bench:pilot": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/cursor-parity-pilot.mjs",
     "greenfield:a19": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-fieldflow-a19.mjs",
     "greenfield:a19:live": "BRYANTLABS_A19_LIVE=1 node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-fieldflow-a19.mjs",
     "greenfield:a22": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-fleetops-a22.mjs",
