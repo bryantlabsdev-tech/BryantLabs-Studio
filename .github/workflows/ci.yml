@@ -12,6 +12,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -23,6 +25,9 @@ jobs:
 
       - name: Dependency license policy
         run: npm run licenses:check
+
+      - name: Provenance register coverage
+        run: npm run provenance:check && npm run provenance:test
 
       - name: Typecheck
         run: npm run typecheck
