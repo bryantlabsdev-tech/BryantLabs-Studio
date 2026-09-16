@@ -1,6 +1,8 @@
 # BryantLabs Studio
 
-A local-first AI app builder. This repository is a **fresh, independent project** — it is not BLAI and shares no BLAI code or architecture.
+A local-first AI app builder intended to be developed independently. The repository's current provenance limits and release blockers are recorded explicitly below rather than assumed away.
+
+Originality and release controls are documented in [`PROVENANCE.md`](./PROVENANCE.md), [`CLEAN_ROOM_POLICY.md`](./CLEAN_ROOM_POLICY.md), and [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). These controls reduce legal and licensing risk; they do not constitute legal advice or a guarantee of zero risk.
 
 > See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full vision, phase status, BLAI lessons learned, and the roadmap (Phases 5–9).
 

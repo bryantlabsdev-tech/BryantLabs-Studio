@@ -158,15 +158,15 @@ npm run greenfield:stress:lock-replay
 npm run greenfield:stress:sync-fixtures
 ```
 
-## Cursor parity pilot (manual, no providers)
+## Agent acceptance pilot (manual, no providers)
 
-Five-task Studio vs Cursor scorecard harness. It creates temporary project fixtures, prints a shared prompt, and evaluates the tree after a human runs the same task in each product. It does not launch Studio or Cursor and does not call paid providers.
+Five-task scorecard harness for evaluating Studio and an independently selected reference tool against the same acceptance criteria. It creates temporary project fixtures, prints a shared prompt, and evaluates the resulting tree. It does not launch either tool or call paid providers.
 
 ```bash
-npm run bench:pilot -- help
+npm run bench:acceptance -- help
 ```
 
-Operator steps: `benchmarks/cursorParityPilot/README.md`
+Operator steps: `benchmarks/agentAcceptancePilot/README.md`
 
 ## Adding cases
 

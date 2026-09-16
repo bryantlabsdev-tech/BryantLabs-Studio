@@ -1,6 +1,6 @@
-# Phase 2 — Remaining Gaps vs Cursor
+# Phase 2 — Remaining Capability Gaps
 
-| Cursor behavior | BryantLabs status | Gap |
+| Reference capability | BryantLabs status | Gap |
 |-----------------|-------------------|-----|
 | Per-prompt run blocks in thread | ✅ Implemented | — |
 | Immutable completed runs | ✅ Frozen artifacts | — |

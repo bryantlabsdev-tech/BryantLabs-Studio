@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Launch the Electron app with ELECTRON_RUN_AS_NODE cleared.
- * Cursor/IDE shells often set ELECTRON_RUN_AS_NODE=1, which makes
+ * Some IDE shells set ELECTRON_RUN_AS_NODE=1, which makes
  * require('electron') return the binary path instead of the API.
  */
 import { spawn } from "node:child_process";

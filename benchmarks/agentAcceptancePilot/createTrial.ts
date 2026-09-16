@@ -32,7 +32,7 @@ export function parseTaskId(value: string): PilotTaskId {
 }
 
 export function trialDirIdentity(trialRoot: string): { taskId: PilotTaskId; product: PilotProduct } {
-  const match = /^bl-pilot-(G1|R1|D1|U1|F1)-(studio|cursor)-/.exec(basename(trialRoot));
+  const match = /^bl-pilot-(G1|R1|D1|U1|F1)-(studio|reference)-/.exec(basename(trialRoot));
   if (!match) {
     throw new ManifestError(`Trial directory name is not a harness identity: ${basename(trialRoot)}`);
   }

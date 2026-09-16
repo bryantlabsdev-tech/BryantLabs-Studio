@@ -38,10 +38,10 @@ export async function runPilotCli(argv: readonly string[]): Promise<number> {
 }
 
 function helpText(): string {
-  return `BryantLabs Studio vs Cursor pilot harness (no product automation, no provider calls).
+  return `BryantLabs Studio agent acceptance pilot (no product automation, no provider calls).
 
 Commands:
-  create-trial --task G1|R1|D1|U1|F1 --product studio|cursor
+  create-trial --task G1|R1|D1|U1|F1 --product studio|reference
   prompt --task G1|R1|D1|U1|F1
   evaluate --trial <dir> [--skip-verify]
   record-scorecard --trial <dir> --model <id> --wall-time-ms <n> --run-ref <text-or-sha256> [--out <file>]

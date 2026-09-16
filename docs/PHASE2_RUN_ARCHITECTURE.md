@@ -78,5 +78,5 @@ No synthetic planner prose in the thought stream.
 | `useAgentRunHistoryController.ts` | Terminal watcher + selection state |
 | `useAgentRunViewModel.ts` | Live vs selected artifact routing |
 | `FollowUpChatHistory.tsx` | Per-run conversation blocks |
-| `AgentRunHistoryPanel.tsx` | Cursor-style run list |
+| `AgentRunHistoryPanel.tsx` | Run list |
 | `AgentRunCard.tsx` | Inline files, thoughts, failure narrative |

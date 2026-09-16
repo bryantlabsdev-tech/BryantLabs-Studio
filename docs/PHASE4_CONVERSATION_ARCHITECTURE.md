@@ -48,9 +48,9 @@ Summary, Generated Files, and Logs remain in **Center workbench → More ▾** (
 
 Success/failure studio bubbles are suppressed when a frozen run artifact exists for the preceding user message — the run block carries the outcome.
 
-## Remaining gaps vs Cursor
+## Remaining gaps against reference capabilities
 
-| Cursor | BryantLabs Studio (after Phase 4) |
+| Reference capability | BryantLabs Studio (after Phase 4) |
 |--------|-----------------------------------|
 | Full inline diff with syntax highlighting in thread | Mini diff (+/− lines, capped preview); full diff still in Diff tab |
 | @-mentions, file attachments in composer | Text prompt only |

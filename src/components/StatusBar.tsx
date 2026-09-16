@@ -4,7 +4,7 @@ import { isAgentWorkflowBusy } from "@/core/agent/agentRunMutex";
 import { APP_INFO } from "@/core/appInfo";
 
 /**
- * Slim footer — live run context (Cursor-style).
+ * Slim footer for live run context.
  */
 export function StatusBar() {
   const {

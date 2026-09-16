@@ -50,7 +50,7 @@ Vite manual chunks: `monaco`, `react-vendor`, `build-view`, `greenfield-view`, `
 | Criterion | Status |
 |-----------|--------|
 | Architecture — provider decomposed | ✅ 22+ workspace hooks, sync extracted |
-| Agent UX — Cursor-style streaming | ✅ Phases 1–8 |
+| Agent UX — streaming execution | ✅ Phases 1–8 |
 | Test coverage | ✅ 486 unit + 106 electron + 9 E2E mock |
 | Real-provider E2E | ✅ Local + nightly CI |
 | CSS maintainability | ✅ 11 modules, App.css minimal |

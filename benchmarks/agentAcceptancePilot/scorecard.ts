@@ -204,7 +204,7 @@ export async function summarizeScorecards(dir: string): Promise<{
 
 export function formatSummaryMarkdown(entries: readonly PilotScorecard[]): string {
   const lines = [
-    "# Cursor parity pilot summary",
+    "# Agent acceptance pilot summary",
     "",
     "Metrics that were not reported by a product are shown as `unavailable`, never as `0`.",
     "",

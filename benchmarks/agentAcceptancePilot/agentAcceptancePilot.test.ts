@@ -35,7 +35,7 @@ async function withTrial(
   }
 }
 
-describe("cursor parity pilot harness", () => {
+describe("agent acceptance pilot harness", () => {
   it("defines five tasks and product-independent prompts", () => {
     assert.equal(PILOT_TASKS.length, 5);
     assert.equal(new Set(PILOT_TASKS.map((t) => t.canonicalPrompt)).size, 5);
@@ -83,18 +83,18 @@ describe("cursor parity pilot harness", () => {
 
   it("creates trials under os.tmpdir with sealed identity", async () => {
     const studio = await createPilotTrial({ taskId: "G1", product: "studio" });
-    const cursor = await createPilotTrial({ taskId: "G1", product: "cursor" });
+    const reference = await createPilotTrial({ taskId: "G1", product: "reference" });
     try {
-      assert.equal(studio.prompt, cursor.prompt);
+      assert.equal(studio.prompt, reference.prompt);
       assert.equal(studio.manifest.product, "studio");
-      assert.equal(cursor.manifest.product, "cursor");
+      assert.equal(reference.manifest.product, "reference");
       const tmpReal = await realpath(tmpdir());
       assert.equal((await realpath(studio.manifest.trialRoot)).startsWith(tmpReal), true);
       const reloaded = await readTrialManifest(studio.manifest.trialRoot);
       assert.equal(reloaded.integrity, studio.manifest.integrity);
     } finally {
       await cleanupTrial(studio.manifest.trialRoot);
-      await cleanupTrial(cursor.manifest.trialRoot);
+      await cleanupTrial(reference.manifest.trialRoot);
     }
   });
 
@@ -103,7 +103,7 @@ describe("cursor parity pilot harness", () => {
     const manifestPath = join(created.manifest.trialRoot, "MANIFEST.json");
     try {
       const raw = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
-      raw.product = "cursor";
+      raw.product = "reference";
       await writeFile(manifestPath, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
       await assert.rejects(() => evaluateTrial(created.manifest.trialRoot, { runVerify: false }), /integrity|directory name|task\/product/);
       await writeFile(manifestPath, "{not json", "utf8");
@@ -115,7 +115,7 @@ describe("cursor parity pilot harness", () => {
   });
 
   it("prints the exact canonical prompt on stdout", () => {
-    const script = join(REPO_ROOT, "scripts", "cursor-parity-pilot.mjs");
+    const script = join(REPO_ROOT, "scripts", "agent-acceptance-pilot.mjs");
     const hook = join(REPO_ROOT, "scripts", "test-alias-hook.mjs");
     const result = spawnSync(
       process.execPath,
@@ -277,7 +277,7 @@ export function History({ entries }: { entries: string[] }) {
       const entry = buildScorecardEntry({
         evaluation: {
           taskId: "G1",
-          product: "cursor",
+          product: "reference",
           trialRoot: dir,
           passed: false,
           checks: [],
@@ -292,7 +292,7 @@ export function History({ entries }: { entries: string[] }) {
         notes: "n/a metrics",
         transcriptOrRunReference: "abc",
       });
-      await writeScorecard(join(dir, "g1-cursor.json"), entry);
+      await writeScorecard(join(dir, "g1-reference.json"), entry);
       const { markdown } = await summarizeScorecards(dir);
       assert.match(markdown, /unavailable/);
       assert.match(markdown, /fail/);

@@ -1,7 +1,7 @@
 export const PILOT_TASK_IDS = ["G1", "R1", "D1", "U1", "F1"] as const;
 export type PilotTaskId = (typeof PILOT_TASK_IDS)[number];
 
-export const PILOT_PRODUCTS = ["studio", "cursor"] as const;
+export const PILOT_PRODUCTS = ["studio", "reference"] as const;
 export type PilotProduct = (typeof PILOT_PRODUCTS)[number];
 
 export const SCORECARD_VERSION = 1 as const;

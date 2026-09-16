@@ -7,7 +7,7 @@ export interface SearchReplaceResult {
 const BLOCK_RE =
   /<<<< SEARCH\r?\n([\s\S]*?)\r?\n=======\r?\n([\s\S]*?)\r?\n>>>> REPLACE/g;
 
-/** Apply Cursor-style SEARCH/REPLACE blocks to full file content. */
+/** Apply SEARCH/REPLACE blocks to full file content. */
 export function applySearchReplaceBlocks(
   source: string,
   patch: string,

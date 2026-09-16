@@ -9,7 +9,7 @@ import { useEffect } from "react";
 import { usePanelLayout } from "@/hooks/usePanelLayout";
 
 /**
- * Cursor-style workspace: icon rail | agent left | editor center | details right.
+ * Workspace: icon rail | agent left | editor center | details right.
  */
 export function ResizableWorkspace() {
   const {
