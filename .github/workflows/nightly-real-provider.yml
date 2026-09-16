@@ -28,8 +28,23 @@ jobs:
         env:
           VITE_BRYANTLABS_E2E: "1"
 
+      - name: Detect provider credentials
+        id: provider-credentials
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          available=false
+          if [ -n "${GROQ_API_KEY}" ] || [ -n "${ANTHROPIC_API_KEY}" ] || [ -n "${GEMINI_API_KEY}" ] || [ -n "${GOOGLE_API_KEY}" ] || [ -n "${OPENROUTER_API_KEY}" ]; then
+            available=true
+          fi
+          echo "available=${available}" >> "$GITHUB_OUTPUT"
+
       - name: Real-provider smoke (opt-in)
-        if: env.GROQ_API_KEY != '' || env.ANTHROPIC_API_KEY != ''
+        if: steps.provider-credentials.outputs.available == 'true'
         run: npm run test:e2e:real
         env:
           CI: "1"
@@ -37,10 +52,10 @@ jobs:
           PLAYWRIGHT_USE_DIST: "1"
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
       - name: Skip notice (no API key configured)
-        if: env.GROQ_API_KEY == '' && env.ANTHROPIC_API_KEY == ''
-        run: echo "Skipping real-provider smoke — add GROQ_API_KEY or ANTHROPIC_API_KEY repo secret."
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        if: steps.provider-credentials.outputs.available == 'false'
+        run: echo "Skipping real-provider smoke — add a supported provider API key repo secret."
