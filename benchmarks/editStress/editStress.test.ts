@@ -4,10 +4,10 @@ import { EDIT_STRESS_PROMPTS } from "./prompts";
 import { runEditStressDryCase, runEditStressSuite } from "./runEditStressSuite";
 
 describe("edit stress dry-run", () => {
-  it("runs all 10 brownfield edit scenarios", () => {
-    assert.equal(EDIT_STRESS_PROMPTS.length, 10);
+  it("runs all defined brownfield edit scenarios", () => {
+    assert.equal(EDIT_STRESS_PROMPTS.length, 11);
     const suite = runEditStressSuite();
-    assert.equal(suite.total, 10);
+    assert.equal(suite.total, 11);
     assert.equal(suite.targetMet, true, suite.runs.filter((r) => !r.ok).map((r) => `${r.id}: ${r.reason}`).join("; "));
   });
 

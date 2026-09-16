@@ -74,7 +74,7 @@ Reports: `benchmarks/results/stress-latest.md`, `stress-fast-latest.md`, `repair
 
 Unit tests: `npm run bench:unit` (includes `benchmarks/stress/stress.test.ts`)
 
-## Brownfield edit stress (10 follow-up prompts)
+## Brownfield edit stress (11 follow-up prompts)
 
 Dry-run validates routing (`build_loop`), submit action, and deterministic planner file selection on brownfield fixtures — CI-safe, no API key.
 
@@ -104,7 +104,7 @@ Full headless path: deterministic plan → `executeApplyPlanOrchestration` (mock
 
 ```bash
 npm run edit:stress:provider:fast    # 4 sudoku prompts (CI default)
-npm run edit:stress:provider         # all 10 prompts
+npm run edit:stress:provider         # all 11 prompts
 npm run edit:stress:provider -- --skip-verify
 npm run edit:stress:provider -- --prompt sudoku-gameplay
 ```

@@ -6,6 +6,8 @@ This register records what can and cannot currently be established from the repo
 
 Do not publish, sell, sign, notarize, or distribute a build while any shipped source or asset is marked **unverified** below. Resolve an unverified item with a dated owner attestation, a documented third-party license, or an independently created replacement. Preserve the evidence outside Git as well as a reference here.
 
+Inventory, templates, and the read-only checker live in [`provenance/`](./provenance/README.md). Run `npm run provenance:check`. Every register row must have an inventory record. Unresolved items with complete records pass. A **Verified** row requires structured evidence; the checker does not authenticate off-Git files and does not infer ownership from Git.
+
 ## Register
 
 | Material | Repository evidence | Status | Required before external release |

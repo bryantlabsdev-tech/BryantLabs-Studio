@@ -17,6 +17,8 @@
     "test:electron": "node ./scripts/run-electron-tests.mjs",
     "test:all": "npm run test:unit && npm run test:electron",
     "licenses:check": "node ./scripts/check-dependency-licenses.mjs",
+    "provenance:check": "node ./scripts/check-provenance.mjs",
+    "provenance:test": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs --test 'provenance/**/*.test.ts'",
     "test:smoke": "node ./scripts/e2e-smoke.mjs",
     "test:e2e": "cross-env BRYANTLABS_MOCK_PROVIDER=1 playwright test",
     "test:e2e:headed": "cross-env BRYANTLABS_MOCK_PROVIDER=1 playwright test --headed",

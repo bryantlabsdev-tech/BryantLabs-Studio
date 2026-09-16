@@ -1,4 +1,4 @@
-/** Ten brownfield edit scenarios — routing + planner dry-run corpus. */
+/** Brownfield edit scenarios — routing + planner dry-run corpus. */
 
 export interface EditStressPrompt {
   readonly id: string;
@@ -90,7 +90,7 @@ export const EDIT_STRESS_PROMPTS: readonly EditStressPrompt[] = [
   },
 ] as const;
 
-export const EDIT_STRESS_TARGET = 10;
+export const EDIT_STRESS_TARGET = EDIT_STRESS_PROMPTS.length;
 
 export function editStressPromptById(id: string): EditStressPrompt | undefined {
   return EDIT_STRESS_PROMPTS.find((p) => p.id === id);
