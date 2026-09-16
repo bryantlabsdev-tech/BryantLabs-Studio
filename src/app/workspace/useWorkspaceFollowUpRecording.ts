@@ -14,6 +14,7 @@ import {
 } from "@/core/build/followUpRun";
 import {
   restoreFollowUpCheckpoint,
+  shouldCommitFollowUpUndo,
   type FollowUpCheckpoint,
 } from "@/core/build/followUpCheckpoint";
 import {
@@ -218,9 +219,15 @@ export function useWorkspaceFollowUpRecording(input: {
     if (!input.api || !input.followUpCheckpoint) return;
     const checkpoint = input.followUpCheckpoint;
     const result = await restoreFollowUpCheckpoint(input.api, checkpoint);
-    if (!result.ok) {
+    if (!shouldCommitFollowUpUndo(result)) {
       const detail = result.error ?? "Undo failed.";
       input.appendGreenfieldRunLog("error", "failed", detail);
+      if (result.attemptBasis && result.attemptBasis.length > 0) {
+        input.setFollowUpCheckpoint({
+          ...checkpoint,
+          undoAttemptBasis: result.attemptBasis,
+        });
+      }
       return;
     }
     input.setFollowUpCheckpoint(null);

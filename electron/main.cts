@@ -51,11 +51,10 @@ import {
   applyEdit,
   createProjectFile,
   deleteProjectFile,
-  writeVerified,
   validateWritePath,
   isCanonicalPathWithinRoot,
 } from "./fileWriter.cjs";
-import { createLastEditStore, parseUndoBatchEntries } from "./lastEditBatch.cjs";
+import { createFsUndoIo, createLastEditStore, parseUndoBatchEntries } from "./lastEditBatch.cjs";
 import { runVerification, type VerificationResult } from "./verifier.cjs";
 import {
   checkHealth,
@@ -704,11 +703,13 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle("edit:undoLast", async (): Promise<EditResult> => {
-    return lastEditStore.undo(projectRoot, {
-      writeVerified,
-      deleteProjectFile,
-      notifyIndexFileChange,
-    });
+    const result = await lastEditStore.undo(
+      projectRoot,
+      createFsUndoIo(notifyIndexFileChange),
+    );
+    return result.ok
+      ? { ok: true, content: result.content, path: result.path }
+      : { ok: false, reason: result.reason, path: result.path };
   });
 
   ipcMain.handle(

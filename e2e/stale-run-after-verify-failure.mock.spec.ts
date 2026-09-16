@@ -193,7 +193,7 @@ test.describe("Stale-run recovery after verification failure (mock)", () => {
   });
 
   test("partial undo keeps stale-run protection and reports the failed path", async () => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     await page.evaluate(() => window.__studioTestHooks?.clearFollowUpReviewFirstPreference?.());
     await acceptSimulatedReview(page, projectDir);
     await page.evaluate(() =>
@@ -205,6 +205,12 @@ test.describe("Stale-run recovery after verification failure (mock)", () => {
       .poll(async () => pathExists(path.join(projectDir, HISTORY_REL)), {
         timeout: 30_000,
       })
+      .toBe(true);
+    await expect
+      .poll(async () => {
+        const app = await fs.readFile(path.join(projectDir, APP_REL), "utf8").catch(() => "");
+        return app.includes(UNDO_MARKER);
+      }, { timeout: 30_000 })
       .toBe(true);
 
     const undoError = await page.evaluate(() => {
@@ -218,10 +224,37 @@ test.describe("Stale-run recovery after verification failure (mock)", () => {
     });
     expect(undoError).toMatch(/History\.tsx/i);
 
+    const canUndoAfterPartial = await page.evaluate(
+      () => window.__studioTestHooks?.getCanUndo?.() ?? false,
+    );
+    expect(canUndoAfterPartial).toBe(true);
+
     await waitForComposerReady(page);
     await fillAgentPrompt(page, FOLLOW_UP_PROMPT);
     await sendAgentPrompt(page);
     await expect(page.getByRole("region", { name: "Stale run state" })).toBeVisible();
     await page.getByRole("button", { name: /^Cancel$/i }).click();
+
+    await undoViaAdvanced(page);
+    await expectRestored(projectDir, originalApp);
+    await expect
+      .poll(async () =>
+        page.evaluate(() => window.__studioTestHooks?.getCanUndo?.() ?? true),
+      )
+      .toBe(false);
+
+    await waitForComposerReady(page);
+    await fillAgentPrompt(page, FOLLOW_UP_PROMPT);
+    await sendAgentPrompt(page);
+    await dismissBlockingDialogs(page);
+    await expect(page.getByRole("region", { name: "Stale run state" })).toBeHidden();
+    await expect(page.getByRole("button", { name: /^Reset and start$/i })).toHaveCount(0);
+    await page.waitForFunction(
+      () =>
+        window.__studioTestHooks?.getPatchPipelineState?.()?.planApplyPhase ===
+        "waiting_for_review",
+      undefined,
+      { timeout: 90_000 },
+    );
   });
 });
