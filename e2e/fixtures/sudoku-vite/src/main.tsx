@@ -1,11 +1,15 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import "./index.css";
 
-createRoot(document.getElementById("root")!).render(
+const mount = document.getElementById("root");
+if (!mount) {
+  throw new Error("Missing #root");
+}
+
+createRoot(mount).render(
   <StrictMode>
     <App />
   </StrictMode>,
 );
-/* mock patch */
-/* mock patch */

@@ -1,2 +1,10 @@
+:root {
+  font-family: system-ui, sans-serif;
+  line-height: 1.4;
+}
 
-/* mock styles */
+main {
+  margin: 2rem auto;
+  max-width: 36rem;
+  padding: 0 1rem;
+}
