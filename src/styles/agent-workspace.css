@@ -1,5 +1,5 @@
 /**
- * Cursor-style agent workspace — composer, timeline, run cards, status header
+ * Agent workspace — composer, timeline, run cards, status header
  */
 
 /* ── Composer ─────────────────────────────────────────────────────────── */
@@ -1263,4 +1263,3 @@ span.agent-file-selection__path {
   flex-wrap: wrap;
   gap: var(--space-2);
 }
-

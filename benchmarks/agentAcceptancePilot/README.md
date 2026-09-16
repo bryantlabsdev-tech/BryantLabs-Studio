@@ -1,10 +1,10 @@
-# Cursor parity pilot harness
+# Agent acceptance pilot harness
 
-Temporary-repository fixtures, shared prompts, and machine-checkable scorecards for a five-task BryantLabs Studio vs Cursor comparison. This harness does not launch either product, read provider keys, or call a model.
+Temporary-repository fixtures, shared prompts, and machine-checkable scorecards for evaluating BryantLabs Studio and an independently selected reference tool. This harness does not launch either tool, read provider keys, or call a model.
 
 Trials live under `os.tmpdir()`. Do not open or modify the product git clone during a trial.
 
-Canonical prompts are byte-identical for Studio and Cursor (`prompt --task <id>` has no product parameter).
+Canonical prompts are byte-identical for both trial labels (`prompt --task <id>` has no product parameter). A reference trial must use only a tool and evaluation method the operator is authorized to use.
 
 ## Tasks
 
@@ -19,13 +19,13 @@ Canonical prompts are byte-identical for Studio and Cursor (`prompt --task <id>`
 ## Commands
 
 ```bash
-npm run bench:pilot -- create-trial --task G1 --product studio
-npm run bench:pilot -- prompt --task G1
-npm run bench:pilot -- evaluate --trial "$TRIAL"
-npm run bench:pilot -- record-scorecard --trial "$TRIAL" --model MODEL --wall-time-ms 120000 --run-ref "$REF"
-npm run bench:pilot -- validate-scorecard --entry "$TRIAL/scorecard.json"
-npm run bench:pilot -- summarize --dir "$RESULTS_DIR"
-npm run bench:pilot -- cleanup --trial "$TRIAL"
+npm run bench:acceptance -- create-trial --task G1 --product studio
+npm run bench:acceptance -- prompt --task G1
+npm run bench:acceptance -- evaluate --trial "$TRIAL"
+npm run bench:acceptance -- record-scorecard --trial "$TRIAL" --model MODEL --wall-time-ms 120000 --run-ref "$REF"
+npm run bench:acceptance -- validate-scorecard --entry "$TRIAL/scorecard.json"
+npm run bench:acceptance -- summarize --dir "$RESULTS_DIR"
+npm run bench:acceptance -- cleanup --trial "$TRIAL"
 ```
 
 Typecheck and build use this checkout's `node_modules` (linked into the trial), not a globally installed `tsc` or `vite`. Omit token/call flags when unknown; they are stored as `unavailable`, never as `0`.

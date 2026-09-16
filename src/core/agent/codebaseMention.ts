@@ -1,4 +1,4 @@
-/** Cursor-style @codebase pin — semantic / relevance search over the open project. */
+/** @codebase pin — semantic and relevance search over the open project. */
 
 export const CODEBASE_MENTION = "codebase";
 

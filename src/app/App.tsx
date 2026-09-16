@@ -25,7 +25,7 @@ import "@/styles/workbench.css";
 import "@/styles/exec-dashboard.css";
 
 /**
- * Cursor-style workspace: icon rail, agent left, editor center, details right.
+ * Workspace layout: icon rail, agent left, editor center, details right.
  */
 export function App() {
   return (

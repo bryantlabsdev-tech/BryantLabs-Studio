@@ -18,7 +18,7 @@ interface RunTimelineVisualizationProps {
   readonly onCancelRun?: () => void;
 }
 
-/** Sticky active-run status header (Cursor-style agent workspace). */
+/** Sticky active-run status header. */
 export function RunTimelineVisualization(props: RunTimelineVisualizationProps) {
   return <AgentStatusHeader {...props} />;
 }

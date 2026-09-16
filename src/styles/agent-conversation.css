@@ -746,7 +746,7 @@
   font-size: var(--font-caption-size, 0.85rem);
 }
 
-/* Unified assistant turn (Cursor-style execution stream) */
+/* Unified assistant turn execution stream */
 
 .agent-turn-bubble {
   max-width: min(100%, 52rem);
@@ -953,4 +953,3 @@
   font-size: 11px;
   color: var(--text-muted);
 }
-

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Manual Studio vs Cursor pilot harness.
- * Does not launch Studio, Cursor, or any model provider.
+ * Manual agent acceptance pilot harness.
+ * Does not launch Studio, a reference tool, or any model provider.
  */
-import { runPilotCli } from "../benchmarks/cursorParityPilot/cli.ts";
+import { runPilotCli } from "../benchmarks/agentAcceptancePilot/cli.ts";
 
 try {
   const code = await runPilotCli(process.argv.slice(2));

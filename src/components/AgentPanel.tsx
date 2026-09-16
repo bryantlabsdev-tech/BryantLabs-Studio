@@ -2,7 +2,7 @@ import { ViewSuspense } from "@/components/ViewSuspense";
 import { LazyBuildView } from "@/components/lazyViews";
 
 /**
- * Left Agent chat column — always visible (Cursor-style).
+ * Left Agent chat column — always visible.
  */
 export function AgentPanel() {
   return (

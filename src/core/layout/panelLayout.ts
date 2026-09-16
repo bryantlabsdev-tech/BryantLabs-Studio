@@ -9,7 +9,7 @@ export interface PanelLayout {
   readonly rightWidth: number;
   readonly dockHeight: number;
   readonly dockOpen: boolean;
-  /** Cursor-style focus: widen agent column, minimize side panels. */
+  /** Agent focus: widen the agent column and minimize side panels. */
   readonly agentFocusMode: boolean;
 }
 

@@ -1,4 +1,4 @@
-/** Cursor-style inline edit: user selects code and instructs a localized change. */
+/** Inline edit: the user selects code and instructs a localized change. */
 
 export interface InlineEditSelection {
   readonly relPath: string;
