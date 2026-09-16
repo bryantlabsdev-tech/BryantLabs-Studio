@@ -51,7 +51,7 @@ missing_evidence: No pre-import VCS, assignment, or independent-implementation r
 
 ## legacy-benchmark-fixtures
 
-Fixture corpora from the same import. Nested `package.json` / `package-lock.json` files inside these trees are **dependency metadata inside fixtures**, not a first-party originality claim. Test helpers `greenfield.ts` and `fieldFlow.ts` were independently rewritten 2026-09-16; see [`legacy-fixture-helpers-replacement.md`](./legacy-fixture-helpers-replacement.md). That rewrite does not verify this register row.
+Fixture corpora from the same import. Nested `package.json` / `package-lock.json` files inside these trees are **dependency metadata inside fixtures**, not a first-party originality claim. Test helpers `greenfield.ts` and `fieldFlow.ts` were independently rewritten 2026-09-16; see [`legacy-fixture-helpers-replacement.md`](./legacy-fixture-helpers-replacement.md). E2E fixture apps `e2e/fixtures/empty-project` and `e2e/fixtures/sudoku-vite` were independently rewritten 2026-09-16; see [`legacy-e2e-fixtures-replacement.md`](./legacy-e2e-fixtures-replacement.md). Those rewrites do not verify this register row.
 
 ```provenance-record
 id: legacy-benchmark-fixtures
@@ -73,7 +73,7 @@ paths:
 - benchmarks/fixtures/
 - e2e/fixtures/
 exclusions:
-missing_evidence: No pre-import authorship, license, or generation log for stress snapshot trees or E2E fixture apps. Whether those snapshots were model-generated, hand-written, or copied is unknown. Fixture lockfiles name third-party packages; those licenses are not attested here. On 2026-09-16, benchmarks/fixtures/greenfield.ts and benchmarks/fixtures/fieldFlow.ts were independently replaced as test helpers (see provenance/legacy-fixture-helpers-replacement.md); that replacement is not verification of this register row.
+missing_evidence: No pre-import authorship, license, or generation log for remaining stress snapshot trees. Whether those snapshots were model-generated, hand-written, or copied is unknown. Fixture lockfiles name third-party packages; those licenses are not attested here. On 2026-09-16, benchmarks/fixtures/greenfield.ts and benchmarks/fixtures/fieldFlow.ts were independently replaced as test helpers (see provenance/legacy-fixture-helpers-replacement.md). On 2026-09-16, e2e/fixtures/empty-project and e2e/fixtures/sudoku-vite were independently replaced as E2E fixture apps (see provenance/legacy-e2e-fixtures-replacement.md). Those replacements are not verification of this register row.
 ```
 
 ---
