@@ -158,6 +158,16 @@ npm run greenfield:stress:lock-replay
 npm run greenfield:stress:sync-fixtures
 ```
 
+## Cursor parity pilot (manual, no providers)
+
+Five-task Studio vs Cursor scorecard harness. It creates temporary project fixtures, prints a shared prompt, and evaluates the tree after a human runs the same task in each product. It does not launch Studio or Cursor and does not call paid providers.
+
+```bash
+npm run bench:pilot -- help
+```
+
+Operator steps: `benchmarks/cursorParityPilot/README.md`
+
 ## Adding cases
 
 1. Add a `BenchmarkCaseDefinition` in the relevant `benchmarks/cases/*.ts` file.
