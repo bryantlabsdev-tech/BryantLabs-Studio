@@ -1,5 +1,10 @@
 import { consumeForcedUndoPathFailure } from "@/core/agent/runRecoveryTestSeams";
 import type { BryantLabsApi } from "@/types";
+import {
+  isAbsentPathReason,
+  runUndoTransaction,
+  type UndoPathSnapshot,
+} from "@/core/build/undoTransaction";
 
 export interface FollowUpCheckpointFile {
   readonly relPath: string;
@@ -7,6 +12,13 @@ export interface FollowUpCheckpointFile {
   readonly content: string;
   /** Absent on older checkpoints — treat as modify, never infer from empty content. */
   readonly action?: "create" | "modify";
+}
+
+export interface FollowUpUndoAttemptBasis {
+  readonly relPath: string;
+  readonly absPath: string;
+  readonly existed: boolean;
+  readonly content: string;
 }
 
 export interface FollowUpCheckpoint {
@@ -17,6 +29,8 @@ export interface FollowUpCheckpoint {
   /** Apply Plan run that produced this undo batch, when known. */
   readonly applyRunId?: string;
   readonly files: readonly FollowUpCheckpointFile[];
+  /** Pre-undo snapshot from the last failed attempt; used to refuse divergent retries. */
+  readonly undoAttemptBasis?: readonly FollowUpUndoAttemptBasis[];
 }
 
 export function createFollowUpCheckpoint(input: {
@@ -76,6 +90,52 @@ export interface RestoreFollowUpCheckpointResult {
   readonly error?: string;
   readonly restored: readonly string[];
   readonly failed: readonly RestoreFollowUpFailure[];
+  readonly compensationOk: boolean;
+  readonly compensationAttempted: boolean;
+  readonly dirtyPaths: readonly string[];
+  readonly attemptBasis?: readonly FollowUpUndoAttemptBasis[];
+}
+
+export function shouldCommitFollowUpUndo(
+  result: RestoreFollowUpCheckpointResult,
+): boolean {
+  return result.ok;
+}
+
+function normalizeLexicalPath(filePath: string): string {
+  const raw = filePath.replace(/\\/g, "/");
+  const absolute = raw.startsWith("/");
+  const parts = raw.split("/");
+  const out: string[] = [];
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      out.pop();
+      continue;
+    }
+    out.push(part);
+  }
+  const joined = out.join("/");
+  return absolute ? `/${joined}` : joined;
+}
+
+function isLexicallyInsideProject(root: string, target: string): boolean {
+  if (!root) return true;
+  const resolvedRoot = normalizeLexicalPath(root);
+  const resolved = normalizeLexicalPath(target);
+  return resolved === resolvedRoot || resolved.startsWith(`${resolvedRoot}/`);
+}
+
+function toFollowUpBasis(
+  snapshots: readonly UndoPathSnapshot[] | undefined,
+): FollowUpUndoAttemptBasis[] | undefined {
+  if (!snapshots) return undefined;
+  return snapshots.map((item) => ({
+    relPath: item.label,
+    absPath: item.path,
+    existed: item.existed,
+    content: item.content,
+  }));
 }
 
 export async function restoreFollowUpCheckpoint(
@@ -86,55 +146,99 @@ export async function restoreFollowUpCheckpoint(
   const failed: RestoreFollowUpFailure[] = [];
   const forcedFail = consumeForcedUndoPathFailure();
 
-  for (const file of checkpoint.files) {
-    if (forcedFail && file.relPath === forcedFail) {
-      failed.push({
-        relPath: file.relPath,
-        error: "Forced undo restore failure",
-      });
-      continue;
-    }
-    try {
-      if (file.action === "create") {
-        const del = await api.deleteProjectFile(file.absPath);
-        if (!del.ok) {
-          failed.push({
-            relPath: file.relPath,
-            error: del.reason ?? "Delete failed",
-          });
-          continue;
+  const result = await runUndoTransaction(
+    checkpoint.files.map((file) => ({
+      path: file.absPath,
+      created: file.action === "create",
+      previousContent: file.action === "create" ? "" : file.content,
+      label: file.relPath,
+    })),
+    {
+      normalizePath: (filePath) => normalizeLexicalPath(filePath),
+      validate: async (filePath, _intent) => {
+        if (!isLexicallyInsideProject(checkpoint.projectPath, filePath)) {
+          return { ok: false, reason: "Path is outside the project root." };
         }
-        restored.push(file.relPath);
-        continue;
-      }
-      const current = await api.readFile(file.absPath);
-      if (!current.readable) {
-        failed.push({
-          relPath: file.relPath,
-          error: current.reason ?? "Read failed",
-        });
-        continue;
-      }
-      const before = "content" in current ? current.content : "";
-      const res = await api.applyEdit(file.absPath, before, file.content, false);
-      if (!res.ok) {
-        failed.push({
-          relPath: file.relPath,
-          error: res.reason ?? "Restore failed",
-        });
-        continue;
-      }
-      restored.push(file.relPath);
-    } catch {
-      failed.push({ relPath: file.relPath, error: "Restore failed" });
-    }
+        return { ok: true };
+      },
+      snapshot: async (filePath) => {
+        const current = await api.readFile(filePath);
+        if (current.readable) {
+          return {
+            ok: true,
+            existed: true,
+            content: "content" in current ? current.content : "",
+          };
+        }
+        const reason = current.reason ?? "";
+        if (/permission|EACCES|binary|too large/i.test(reason)) {
+          return { ok: false, reason: reason || "Snapshot failed" };
+        }
+        return { ok: true, existed: false, content: "" };
+      },
+      write: async (filePath, content) => {
+        const current = await api.readFile(filePath);
+        if (!current.readable) {
+          return api.createProjectFile(filePath, content);
+        }
+        const before = "content" in current ? current.content : "";
+        return api.applyEdit(filePath, before, content, false);
+      },
+      delete: async (filePath) => {
+        const del = await api.deleteProjectFile(filePath);
+        if (!del.ok && isAbsentPathReason(del.reason)) {
+          return { ok: true };
+        }
+        return del;
+      },
+      shouldFail: (op) => Boolean(forcedFail && op.label === forcedFail),
+    },
+    {
+      reverse: false,
+      ...(checkpoint.undoAttemptBasis
+        ? {
+            attemptBasis: checkpoint.undoAttemptBasis.map((item) => ({
+              key: normalizeLexicalPath(item.absPath),
+              path: item.absPath,
+              label: item.relPath,
+              existed: item.existed,
+              content: item.content,
+            })),
+          }
+        : {}),
+    },
+  );
+
+  const attemptBasis = toFollowUpBasis(result.attemptBasis);
+
+  if (result.ok) {
+    return {
+      ok: true,
+      restored: checkpoint.files.map((file) => file.relPath),
+      failed,
+      compensationOk: true,
+      compensationAttempted: false,
+      dirtyPaths: [],
+    };
   }
 
-  if (failed.length > 0) {
-    const error = failed.map((item) => `${item.relPath}: ${item.error}`).join("; ");
-    return { ok: false, error, restored, failed };
+  if (result.failedLabel) {
+    failed.push({
+      relPath: result.failedLabel,
+      error: result.reason ?? "Undo failed",
+    });
   }
-  return { ok: true, restored, failed };
+
+  return {
+    ok: false,
+    restored,
+    failed,
+    compensationOk: result.compensationOk,
+    compensationAttempted: result.compensationAttempted,
+    dirtyPaths: result.dirtyLabels,
+    ...(result.reason ? { error: result.reason } : {}),
+    ...(attemptBasis ? { attemptBasis } : {}),
+  };
 }
 
 export interface PartialApplyRollbackEntry {
