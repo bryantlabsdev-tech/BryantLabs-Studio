@@ -21,7 +21,7 @@ Git author names, commit dates, and file paths are **repository observations**. 
 | `requires_replacement` | The owner records that the material should be replaced rather than attested. |
 | `verified` | Allowed only when the matching `PROVENANCE.md` row is **Verified** and `evidence_reference` is a structured citation (id, record type, date, reviewer, and stored location or SHA-256). The checker does not authenticate off-Git files. |
 
-The three historical items remain **unresolved** until a human owner supplies evidence. This repository must not infer that Git history “proves” they are original.
+The three historical items remain **unresolved** until a human owner supplies evidence sufficient for a later **Verified** status. This repository must not infer that Git history “proves” they are original. Owner notes that the BryantLabs source bitmap was generated with ChatGPT do not change the register status and do not establish copyright protection, ownership, non-infringement, or trademark clearance.
 
 ## Distinctions the templates keep separate
 
