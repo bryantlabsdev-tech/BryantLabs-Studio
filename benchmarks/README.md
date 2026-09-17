@@ -56,6 +56,11 @@ npm run greenfield:stress:replay:legacy
 # Refresh committed CI fixtures from Desktop corpus (after lock-replay)
 npm run greenfield:stress:sync-fixtures
 
+# Deterministic original scaffolds (no network, no provider keys)
+# Writes all 10 STRESS_PROMPTS apps into an explicit temp directory
+npm run greenfield:stress:scaffold -- --output /tmp/bryantlabs-stress-scaffold
+npm run greenfield:stress:scaffold -- --output /tmp/bryantlabs-stress-scaffold --overwrite
+
 # Live single prompt
 npm run greenfield:stress:live -- --prompt fleetops-pro
 ```
@@ -67,6 +72,8 @@ npm run greenfield:stress:live -- --prompt fleetops-pro
 | `~/Desktop/studiotest/stress/live/` | Live generation output (overwritten each run) |
 | `~/Desktop/studiotest/stress/replay-frozen/` | Locked snapshots for repair replay (5 fast-suite ids) |
 | `benchmarks/fixtures/stress/` | Committed CI replay snapshots (sync with `greenfield:stress:sync-fixtures`) |
+
+`npm run greenfield:stress:scaffold` never writes into `legacy/` or `replay-frozen/` unless `--allow-corpus-output` is passed (reserved for a future replacement command).
 
 Live reports include a **Frozen replay corpus** section (independent health check). Replay target: **4/5** on frozen snapshots locally; **5/5 + 10/10** in CI (`BRYANTLABS_STRESS_REPLAY_STRICT=1`).
 
