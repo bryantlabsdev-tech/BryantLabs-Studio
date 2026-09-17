@@ -1,53 +1,55 @@
-import { createContext, ReactNode } from "react";
-import { Route, Routes } from "react-router-dom";
-// Component Imports
-import { Layout } from "./components/Layout";
+import { useEffect, useState } from "react";
+import { Dashboard } from "./pages/Dashboard";
+import { Patients } from "./pages/Patients";
+import { Appointments } from "./pages/Appointments";
+import { Prescriptions } from "./pages/Prescriptions";
+import { Providers } from "./pages/Providers";
+import { Billing } from "./pages/Billing";
+import { VisitNotes } from "./pages/VisitNotes";
+import { Reports } from "./pages/Reports";
 
-// Page Imports
-import Dashboard from "./pages/Dashboard";
-import Patients from "./pages/Patients";
-import Appointments from "./pages/Appointments";
-import Prescriptions from "./pages/Prescriptions";
-import Providers from "./pages/Providers";
-import Billing from "./pages/Billing";
-import VisitNotes from "./pages/VisitNotes";
-import Reports from "./pages/Reports";
+const PAGES = [
+  { id: "dashboard", title: "Dashboard", Page: Dashboard },
+  { id: "patients", title: "Patients", Page: Patients },
+  { id: "appointments", title: "Appointments", Page: Appointments },
+  { id: "prescriptions", title: "Prescriptions", Page: Prescriptions },
+  { id: "providers", title: "Providers", Page: Providers },
+  { id: "billing", title: "Billing", Page: Billing },
+  { id: "visit-notes", title: "Visit Notes", Page: VisitNotes },
+  { id: "reports", title: "Reports", Page: Reports },
+] as const;
 
-/**
- * A placeholder context for application state, as requested for persistence wiring.
- * In a real app, this would be in its own file (e.g., src/context/AppContext.tsx)
- * and would hold shared state, updaters, and logic for localStorage.
- * Exported to be available to other components and to satisfy 'no-unused-vars'.
- */
-export const AppContext = createContext<object | null>(null);
+type PageId = (typeof PAGES)[number]["id"];
 
-const AppProvider = ({ children }: { children: ReactNode }) => {
-  // This is where state management (e.g., useReducer, useState) and
-  // effects for localStorage synchronization would be implemented.
-  const contextValue = {};
+export default function App() {
+  const [route, setRoute] = useState<PageId>(PAGES[0].id);
+
+  useEffect(() => {
+    const sync = () => {
+      const hash = window.location.hash.replace(/^#\/?/, "");
+      const match = PAGES.find((page) => page.id === hash);
+      setRoute(match?.id ?? PAGES[0].id);
+    };
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  const current = PAGES.find((page) => page.id === route) ?? PAGES[0];
+  const Page = current.Page;
 
   return (
-    <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>
-  );
-};
-
-function App() {
-  return (
-    <AppProvider>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="patients" element={<Patients />} />
-          <Route path="appointments" element={<Appointments />} />
-          <Route path="prescriptions" element={<Prescriptions />} />
-          <Route path="providers" element={<Providers />} />
-          <Route path="billing" element={<Billing />} />
-          <Route path="visit-notes" element={<VisitNotes />} />
-          <Route path="reports" element={<Reports />} />
-        </Route>
-      </Routes>
-    </AppProvider>
+    <main>
+      <h1>MedTrack Clinic</h1>
+      <p>MedTrack deterministic stress scaffold.</p>
+      <nav>
+        {PAGES.map((page) => (
+          <a href={"#/" + page.id} key={page.id}>
+            {page.title}
+          </a>
+        ))}
+      </nav>
+      <Page />
+    </main>
   );
 }
-
-export default App;

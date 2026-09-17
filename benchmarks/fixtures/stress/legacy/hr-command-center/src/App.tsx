@@ -1,53 +1,57 @@
-import { createContext, ReactNode } from "react";
-import { Route, Routes } from "react-router-dom";
-import { Layout } from "./components/Layout";
+import { useEffect, useState } from "react";
+import { Dashboard } from "./pages/Dashboard";
+import { Employees } from "./pages/Employees";
+import { Departments } from "./pages/Departments";
+import { Onboarding } from "./pages/Onboarding";
+import { TimeOff } from "./pages/TimeOff";
+import { PerformanceReviews } from "./pages/PerformanceReviews";
+import { PayrollSummary } from "./pages/PayrollSummary";
+import { Documents } from "./pages/Documents";
+import { Reports } from "./pages/Reports";
 
-// Page Imports
-import Dashboard from "./pages/Dashboard";
-import Employees from "./pages/Employees";
-import Departments from "./pages/Departments";
-import Onboarding from "./pages/Onboarding";
-import TimeOff from "./pages/TimeOff";
-import PerformanceReviews from "./pages/PerformanceReviews";
-import PayrollSummary from "./pages/PayrollSummary";
-import Documents from "./pages/Documents";
-import Reports from "./pages/Reports";
+const PAGES = [
+  { id: "dashboard", title: "Dashboard", Page: Dashboard },
+  { id: "employees", title: "Employees", Page: Employees },
+  { id: "departments", title: "Departments", Page: Departments },
+  { id: "onboarding", title: "Onboarding", Page: Onboarding },
+  { id: "time-off", title: "Time Off", Page: TimeOff },
+  { id: "performance-reviews", title: "Performance Reviews", Page: PerformanceReviews },
+  { id: "payroll-summary", title: "Payroll Summary", Page: PayrollSummary },
+  { id: "documents", title: "Documents", Page: Documents },
+  { id: "reports", title: "Reports", Page: Reports },
+] as const;
 
-// NOTE: The user requested wiring for a persistent context.
-// In a real application, this context and provider would live in a separate file
-// (e.g., src/context/DataContext.tsx) and would contain state management logic
-// (e.g., useReducer, useEffect) to interact with localStorage.
-// For this "wiring-only" step, we define a simple placeholder.
-const AppContext = createContext({});
+type PageId = (typeof PAGES)[number]["id"];
 
-const AppProvider = ({ children }: { children: ReactNode }) => {
-  // Placeholder value. A real implementation would hold state (e.g., employees)
-  // and functions to update that state, persisting to localStorage.
-  const value = {};
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
-};
+export default function App() {
+  const [route, setRoute] = useState<PageId>(PAGES[0].id);
 
-function App() {
+  useEffect(() => {
+    const sync = () => {
+      const hash = window.location.hash.replace(/^#\/?/, "");
+      const match = PAGES.find((page) => page.id === hash);
+      setRoute(match?.id ?? PAGES[0].id);
+    };
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  const current = PAGES.find((page) => page.id === route) ?? PAGES[0];
+  const Page = current.Page;
+
   return (
-    <AppProvider>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="/employees" element={<Employees />} />
-          <Route path="/departments" element={<Departments />} />
-          <Route path="/onboarding" element={<Onboarding />} />
-          <Route path="/time-off" element={<TimeOff />} />
-          <Route
-            path="/performance-reviews"
-            element={<PerformanceReviews />}
-          />
-          <Route path="/payroll-summary" element={<PayrollSummary />} />
-          <Route path="/documents" element={<Documents />} />
-          <Route path="/reports" element={<Reports />} />
-        </Route>
-      </Routes>
-    </AppProvider>
+    <main>
+      <h1>HR Command Center</h1>
+      <p>HR Command deterministic stress scaffold.</p>
+      <nav>
+        {PAGES.map((page) => (
+          <a href={"#/" + page.id} key={page.id}>
+            {page.title}
+          </a>
+        ))}
+      </nav>
+      <Page />
+    </main>
   );
 }
-
-export default App;

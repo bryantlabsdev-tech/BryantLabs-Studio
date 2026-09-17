@@ -1,8 +1,11 @@
-export default function Patients() {
+export function Patients() {
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-semibold text-white">Patients</h1>
-      <p className="mt-2 text-sm text-neutral-400">Page scaffold — generated to complete routing. Replace with full UI in a follow-up.</p>
-    </div>
+    <section>
+      <h2>Patients</h2>
+      <p>
+        MedTrack scaffold page for patients.
+      </p>
+      <p>Required keywords: patient, appointment, prescription, provider, billing.</p>
+    </section>
   );
 }

@@ -1,38 +1,57 @@
-import { Route, Routes } from "react-router-dom";
-import { Layout } from "./components/Layout";
-import { DataProvider } from "./contexts/DataProvider";
+import { useEffect, useState } from "react";
+import { Dashboard } from "./pages/Dashboard";
+import { Units } from "./pages/Units";
+import { Tenants } from "./pages/Tenants";
+import { Leases } from "./pages/Leases";
+import { RentPayments } from "./pages/RentPayments";
+import { MaintenanceRequests } from "./pages/MaintenanceRequests";
+import { Inspections } from "./pages/Inspections";
+import { Notices } from "./pages/Notices";
+import { Reports } from "./pages/Reports";
 
-import Dashboard from "./pages/Dashboard";
-import Inspections from "./pages/Inspections";
-import Leases from "./pages/Leases";
-import MaintenanceRequests from "./pages/MaintenanceRequests";
-import Notices from "./pages/Notices";
-import RentPayments from "./pages/RentPayments";
-import Reports from "./pages/Reports";
-import Tenants from "./pages/Tenants";
-import Units from "./pages/Units";
+const PAGES = [
+  { id: "dashboard", title: "Dashboard", Page: Dashboard },
+  { id: "units", title: "Units", Page: Units },
+  { id: "tenants", title: "Tenants", Page: Tenants },
+  { id: "leases", title: "Leases", Page: Leases },
+  { id: "rent-payments", title: "Rent Payments", Page: RentPayments },
+  { id: "maintenance-requests", title: "Maintenance Requests", Page: MaintenanceRequests },
+  { id: "inspections", title: "Inspections", Page: Inspections },
+  { id: "notices", title: "Notices", Page: Notices },
+  { id: "reports", title: "Reports", Page: Reports },
+] as const;
 
-function App() {
+type PageId = (typeof PAGES)[number]["id"];
+
+export default function App() {
+  const [route, setRoute] = useState<PageId>(PAGES[0].id);
+
+  useEffect(() => {
+    const sync = () => {
+      const hash = window.location.hash.replace(/^#\/?/, "");
+      const match = PAGES.find((page) => page.id === hash);
+      setRoute(match?.id ?? PAGES[0].id);
+    };
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  const current = PAGES.find((page) => page.id === route) ?? PAGES[0];
+  const Page = current.Page;
+
   return (
-    <DataProvider>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="units" element={<Units />} />
-          <Route path="tenants" element={<Tenants />} />
-          <Route path="leases" element={<Leases />} />
-          <Route path="rent-payments" element={<RentPayments />} />
-          <Route
-            path="maintenance-requests"
-            element={<MaintenanceRequests />}
-          />
-          <Route path="inspections" element={<Inspections />} />
-          <Route path="notices" element={<Notices />} />
-          <Route path="reports" element={<Reports />} />
-        </Route>
-      </Routes>
-    </DataProvider>
+    <main>
+      <h1>PropertyManager Pro</h1>
+      <p>PropertyManager deterministic stress scaffold.</p>
+      <nav>
+        {PAGES.map((page) => (
+          <a href={"#/" + page.id} key={page.id}>
+            {page.title}
+          </a>
+        ))}
+      </nav>
+      <Page />
+    </main>
   );
 }
-
-export default App;

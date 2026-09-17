@@ -1,80 +1,57 @@
-import { ReactNode, createContext, useEffect, useMemo, useState } from "react";
-import { Route, Routes } from "react-router-dom";
-// Layout Component
-import { Layout } from './components/Layout';
+import { useEffect, useState } from "react";
+import { Dashboard } from "./pages/Dashboard";
+import { Clients } from "./pages/Clients";
+import { Cases } from "./pages/Cases";
+import { Evidence } from "./pages/Evidence";
+import { Documents } from "./pages/Documents";
+import { Deadlines } from "./pages/Deadlines";
+import { Hearings } from "./pages/Hearings";
+import { Notes } from "./pages/Notes";
+import { Reports } from "./pages/Reports";
 
-// Page Components
-import Dashboard from './pages/Dashboard';
-import Clients from './pages/Clients';
-import Cases from './pages/Cases';
-import Evidence from './pages/Evidence';
-import Documents from './pages/Documents';
-import Deadlines from './pages/Deadlines';
-import Hearings from './pages/Hearings';
-import Notes from './pages/Notes';
-import Reports from './pages/Reports';
+const PAGES = [
+  { id: "dashboard", title: "Dashboard", Page: Dashboard },
+  { id: "clients", title: "Clients", Page: Clients },
+  { id: "cases", title: "Cases", Page: Cases },
+  { id: "evidence", title: "Evidence", Page: Evidence },
+  { id: "documents", title: "Documents", Page: Documents },
+  { id: "deadlines", title: "Deadlines", Page: Deadlines },
+  { id: "hearings", title: "Hearings", Page: Hearings },
+  { id: "notes", title: "Notes", Page: Notes },
+  { id: "reports", title: "Reports", Page: Reports },
+] as const;
 
-// --- Context for Persistence ---
-// A simple context to demonstrate provider wiring with localStorage persistence,
-// as requested. This can be expanded to manage global application state.
+type PageId = (typeof PAGES)[number]["id"];
 
-type Theme = 'light' | 'dark';
+export default function App() {
+  const [route, setRoute] = useState<PageId>(PAGES[0].id);
 
-interface AppContextType {
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
-}
-
-// Exported for use in other components via useContext hook
-export const AppContext = createContext<AppContextType | undefined>(undefined);
-
-const AppProvider = ({ children }: { children: ReactNode }) => {
-  const [theme, setTheme] = useState<Theme>(() => {
-    // Get initial theme from localStorage or default to 'light'
-    const savedTheme = localStorage.getItem('app-theme') as Theme;
-    return savedTheme || 'light';
-  });
-
-  // Effect to update localStorage and document class when theme changes
   useEffect(() => {
-    localStorage.setItem('app-theme', theme);
-    document.documentElement.classList.remove('light', 'dark');
-    document.documentElement.classList.add(theme);
-  }, [theme]);
+    const sync = () => {
+      const hash = window.location.hash.replace(/^#\/?/, "");
+      const match = PAGES.find((page) => page.id === hash);
+      setRoute(match?.id ?? PAGES[0].id);
+    };
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
 
-  // Memoize the context value to prevent unnecessary re-renders of consumers
-  const contextValue = useMemo(() => ({
-    theme,
-    setTheme,
-  }), [theme]);
+  const current = PAGES.find((page) => page.id === route) ?? PAGES[0];
+  const Page = current.Page;
 
   return (
-    <AppContext.Provider value={contextValue}>
-      {children}
-    </AppContext.Provider>
-  );
-};
-
-// --- Main Application Router ---
-
-function App() {
-  return (
-    <AppProvider>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="clients" element={<Clients />} />
-          <Route path="cases" element={<Cases />} />
-          <Route path="evidence" element={<Evidence />} />
-          <Route path="documents" element={<Documents />} />
-          <Route path="deadlines" element={<Deadlines />} />
-          <Route path="hearings" element={<Hearings />} />
-          <Route path="notes" element={<Notes />} />
-          <Route path="reports" element={<Reports />} />
-        </Route>
-      </Routes>
-    </AppProvider>
+    <main>
+      <h1>LegalCase Vault</h1>
+      <p>LegalCase deterministic stress scaffold.</p>
+      <nav>
+        {PAGES.map((page) => (
+          <a href={"#/" + page.id} key={page.id}>
+            {page.title}
+          </a>
+        ))}
+      </nav>
+      <Page />
+    </main>
   );
 }
-
-export default App;

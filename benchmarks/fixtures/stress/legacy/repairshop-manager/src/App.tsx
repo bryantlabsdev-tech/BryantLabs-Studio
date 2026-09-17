@@ -1,83 +1,57 @@
-import { createContext, useState, useEffect, ReactNode, Dispatch, SetStateAction } from 'react';
-import { Route, Routes } from "react-router-dom";
-// Import Layout and Page components
-import { Layout } from "./components/Layout";
-import Dashboard from "./pages/Dashboard";
-import Customers from "./pages/Customers";
-import Vehicles from "./pages/Vehicles";
-import WorkOrders from "./pages/WorkOrders";
-import Estimates from "./pages/Estimates";
-import Invoices from "./pages/Invoices";
-import Technicians from "./pages/Technicians";
-import PartsInventory from "./pages/PartsInventory";
-import ServiceHistory from "./pages/ServiceHistory";
+import { useEffect, useState } from "react";
+import { Dashboard } from "./pages/Dashboard";
+import { Customers } from "./pages/Customers";
+import { Vehicles } from "./pages/Vehicles";
+import { WorkOrders } from "./pages/WorkOrders";
+import { Estimates } from "./pages/Estimates";
+import { Invoices } from "./pages/Invoices";
+import { Technicians } from "./pages/Technicians";
+import { PartsInventory } from "./pages/PartsInventory";
+import { ServiceHistory } from "./pages/ServiceHistory";
 
-// --- App Context for localStorage persistence ---
-// This is a simple example context for managing a global state (e.g., theme)
-// and persisting it to localStorage, as requested.
+const PAGES = [
+  { id: "dashboard", title: "Dashboard", Page: Dashboard },
+  { id: "customers", title: "Customers", Page: Customers },
+  { id: "vehicles", title: "Vehicles", Page: Vehicles },
+  { id: "work-orders", title: "Work Orders", Page: WorkOrders },
+  { id: "estimates", title: "Estimates", Page: Estimates },
+  { id: "invoices", title: "Invoices", Page: Invoices },
+  { id: "technicians", title: "Technicians", Page: Technicians },
+  { id: "parts-inventory", title: "Parts Inventory", Page: PartsInventory },
+  { id: "service-history", title: "Service History", Page: ServiceHistory },
+] as const;
 
-type Theme = 'light' | 'dark';
-
-interface AppContextType {
-  theme: Theme;
-  setTheme: Dispatch<SetStateAction<Theme>>;
-}
-
-// Export the context so other components can consume it with `useContext`
-export const AppContext = createContext<AppContextType | undefined>(undefined);
-
-const AppProvider = ({ children }: { children: ReactNode }) => {
-  const [theme, setTheme] = useState<Theme>(() => {
-    try {
-      const savedTheme = localStorage.getItem('repair-shop-theme');
-      return savedTheme === 'dark' ? 'dark' : 'light';
-    } catch {
-      // If localStorage is disabled or unavailable, default to 'light'
-      return 'light';
-    }
-  });
-
-  // Effect to persist the theme to localStorage and update the document class
-  useEffect(() => {
-    try {
-      localStorage.setItem('repair-shop-theme', theme);
-      if (theme === 'dark') {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-    } catch (error) {
-      console.warn('Failed to persist theme to localStorage:', error);
-    }
-  }, [theme]);
-
-  const value = { theme, setTheme };
-
-  return (
-    <AppContext.Provider value={value}>
-      {children}
-    </AppContext.Provider>
-  );
-};
-
-// --- Application Router ---
+type PageId = (typeof PAGES)[number]["id"];
 
 export default function App() {
+  const [route, setRoute] = useState<PageId>(PAGES[0].id);
+
+  useEffect(() => {
+    const sync = () => {
+      const hash = window.location.hash.replace(/^#\/?/, "");
+      const match = PAGES.find((page) => page.id === hash);
+      setRoute(match?.id ?? PAGES[0].id);
+    };
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  const current = PAGES.find((page) => page.id === route) ?? PAGES[0];
+  const Page = current.Page;
+
   return (
-    <AppProvider>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="customers" element={<Customers />} />
-          <Route path="vehicles" element={<Vehicles />} />
-          <Route path="work-orders" element={<WorkOrders />} />
-          <Route path="estimates" element={<Estimates />} />
-          <Route path="invoices" element={<Invoices />} />
-          <Route path="technicians" element={<Technicians />} />
-          <Route path="parts-inventory" element={<PartsInventory />} />
-          <Route path="service-history" element={<ServiceHistory />} />
-        </Route>
-      </Routes>
-    </AppProvider>
+    <main>
+      <h1>RepairShop Manager</h1>
+      <p>RepairShop deterministic stress scaffold.</p>
+      <nav>
+        {PAGES.map((page) => (
+          <a href={"#/" + page.id} key={page.id}>
+            {page.title}
+          </a>
+        ))}
+      </nav>
+      <Page />
+    </main>
   );
 }

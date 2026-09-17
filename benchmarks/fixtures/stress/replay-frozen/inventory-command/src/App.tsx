@@ -1,76 +1,55 @@
-import { createContext, useEffect, useState } from "react";
-import { Routes, Route } from "react-router-dom";
-import { Layout } from './components/Layout';
+import { useEffect, useState } from "react";
+import { Dashboard } from "./pages/Dashboard";
+import { Products } from "./pages/Products";
+import { Suppliers } from "./pages/Suppliers";
+import { PurchaseOrders } from "./pages/PurchaseOrders";
+import { StockMovements } from "./pages/StockMovements";
+import { Alerts } from "./pages/Alerts";
+import { Reports } from "./pages/Reports";
+import { Settings } from "./pages/Settings";
 
-// Import Page Components
-import Dashboard from './pages/Dashboard';
-import Products from './pages/Products';
-import Suppliers from './pages/Suppliers';
-import PurchaseOrders from './pages/PurchaseOrders';
-import StockMovements from './pages/StockMovements';
-import Alerts from './pages/Alerts';
-import Reports from './pages/Reports';
-import Settings from './pages/Settings';
+const PAGES = [
+  { id: "dashboard", title: "Dashboard", Page: Dashboard },
+  { id: "products", title: "Products", Page: Products },
+  { id: "suppliers", title: "Suppliers", Page: Suppliers },
+  { id: "purchase-orders", title: "Purchase Orders", Page: PurchaseOrders },
+  { id: "stock-movements", title: "Stock Movements", Page: StockMovements },
+  { id: "alerts", title: "Alerts", Page: Alerts },
+  { id: "reports", title: "Reports", Page: Reports },
+  { id: "settings", title: "Settings", Page: Settings },
+] as const;
 
-// A simple settings context to demonstrate provider wiring with localStorage persistence.
-// In a larger application, this would be in its own file (e.g., src/context/SettingsContext.tsx).
+type PageId = (typeof PAGES)[number]["id"];
 
-interface AppSettings {
-  theme: 'light' | 'dark';
-}
-
-interface AppSettingsContextType {
-  settings: AppSettings;
-  setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
-}
-
-// The context is created but not exported, as only the Provider is needed in this file.
-const AppSettingsContext = createContext<AppSettingsContextType | undefined>(undefined);
-
-const AppSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [settings, setSettings] = useState<AppSettings>(() => {
-    try {
-      const storedSettings = window.localStorage.getItem('app-settings');
-      return storedSettings ? JSON.parse(storedSettings) : { theme: 'light' };
-    } catch (error) {
-      console.error('Failed to parse settings from localStorage:', error);
-      return { theme: 'light' };
-    }
-  });
+export default function App() {
+  const [route, setRoute] = useState<PageId>(PAGES[0].id);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem('app-settings', JSON.stringify(settings));
-    } catch (error) {
-      console.error('Failed to save settings to localStorage:', error);
-    }
-  }, [settings]);
+    const sync = () => {
+      const hash = window.location.hash.replace(/^#\/?/, "");
+      const match = PAGES.find((page) => page.id === hash);
+      setRoute(match?.id ?? PAGES[0].id);
+    };
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  const current = PAGES.find((page) => page.id === route) ?? PAGES[0];
+  const Page = current.Page;
 
   return (
-    <AppSettingsContext.Provider value={{ settings, setSettings }}>
-      {children}
-    </AppSettingsContext.Provider>
-  );
-};
-
-
-function App() {
-  return (
-    <AppSettingsProvider>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="products" element={<Products />} />
-          <Route path="suppliers" element={<Suppliers />} />
-          <Route path="purchase-orders" element={<PurchaseOrders />} />
-          <Route path="stock-movements" element={<StockMovements />} />
-          <Route path="alerts" element={<Alerts />} />
-          <Route path="reports" element={<Reports />} />
-          <Route path="settings" element={<Settings />} />
-        </Route>
-      </Routes>
-    </AppSettingsProvider>
+    <main>
+      <h1>Inventory Command Center</h1>
+      <p>Inventory deterministic stress scaffold.</p>
+      <nav>
+        {PAGES.map((page) => (
+          <a href={"#/" + page.id} key={page.id}>
+            {page.title}
+          </a>
+        ))}
+      </nav>
+      <Page />
+    </main>
   );
 }
-
-export default App;

@@ -1,74 +1,57 @@
-import { createContext, useState, useEffect, useMemo } from 'react';
-import { Route, Routes } from "react-router-dom";
-import { Layout } from './components/Layout';
+import { useEffect, useState } from "react";
+import { Dashboard } from "./pages/Dashboard";
+import { MenuItems } from "./pages/MenuItems";
+import { Tables } from "./pages/Tables";
+import { Reservations } from "./pages/Reservations";
+import { Orders } from "./pages/Orders";
+import { KitchenQueue } from "./pages/KitchenQueue";
+import { Staff } from "./pages/Staff";
+import { Inventory } from "./pages/Inventory";
+import { Reports } from "./pages/Reports";
 
-// Import all page components
-import Dashboard from "./pages/Dashboard";
-import MenuItems from "./pages/MenuItems";
-import Tables from "./pages/Tables";
-import Reservations from "./pages/Reservations";
-import Orders from "./pages/Orders";
-import KitchenQueue from "./pages/KitchenQueue";
-import Staff from "./pages/Staff";
-import Inventory from "./pages/Inventory";
-import Reports from "./pages/Reports";
+const PAGES = [
+  { id: "dashboard", title: "Dashboard", Page: Dashboard },
+  { id: "menu-items", title: "Menu Items", Page: MenuItems },
+  { id: "tables", title: "Tables", Page: Tables },
+  { id: "reservations", title: "Reservations", Page: Reservations },
+  { id: "orders", title: "Orders", Page: Orders },
+  { id: "kitchen-queue", title: "Kitchen Queue", Page: KitchenQueue },
+  { id: "staff", title: "Staff", Page: Staff },
+  { id: "inventory", title: "Inventory", Page: Inventory },
+  { id: "reports", title: "Reports", Page: Reports },
+] as const;
 
-// Simple localStorage-backed context as requested for persistence.
-// Here, we manage a theme preference as an example of wiring.
-type Theme = 'light' | 'dark';
+type PageId = (typeof PAGES)[number]["id"];
 
-interface AppContextType {
-  theme: Theme;
-  toggleTheme: () => void;
-}
-
-export const AppContext = createContext<AppContextType>({
-  theme: 'light',
-  toggleTheme: () => {},
-});
-
-function App() {
-  const [theme, setTheme] = useState<Theme>(() => {
-    const storedTheme = localStorage.getItem('restaurantOpsTheme');
-    // Ensure the value from localStorage is a valid theme
-    return (storedTheme === 'light' || storedTheme === 'dark') ? storedTheme : 'light';
-  });
+export default function App() {
+  const [route, setRoute] = useState<PageId>(PAGES[0].id);
 
   useEffect(() => {
-    // Persist theme to localStorage
-    localStorage.setItem('restaurantOpsTheme', theme);
-    // Apply class to root element for Tailwind CSS dark mode
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [theme]);
+    const sync = () => {
+      const hash = window.location.hash.replace(/^#\/?/, "");
+      const match = PAGES.find((page) => page.id === hash);
+      setRoute(match?.id ?? PAGES[0].id);
+    };
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
 
-  const toggleTheme = () => {
-    setTheme((prevTheme) => (prevTheme === 'light' ? 'dark' : 'light'));
-  };
-
-  // Memoize context value to prevent unnecessary re-renders of consumers
-  const contextValue = useMemo(() => ({ theme, toggleTheme }), [theme]);
+  const current = PAGES.find((page) => page.id === route) ?? PAGES[0];
+  const Page = current.Page;
 
   return (
-    <AppContext.Provider value={contextValue}>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="menu-items" element={<MenuItems />} />
-          <Route path="tables" element={<Tables />} />
-          <Route path="reservations" element={<Reservations />} />
-          <Route path="orders" element={<Orders />} />
-          <Route path="kitchen-queue" element={<KitchenQueue />} />
-          <Route path="staff" element={<Staff />} />
-          <Route path="inventory" element={<Inventory />} />
-          <Route path="reports" element={<Reports />} />
-        </Route>
-      </Routes>
-    </AppContext.Provider>
+    <main>
+      <h1>RestaurantOps</h1>
+      <p>RestaurantOps deterministic stress scaffold.</p>
+      <nav>
+        {PAGES.map((page) => (
+          <a href={"#/" + page.id} key={page.id}>
+            {page.title}
+          </a>
+        ))}
+      </nav>
+      <Page />
+    </main>
   );
 }
-
-export default App;
