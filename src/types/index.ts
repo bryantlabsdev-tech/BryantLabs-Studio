@@ -342,6 +342,11 @@ export interface BryantLabsApi {
   gitCommit(
     message: string,
   ): Promise<import("@/core/git/types").GitCommitResult>;
+  gitPushPreflight(): Promise<import("@/core/git/gitPushPolicy").GitPushPreflightResult>;
+  gitPushExecute(
+    token: string,
+  ): Promise<import("@/core/git/gitPushPolicy").GitPushExecuteResult>;
+  gitPushCancel(token: string): Promise<{ readonly ok: true }>;
   /** Apply a deterministic, user-approved edit (Phase 5). */
   applyEdit(
     filePath: string,

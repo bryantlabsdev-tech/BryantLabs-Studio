@@ -537,6 +537,11 @@ export interface WorkspaceState {
   gitCommit(
     message: string,
   ): Promise<import("@/core/git/types").GitCommitResult>;
+  gitPushPreflight(): Promise<import("@/core/git/gitPushPolicy").GitPushPreflightResult>;
+  gitPushExecute(
+    token: string,
+  ): Promise<import("@/core/git/gitPushPolicy").GitPushExecuteResult>;
+  gitPushCancel(token: string): Promise<{ readonly ok: true }>;
   selectGitPath(relPath: string | null): void;
   // ---- Run persistence (resume after restart) ----
   readonly pendingRunCheckpoint: PersistedRunCheckpoint | null;

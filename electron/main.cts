@@ -55,6 +55,13 @@ import {
   isCanonicalPathWithinRoot,
 } from "./fileWriter.cjs";
 import { loadTrustedInstructionSources } from "./instructionPackLoad.cjs";
+import {
+  cancelGitPushToken,
+  clearGitPushSession,
+  executeApprovedGitPush,
+  gitPushAllowsLocalRemotes,
+  prepareGitPush,
+} from "./gitPush.cjs";
 import { createFsUndoIo, createLastEditStore, parseUndoBatchEntries } from "./lastEditBatch.cjs";
 import { runVerification, type VerificationResult } from "./verifier.cjs";
 import {
@@ -277,6 +284,7 @@ function createWindow(): void {
 
   mainWindow.on("closed", () => {
     mainWindow = null;
+    clearGitPushSession();
   });
 
   if (DEV_SERVER_URL) {
@@ -292,6 +300,7 @@ async function switchProjectRoot(selected: string): Promise<void> {
   await switchToProjectRoot(approved, async (root) => {
     projectRoot = root;
     lastEditStore.clear();
+    clearGitPushSession();
     hydrateProjectAfterSwitch(root);
     await activateProjectIndex(root, () => mainWindow);
   });
@@ -472,6 +481,30 @@ function registerIpcHandlers(): void {
       return { ok: false, reason: "Invalid commit message." };
     }
     return commitGit(projectRoot, message);
+  });
+
+  ipcMain.handle("git:pushPreflight", async () => {
+    if (!projectRoot) {
+      return { ok: false as const, code: "no_project" as const, message: "Open a project before pushing." };
+    }
+    return prepareGitPush(projectRoot, { allowLocalRemotes: gitPushAllowsLocalRemotes() });
+  });
+
+  ipcMain.handle("git:pushExecute", async (_event, token: unknown) => {
+    if (!projectRoot) {
+      return { ok: false as const, code: "no_project" as const, message: "Open a project before pushing." };
+    }
+    if (typeof token !== "string") {
+      return { ok: false as const, code: "token_invalid" as const, message: "Push approval expired. Start a new push from the Git view." };
+    }
+    return executeApprovedGitPush(projectRoot, token, {
+      allowLocalRemotes: gitPushAllowsLocalRemotes(),
+    });
+  });
+
+  ipcMain.handle("git:pushCancel", async (_event, token: unknown) => {
+    if (typeof token === "string") cancelGitPushToken(token);
+    return { ok: true as const };
   });
 
   ipcMain.handle("project:memory:read", async (): Promise<ProjectMemoryRecord | null> => {

@@ -2620,6 +2620,114 @@
   cursor: default;
 }
 
+.git-view__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.git-view__push {
+  all: unset;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--accent-hover) 45%, transparent);
+  color: inherit;
+}
+
+.git-view__push:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-hover) 16%, transparent);
+}
+
+.git-view__push:disabled,
+.git-view__push--confirm:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.git-view__notice {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.git-push-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(8, 10, 14, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.git-push-dialog {
+  width: min(440px, 100%);
+  max-height: min(80vh, 640px);
+  overflow: auto;
+  background: var(--bg-surface, #12151c);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.git-push-dialog__title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.git-push-dialog__lead,
+.git-push-dialog__auth,
+.git-push-dialog__warning {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.git-push-dialog__warning {
+  color: #fbbf24;
+}
+
+.git-push-dialog__facts {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.git-push-dialog__facts div {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 8px;
+}
+
+.git-push-dialog__facts dt {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.git-push-dialog__facts dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.git-push-dialog__commits {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.git-push-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .git-view__error {
   margin: 0;
   font-size: 11px;

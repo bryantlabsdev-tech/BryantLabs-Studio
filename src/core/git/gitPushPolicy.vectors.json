@@ -1,0 +1,129 @@
+{
+  "sanitize": [
+    {
+      "raw": "https://github.com/org/repo.git",
+      "allowLocal": false,
+      "ok": true,
+      "display": "github.com/org/repo.git",
+      "network": true
+    },
+    {
+      "raw": "git@github.com:org/repo.git",
+      "allowLocal": false,
+      "ok": true,
+      "display": "github.com/org/repo",
+      "network": true
+    },
+    {
+      "raw": "ssh://git@github.com/org/repo.git",
+      "allowLocal": false,
+      "ok": true,
+      "display": "git@github.com/org/repo.git",
+      "network": true
+    },
+    {
+      "raw": "https://user:ghp_secretTOKEN12@github.com/org/repo.git",
+      "allowLocal": false,
+      "ok": false
+    },
+    {
+      "raw": "https://user@github.com/org/repo.git",
+      "allowLocal": false,
+      "ok": false
+    },
+    {
+      "raw": "ext::sh -c touch pwned",
+      "allowLocal": false,
+      "ok": false
+    },
+    {
+      "raw": "http::helper",
+      "allowLocal": false,
+      "ok": false
+    },
+    {
+      "raw": "git://github.com/org/repo.git",
+      "allowLocal": false,
+      "ok": false
+    },
+    {
+      "raw": "http://github.com/org/repo.git",
+      "allowLocal": false,
+      "ok": false
+    },
+    {
+      "raw": "file:///tmp/example.git",
+      "allowLocal": false,
+      "ok": false
+    },
+    {
+      "raw": "/tmp/example.git",
+      "allowLocal": false,
+      "ok": false
+    },
+    {
+      "raw": "/tmp/example.git",
+      "allowLocal": true,
+      "ok": true,
+      "display": "local:example.git",
+      "network": false
+    },
+    {
+      "raw": "file:///tmp/example.git",
+      "allowLocal": true,
+      "ok": true,
+      "display": "local:example.git",
+      "network": false
+    },
+    {
+      "raw": "https://github.com/org/repo.git\n-u",
+      "allowLocal": false,
+      "ok": false
+    },
+    {
+      "raw": "--upload-pack=evil",
+      "allowLocal": false,
+      "ok": false
+    }
+  ],
+  "classify": [
+    {
+      "stderr": "[rejected] (non-fast-forward)\nfailed to push some refs",
+      "code": "non_fast_forward"
+    },
+    {
+      "stderr": "fatal: Authentication failed for 'https://example.test/repo.git'",
+      "code": "authentication_failure"
+    },
+    {
+      "stderr": "fatal: unable to access 'https://example.test/': Could not resolve host",
+      "code": "network_failure"
+    },
+    {
+      "timedOut": true,
+      "stderr": "",
+      "code": "timeout"
+    },
+    {
+      "stderr": "",
+      "stdout": "Everything up-to-date",
+      "code": "nothing_to_push"
+    }
+  ],
+  "argsUpstream": {
+    "branch": "feature/x",
+    "setUpstream": true,
+    "allowLocalRemotes": false,
+    "contains": [
+      "-c",
+      "core.hooksPath=/dev/null",
+      "push",
+      "--no-verify",
+      "--set-upstream",
+      "--end-of-options",
+      "origin",
+      "refs/heads/feature/x:refs/heads/feature/x"
+    ],
+    "forbidden": ["force", "HEAD:feature/x"]
+  }
+}

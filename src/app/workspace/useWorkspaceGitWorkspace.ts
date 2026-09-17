@@ -8,6 +8,7 @@ import type { GitStatusSnapshot } from "@/core/git/types";
 
 export function useWorkspaceGitWorkspace(input: {
   readonly api: BryantLabsApi | undefined;
+  readonly projectPath: string | null;
   readonly selectedGitPath: string | null;
   readonly setGitStatus: React.Dispatch<React.SetStateAction<GitStatusSnapshot | null>>;
   readonly setGitStatusLoading: React.Dispatch<React.SetStateAction<boolean>>;
@@ -164,6 +165,59 @@ export function useWorkspaceGitWorkspace(input: {
     [refreshGitStatus],
   );
 
+  const gitPushPreflight = useCallback(async () => {
+    const current = inputRef.current;
+    if (!current.api?.gitPushPreflight) {
+      return {
+        ok: false as const,
+        code: "no_project" as const,
+        message: "Git push is unavailable.",
+      };
+    }
+    const startedPath = current.projectPath;
+    current.setGitActionError(null);
+    const result = await current.api.gitPushPreflight();
+    if (inputRef.current.projectPath !== startedPath) {
+      return result;
+    }
+    if (!result.ok) {
+      current.setGitActionError(result.message);
+    }
+    return result;
+  }, []);
+
+  const gitPushExecute = useCallback(
+    async (token: string) => {
+      const current = inputRef.current;
+      if (!current.api?.gitPushExecute) {
+        return {
+          ok: false as const,
+          code: "no_project" as const,
+          message: "Git push is unavailable.",
+        };
+      }
+      const startedPath = current.projectPath;
+      current.setGitActionError(null);
+      const result = await current.api.gitPushExecute(token);
+      if (inputRef.current.projectPath !== startedPath) {
+        return result;
+      }
+      if (!result.ok) {
+        current.setGitActionError(result.message);
+        return result;
+      }
+      await refreshGitStatus();
+      return result;
+    },
+    [refreshGitStatus],
+  );
+
+  const gitPushCancel = useCallback(async (token: string) => {
+    const current = inputRef.current;
+    if (!current.api?.gitPushCancel) return { ok: true as const };
+    return current.api.gitPushCancel(token);
+  }, []);
+
   return {
     refreshGitStatus,
     selectGitPath,
@@ -171,5 +225,8 @@ export function useWorkspaceGitWorkspace(input: {
     gitUnstage,
     gitRestore,
     gitCommit,
+    gitPushPreflight,
+    gitPushExecute,
+    gitPushCancel,
   };
 }
