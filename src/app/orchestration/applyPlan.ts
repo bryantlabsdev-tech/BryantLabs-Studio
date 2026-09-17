@@ -19,6 +19,7 @@ import {
 import { resolveEffectiveProjectScan } from "@/core/agent/resolveEffectiveProjectScan";
 import { logPatchGenerated } from "@/core/agent/projectIntentRouting";
 import { buildAgentApplyPlanContext } from "@/core/context/buildAgentContext";
+import { readProjectRulesText } from "@/core/projectRules/readProjectRules";
 import {
   readReferencedFileContents,
   resolveContextContentPathsAsync,
@@ -449,6 +450,7 @@ async function executeApplyPlanOrchestrationBody(
       operation: pipelineMode ? "pipeline_coder" : "apply_plan",
       ...(memoryRetrieval ? { memoryRetrieval } : {}),
     }) ?? null;
+  const projectRules = await readProjectRulesText(studioApi, resolved.project.path);
   const contextBase = uiOnlyPrompt
     ? buildApplyPlanPatchContext(projectScan)
     : buildAgentApplyPlanContext(projectScan, {
@@ -457,6 +459,7 @@ async function executeApplyPlanOrchestrationBody(
         sessionMemory: resolved.sessionMemory,
         projectPath: resolved.project.path,
         slim: false,
+        projectRules,
         ...(memoryRetrieval ? { memoryRetrieval } : {}),
         ...(intelligence ? { intelligence } : {}),
       });
@@ -481,6 +484,7 @@ async function executeApplyPlanOrchestrationBody(
           projectPath: resolved.project.path,
           slim: false,
           referencedContents,
+          projectRules,
           ...(memoryRetrieval ? { memoryRetrieval } : {}),
           ...(intelligence ? { intelligence } : {}),
         })

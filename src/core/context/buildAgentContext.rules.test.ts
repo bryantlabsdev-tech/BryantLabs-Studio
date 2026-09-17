@@ -22,7 +22,7 @@ describe("buildAgentPlanContext project rules", () => {
     );
 
     assert.equal(context.projectRules, "Always use Tailwind utility classes.");
-    assert.match(context.repositoryPrompt ?? "", /Project rules \(must follow\)/);
+    assert.match(context.repositoryPrompt ?? "", /Project rules \(must follow/);
     assert.match(context.repositoryPrompt ?? "", /Tailwind utility classes/);
   });
 });

@@ -54,6 +54,7 @@ import {
   validateWritePath,
   isCanonicalPathWithinRoot,
 } from "./fileWriter.cjs";
+import { loadTrustedInstructionSources } from "./instructionPackLoad.cjs";
 import { createFsUndoIo, createLastEditStore, parseUndoBatchEntries } from "./lastEditBatch.cjs";
 import { runVerification, type VerificationResult } from "./verifier.cjs";
 import {
@@ -367,6 +368,13 @@ function registerIpcHandlers(): void {
       }
     },
   );
+
+  ipcMain.handle("fs:loadProjectInstructionPack", async () => {
+    if (!projectRoot) {
+      return { sources: [], skipped: [] };
+    }
+    return loadTrustedInstructionSources(projectRoot);
+  });
 
   ipcMain.handle(
     "fs:readFile",

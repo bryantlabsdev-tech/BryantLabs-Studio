@@ -92,6 +92,7 @@ describe("Ask mode consultation does not mutate", () => {
       prompt: "Edit App.tsx and add a timer",
       intent: "ask",
       askMode: true,
+      projectRules: "",
     });
     assert.equal(result.ok, true);
     assert.match(result.text, /read-only/i);
@@ -163,6 +164,7 @@ describe("Ask mode consultation does not mutate", () => {
       prompt: "What does App.tsx do?",
       intent: "ask",
       askMode: true,
+      projectRules: "",
     });
     assert.equal(result.ok, false);
     assert.equal(result.text, "");

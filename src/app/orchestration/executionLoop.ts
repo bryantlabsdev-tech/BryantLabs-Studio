@@ -1,4 +1,5 @@
 import { buildAgentApplyPlanContext } from "@/core/context/buildAgentContext";
+import { readProjectRulesText } from "@/core/projectRules/readProjectRules";
 import {
   completeExecutionStepAsNoOp,
   executionSessionAfterApplyPlanSuccess,
@@ -70,12 +71,17 @@ export async function executeMultiFileLoopOrchestration(
     initial.prompt,
     "apply_plan",
   );
+  const projectRules =
+    studioApi && host.project?.path
+      ? await readProjectRulesText(studioApi, host.project.path)
+      : "";
   const context = buildAgentApplyPlanContext(projectScan, {
     userPrompt: initial.prompt,
     projectMemory: host.projectMemoryRef.current,
     sessionMemory: host.sessionMemory,
     projectPath: host.project?.path ?? null,
     memoryRetrieval,
+    projectRules,
   });
   const callbacks = {
     readFile: (absPath: string) => studioApi.readFile(absPath),

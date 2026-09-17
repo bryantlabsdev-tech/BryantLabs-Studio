@@ -17,6 +17,7 @@ const api = {
   listDirectory: (dirPath: string) =>
     ipcRenderer.invoke("fs:listDirectory", dirPath),
   readFile: (filePath: string) => ipcRenderer.invoke("fs:readFile", filePath),
+  loadProjectInstructionPack: () => ipcRenderer.invoke("fs:loadProjectInstructionPack"),
   scanProject: () => ipcRenderer.invoke("project:scan"),
   getProjectIndexStatus: () => ipcRenderer.invoke("project:index-status"),
   rescanProject: () => ipcRenderer.invoke("project:rescan"),

@@ -10,7 +10,7 @@ import {
   logGreenfieldSuccess,
 } from "@/core/greenfield/generateLogging";
 import { classifyGreenfieldGenerationRoute } from "@/core/greenfield/greenfieldRouter";
-import type { GreenfieldGenerateReliabilityHost } from "@/core/greenfield/generatePipeline";
+import { applyProjectInstructionPackToPrompt } from "@/core/projectRules/instructionPack";
 import {
   allManifestPaths,
   planManifestFromPrompt,
@@ -47,6 +47,7 @@ import type {
   GreenfieldGenerateResult,
   GreenfieldProjectFile,
 } from "@/core/greenfield/types";
+import type { GreenfieldGenerateReliabilityHost } from "@/core/greenfield/generatePipeline";
 
 export interface MultiPhasePhaseResult {
   readonly phase: string;
@@ -104,22 +105,24 @@ async function invokeRaw(
     };
   }
   if (!host.invokeGreenfieldRawCall) {
+    const packed = applyProjectInstructionPackToPrompt(prompt, host.projectRules);
     return host.api.greenfieldGenerateRaw
       ? (host.api.greenfieldGenerateRaw(
           host.settings.provider,
-          prompt,
+          packed,
           host.generationId,
         ) as Promise<GreenfieldGenerateResult>)
       : null;
   }
+  const packed = applyProjectInstructionPackToPrompt(prompt, host.projectRules);
   const ipc = await host.invokeGreenfieldRawCall(
     host.settings,
-    estimateTokens(prompt),
+    estimateTokens(packed),
     (provider: ProviderId) =>
-      host.api.greenfieldGenerateRaw!(provider, prompt, host.generationId) as Promise<
+      host.api.greenfieldGenerateRaw!(provider, packed, host.generationId) as Promise<
         GreenfieldGenerateResult & StageProviderResult
       >,
-    prompt,
+    packed,
     purpose,
   );
   if (ipc) return ipc as GreenfieldGenerateResult;

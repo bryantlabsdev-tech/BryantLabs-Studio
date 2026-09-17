@@ -5,7 +5,9 @@ import {
   readFollowUpReviewFirst,
   resolveFollowUpAutoContinue,
 } from "@/core/build/followUpPrefs";
+import { getLastConsultationPrompt } from "@/core/agent/agentConsultation";
 import { getFollowUpSettlementDiagnostic } from "@/core/agent/followUpSettlementDiagnostics";
+import { getLastInstructionPackDiagnostic } from "@/core/projectRules/instructionPack";
 import { useStudioTestHooks } from "@/app/workspace/useStudioTestHooks";
 import {
   computeStudioReadinessState,
@@ -419,5 +421,7 @@ export function useWorkspaceStudioTestHooks(input: WorkspaceStudioTestHooksInput
     clearFollowUpReviewFirstPreference: clearFollowUpReviewFirstPreferenceHook,
     forceNextVerificationFailure,
     forceNextUndoPathFailure,
+    getLastConsultationPrompt,
+    getInstructionPackDiagnostic: getLastInstructionPackDiagnostic,
   });
 }

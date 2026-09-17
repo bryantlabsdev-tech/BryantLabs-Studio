@@ -65,6 +65,8 @@ interface StudioTestHooks {
   clearFollowUpReviewFirstPreference(): void;
   forceNextVerificationFailure(message: string): void;
   forceNextUndoPathFailure(relPath: string): void;
+  getLastConsultationPrompt(): string;
+  getInstructionPackDiagnostic(): import("@/core/projectRules/instructionPack").InstructionPackDiagnostic | null;
 }
 
 interface StudioReadinessState {

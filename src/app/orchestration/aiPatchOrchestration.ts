@@ -1,4 +1,5 @@
 import { buildAgentApplyPlanContext } from "@/core/context/buildAgentContext";
+import { readProjectRulesText } from "@/core/projectRules/readProjectRules";
 import { formatInlineEditPrompt, type InlineEditSelection } from "@/core/editor/inlineEdit";
 import { isEditablePath, validatePatch } from "@/core/editor";
 import { diffLineStats } from "@/core/planApply";
@@ -58,6 +59,7 @@ export async function proposeAIPatchOrchestration(
   const memoryRetrieval = host.scan
     ? host.resolveMemoriesForPrompt(effectivePrompt, "ai_patch", [rel])
     : null;
+  const projectRules = await readProjectRulesText(host.api, host.project.path);
   const context = host.scan
     ? buildAgentApplyPlanContext(host.scan, {
         userPrompt: effectivePrompt,
@@ -65,6 +67,7 @@ export async function proposeAIPatchOrchestration(
         sessionMemory: host.sessionMemory,
         projectPath: host.project.path,
         memoryRetrieval,
+        projectRules,
       })
     : {
         framework: "unknown",

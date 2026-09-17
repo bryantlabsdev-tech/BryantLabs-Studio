@@ -25,6 +25,7 @@ import type { PlanContext } from "@/core/planner/aiTypes";
 import type { ProviderId } from "@/core/providers/types";
 import type { ProjectMemory } from "@/core/projectMemory/types";
 import type { ProjectScan } from "@/types";
+import { getLastInstructionPackText } from "@/core/projectRules/instructionPack";
 
 export interface PrepareContextSnapshotInput {
   readonly operation: ContextOperation;
@@ -38,6 +39,7 @@ export interface PrepareContextSnapshotInput {
   readonly applyPlanSlim?: boolean;
   readonly requestPreviewOverride?: string;
   readonly orchestration?: ContextOrchestrationSection;
+  readonly projectRules?: string | null;
 }
 
 export function prepareContextSnapshot(
@@ -47,6 +49,7 @@ export function prepareContextSnapshot(
     input.originalPrompt,
     input.sessionMemory,
   );
+  const projectRules = input.projectRules ?? (getLastInstructionPackText() || null);
 
   let planContext: PlanContext;
   if (
@@ -59,6 +62,11 @@ export function prepareContextSnapshot(
       input.sessionMemory,
       input.projectMemory,
       input.projectPath,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      projectRules,
     ).context;
   } else {
     planContext = buildAgentApplyPlanContext(input.scan, {
@@ -67,6 +75,7 @@ export function prepareContextSnapshot(
       sessionMemory: input.sessionMemory,
       projectPath: input.projectPath,
       slim: input.applyPlanSlim ?? input.operation === "apply_plan",
+      projectRules,
     });
   }
 

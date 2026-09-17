@@ -54,6 +54,8 @@ export interface StudioTestHookCallbacks {
   readonly clearFollowUpReviewFirstPreference: () => void;
   readonly forceNextVerificationFailure: (message: string) => void;
   readonly forceNextUndoPathFailure: (relPath: string) => void;
+  readonly getLastConsultationPrompt: () => string;
+  readonly getInstructionPackDiagnostic: () => import("@/core/projectRules/instructionPack").InstructionPackDiagnostic | null;
 }
 
 export function useStudioTestHooks(callbacks: StudioTestHookCallbacks): void {
@@ -95,6 +97,9 @@ export function useStudioTestHooks(callbacks: StudioTestHookCallbacks): void {
         callbacksRef.current.forceNextVerificationFailure(message),
       forceNextUndoPathFailure: (relPath: string) =>
         callbacksRef.current.forceNextUndoPathFailure(relPath),
+      getLastConsultationPrompt: () => callbacksRef.current.getLastConsultationPrompt(),
+      getInstructionPackDiagnostic: () =>
+        callbacksRef.current.getInstructionPackDiagnostic(),
     };
 
     (window as Window & { __studioTestHooks?: typeof hooks }).__studioTestHooks = hooks;

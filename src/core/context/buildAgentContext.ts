@@ -27,6 +27,8 @@ import {
   type ProjectMemoryContextResult,
 } from "@/core/projectIntelligence/buildProjectMemoryContext";
 
+import { PROJECT_RULES_CONTEXT_LABEL } from "@/core/projectRules/instructionPack";
+
 function attachProjectRules(
   context: PlanContext,
   projectRules?: string | null,
@@ -36,7 +38,7 @@ function attachProjectRules(
   return {
     ...context,
     projectRules: trimmed,
-    repositoryPrompt: [context.repositoryPrompt, `Project rules (must follow):\n${trimmed}`]
+    repositoryPrompt: [context.repositoryPrompt, `${PROJECT_RULES_CONTEXT_LABEL}:\n${trimmed}`]
       .filter(Boolean)
       .join("\n\n"),
   };
