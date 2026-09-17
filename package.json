@@ -43,6 +43,7 @@
     "greenfield:stress:replay:legacy": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress-replay-legacy.mjs",
     "greenfield:stress:lock-replay": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress-lock-replay.mjs",
     "greenfield:stress:sync-fixtures": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress-sync-fixtures.mjs",
+    "greenfield:stress:scaffold": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/greenfield-stress-scaffold.mjs",
     "edit:stress": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/edit-stress.mjs",
     "edit:stress:live": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/edit-stress-live.mjs",
     "edit:stress:provider": "node --experimental-strip-types --import ./scripts/test-alias-hook.mjs ./scripts/edit-stress-provider.mjs",
