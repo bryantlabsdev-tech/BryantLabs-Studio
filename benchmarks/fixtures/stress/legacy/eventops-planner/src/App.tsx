@@ -1,46 +1,57 @@
-import { createContext } from 'react';
-import { Route, Routes } from "react-router-dom";
-import { Layout } from './components/Layout';
-import Dashboard from './pages/Dashboard';
-import Events from './pages/Events';
-import Venues from './pages/Venues';
-import Vendors from './pages/Vendors';
-import Budgets from './pages/Budgets';
-import Tasks from './pages/Tasks';
-import Guests from './pages/Guests';
-import Schedules from './pages/Schedules';
-import Reports from './pages/Reports';
+import { useEffect, useState } from "react";
+import { Dashboard } from "./pages/Dashboard";
+import { Events } from "./pages/Events";
+import { Venues } from "./pages/Venues";
+import { Vendors } from "./pages/Vendors";
+import { Budgets } from "./pages/Budgets";
+import { Tasks } from "./pages/Tasks";
+import { Guests } from "./pages/Guests";
+import { Schedules } from "./pages/Schedules";
+import { Reports } from "./pages/Reports";
 
-// A simple placeholder context for application state, as requested.
-// In a real app, this would be more fleshed out in its own file
-// and would manage state with reducers, interact with localStorage, etc.
-// eslint-disable-next-line @typescript-eslint/no-empty-interface
-interface IAppContext {}
-export const AppContext = createContext<IAppContext>({});
+const PAGES = [
+  { id: "dashboard", title: "Dashboard", Page: Dashboard },
+  { id: "events", title: "Events", Page: Events },
+  { id: "venues", title: "Venues", Page: Venues },
+  { id: "vendors", title: "Vendors", Page: Vendors },
+  { id: "budgets", title: "Budgets", Page: Budgets },
+  { id: "tasks", title: "Tasks", Page: Tasks },
+  { id: "guests", title: "Guests", Page: Guests },
+  { id: "schedules", title: "Schedules", Page: Schedules },
+  { id: "reports", title: "Reports", Page: Reports },
+] as const;
 
-function App() {
-  // Placeholder value for the context provider.
-  // This is where state management logic (e.g., useReducer, useState)
-  // and persistence logic (e.g., useEffect with localStorage) would go.
-  const appContextValue = {};
+type PageId = (typeof PAGES)[number]["id"];
+
+export default function App() {
+  const [route, setRoute] = useState<PageId>(PAGES[0].id);
+
+  useEffect(() => {
+    const sync = () => {
+      const hash = window.location.hash.replace(/^#\/?/, "");
+      const match = PAGES.find((page) => page.id === hash);
+      setRoute(match?.id ?? PAGES[0].id);
+    };
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  const current = PAGES.find((page) => page.id === route) ?? PAGES[0];
+  const Page = current.Page;
 
   return (
-    <AppContext.Provider value={appContextValue}>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="events" element={<Events />} />
-          <Route path="venues" element={<Venues />} />
-          <Route path="vendors" element={<Vendors />} />
-          <Route path="budgets" element={<Budgets />} />
-          <Route path="tasks" element={<Tasks />} />
-          <Route path="guests" element={<Guests />} />
-          <Route path="schedules" element={<Schedules />} />
-          <Route path="reports" element={<Reports />} />
-        </Route>
-      </Routes>
-    </AppContext.Provider>
+    <main>
+      <h1>EventOps Planner</h1>
+      <p>EventOps deterministic stress scaffold.</p>
+      <nav>
+        {PAGES.map((page) => (
+          <a href={"#/" + page.id} key={page.id}>
+            {page.title}
+          </a>
+        ))}
+      </nav>
+      <Page />
+    </main>
   );
 }
-
-export default App;
