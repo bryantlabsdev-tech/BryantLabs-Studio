@@ -23,6 +23,7 @@ import {
   intentIsConsultation,
   type AgentPromptIntent,
 } from "@/core/agent/agentIntentRouter";
+import { buildAskModeRoute, isAskComposerOverride } from "@/core/agent/askMode";
 import type { ProjectScan } from "@/types";
 
 export type { AgentPromptIntent };
@@ -52,7 +53,7 @@ export type AgentRouteMode =
   | "repair_project"
   | "refactor_project";
 
-export type ComposerModeOverride = "auto" | "new_app" | "edit" | "fix_errors";
+export type ComposerModeOverride = "auto" | "new_app" | "edit" | "fix_errors" | "ask";
 
 export type AgentExecutionKind =
   | "greenfield"
@@ -523,6 +524,13 @@ export function routeAgentPrompt(
 
   if (trimmed.length < 4) {
     return blocked("Enter a goal with at least 4 characters.", decisionWithReject);
+  }
+
+  if (isAskComposerOverride(override)) {
+    return buildAskModeRoute({
+      prompt: trimmed,
+      decision: decisionWithReject,
+    });
   }
 
   if (input.scanStatus === "scanning" || input.scanStatus === "idle") {

@@ -1,6 +1,8 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   consultationActivityLine,
+  isStaleConsultationTurn,
+  resolveConsultationExecution,
   runAgentCommandIntent,
   runAgentConsultation,
 } from "@/core/agent/agentConsultation";
@@ -35,6 +37,33 @@ export function useAgentConsultation(input: {
 }) {
   const [consultationRunning, setConsultationRunning] = useState(false);
   const pendingMixedEditRef = useRef<PendingMixedEdit | null>(null);
+  const generationRef = useRef(0);
+  const mountedRef = useRef(true);
+  const projectPathRef = useRef(input.projectPath);
+  projectPathRef.current = input.projectPath;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      generationRef.current += 1;
+    };
+  }, []);
+
+  const prevProjectPathRef = useRef(input.projectPath);
+  useEffect(() => {
+    if (prevProjectPathRef.current === input.projectPath) return;
+    prevProjectPathRef.current = input.projectPath;
+    generationRef.current += 1;
+    setConsultationRunning(false);
+    void input.api?.cancelActiveProviderRequests?.();
+  }, [input.projectPath, input.api]);
+
+  const cancelConsultation = useCallback(() => {
+    generationRef.current += 1;
+    setConsultationRunning(false);
+    void input.api?.cancelActiveProviderRequests?.();
+  }, [input.api]);
 
   const runAgentConsultationFlow = useCallback(
     async (opts: {
@@ -42,6 +71,7 @@ export function useAgentConsultation(input: {
       readonly promptIntent: AgentPromptIntent;
       readonly mixedEdit?: boolean;
       readonly command?: boolean;
+      readonly askMode?: boolean;
     }) => {
       if (!input.api || !input.projectPath) {
         input.recordAgentStudioMessage("Open a project folder first.", {
@@ -49,6 +79,12 @@ export function useAgentConsultation(input: {
         });
         return;
       }
+      const startedProjectPath = input.projectPath;
+      const generation = ++generationRef.current;
+      const execution = resolveConsultationExecution({
+        ...(opts.askMode ? { askMode: true } : {}),
+        ...(opts.command ? { command: true } : {}),
+      });
       setConsultationRunning(true);
       input.recordAgentActivityMessage(consultationActivityLine(opts.promptIntent));
       input.updateGreenfieldRun?.({
@@ -66,17 +102,31 @@ export function useAgentConsultation(input: {
       try {
         const base: AgentConsultationInput = {
           api: input.api,
-          projectPath: input.projectPath,
+          projectPath: startedProjectPath,
           prompt: opts.prompt,
           intent: opts.promptIntent,
           scan: input.scan,
           activeEditorContext: input.activeEditorContextRef.current,
-          ...(opts.mixedEdit ? { mixedEdit: true } : {}),
+          ...(opts.askMode ? { askMode: true } : {}),
+          ...(opts.mixedEdit && !opts.askMode ? { mixedEdit: true } : {}),
         };
 
-        const result = opts.command
-          ? await runAgentCommandIntent(base)
-          : await runAgentConsultation(base);
+        const result =
+          execution === "command"
+            ? await runAgentCommandIntent(base)
+            : await runAgentConsultation(base);
+
+        if (
+          !mountedRef.current ||
+          isStaleConsultationTurn({
+            generation,
+            currentGeneration: generationRef.current,
+            startedProjectPath,
+            currentProjectPath: projectPathRef.current,
+          })
+        ) {
+          return;
+        }
 
         if (!result.ok) {
           const message = result.error ?? "Consultation failed";
@@ -126,15 +176,24 @@ export function useAgentConsultation(input: {
           ...(result.provider ? { provider: result.provider } : {}),
         });
 
-        if (opts.mixedEdit) {
+        if (opts.mixedEdit && !opts.askMode) {
           pendingMixedEditRef.current = { prompt: opts.prompt };
         }
       } finally {
-        setConsultationRunning(false);
+        if (
+          mountedRef.current &&
+          generation === generationRef.current
+        ) {
+          setConsultationRunning(false);
+        }
       }
     },
     [input],
   );
+
+  const peekPendingMixedEdit = useCallback((): PendingMixedEdit | null => {
+    return pendingMixedEditRef.current;
+  }, []);
 
   const consumePendingMixedEdit = useCallback((): PendingMixedEdit | null => {
     const pending = pendingMixedEditRef.current;
@@ -150,6 +209,8 @@ export function useAgentConsultation(input: {
     consultationRunning,
     pendingMixedEditRef,
     runAgentConsultationFlow,
+    cancelConsultation,
+    peekPendingMixedEdit,
     consumePendingMixedEdit,
     clearPendingMixedEdit,
   };

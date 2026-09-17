@@ -60,6 +60,10 @@ export function BuildView() {
     buildStatus,
     runBuildLoop,
     startAgent,
+    runAgentConsultationFlow,
+    peekPendingMixedEdit,
+    consultationRunning,
+    cancelConsultation,
     cancelBuildLoop,
     retryApplyPlanReview,
     triggerGreenfieldRepair,
@@ -103,6 +107,7 @@ export function BuildView() {
     cancelGreenfieldRun,
     resetGreenfieldRun,
     recordAgentUserMessage,
+    recordAgentStudioMessage,
     recordAgentGreenfieldSuccess,
     recordAgentActivityMessage,
     openDeveloperConsole,
@@ -160,6 +165,11 @@ export function BuildView() {
     resetAgentRunState,
     recordAgentUserMessage,
     recordAgentActivityMessage,
+    recordAgentStudioMessage,
+    runAgentConsultationFlow,
+    peekPendingMixedEdit,
+    consultationRunning,
+    cancelConsultation,
     providerStatus,
     rescan,
   });
@@ -713,6 +723,10 @@ export function BuildView() {
   };
 
   const handleCancelAgentRun = () => {
+    if (consultationRunning) {
+      cancelConsultation();
+      return;
+    }
     if (greenfieldActive) handleCancelGreenfield();
     else cancelBuildLoop();
   };

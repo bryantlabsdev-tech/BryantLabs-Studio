@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComposerModeOverride } from "@/core/agent/unifiedAgentRoute";
 import {
+  ASK_MODE_READONLY_EXPLANATION,
+  composerModeFromOverride,
+  type ComposerAgentMode,
+} from "@/core/agent/askMode";
+import {
   buildMentionSuggestions,
   detectActiveMention,
   insertMentionAt,
@@ -15,34 +20,20 @@ import { MAX_AGENT_PROMPT_CHARS } from "@/core/agent/promptSubmission";
 import { AgentFollowUpComposerState } from "@/components/agent/AgentFollowUpComposerState";
 import type { ProjectScan } from "@/types";
 
-export type ComposerAgentMode = "create" | "edit" | "fix" | "refactor" | "ask";
+export type { ComposerAgentMode };
 
 const AGENT_MODE_OPTIONS: readonly {
   value: ComposerAgentMode;
   label: string;
   override: ComposerModeOverride;
 }[] = [
+  { value: "auto", label: "Auto", override: "auto" },
   { value: "create", label: "Create", override: "new_app" },
   { value: "edit", label: "Edit", override: "edit" },
   { value: "fix", label: "Fix", override: "fix_errors" },
   { value: "refactor", label: "Refactor", override: "edit" },
-  { value: "ask", label: "Ask", override: "auto" },
+  { value: "ask", label: "Ask (read-only)", override: "ask" },
 ];
-
-export function composerModeFromOverride(
-  override: ComposerModeOverride,
-): ComposerAgentMode {
-  if (override === "new_app") return "create";
-  if (override === "fix_errors") return "fix";
-  if (override === "edit") return "edit";
-  return "ask";
-}
-
-export function overrideFromComposerMode(
-  mode: ComposerAgentMode,
-): ComposerModeOverride {
-  return AGENT_MODE_OPTIONS.find((opt) => opt.value === mode)?.override ?? "auto";
-}
 
 export interface AgentComposerProps {
   readonly prompt: string;
@@ -380,6 +371,12 @@ export function AgentComposer({
                         .join(" ")}
                       disabled={composerDisabled}
                       aria-pressed={uiMode === opt.value}
+                      data-testid={`composer-mode-${opt.value}`}
+                      title={
+                        opt.value === "ask"
+                          ? ASK_MODE_READONLY_EXPLANATION
+                          : undefined
+                      }
                       onClick={() => onModeOverrideChange(opt.override)}
                     >
                       {opt.label}
@@ -439,6 +436,13 @@ export function AgentComposer({
           </div>
         </div>
       </div>
+
+      {uiMode === "ask" ? (
+        <p className="plan__muted" role="note" data-testid="composer-ask-help">
+          Ask is read-only: the studio will explain or inspect code, not edit files
+          or run mutating commands.
+        </p>
+      ) : null}
 
       {promptValidationWarning ? (
         <p className="build-view__prompt-warning plan__muted" role="status">

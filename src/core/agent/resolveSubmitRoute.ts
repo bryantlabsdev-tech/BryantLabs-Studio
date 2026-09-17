@@ -37,6 +37,7 @@ export function resolveAgentSubmitRoute(input: {
   );
 
   if (
+    input.modeOverride !== "ask" &&
     !greenfieldRecovery &&
     shouldBlockEditForIncompleteGreenfield({
       projectPath: input.projectPath,

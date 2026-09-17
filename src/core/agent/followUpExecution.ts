@@ -121,6 +121,17 @@ export function resolveFollowUpSubmitAction(input: {
     return { kind: "no_project" };
   }
 
+  if (
+    input.routeExecution === "consultation" ||
+    input.routeExecution === "mixed_confirm" ||
+    input.routeExecution === "run_command"
+  ) {
+    return {
+      kind: "blocked_scan",
+      reason: "Read-only consultation cannot start an edit run.",
+    };
+  }
+
   if (input.routeExecution === "blocked") {
     if (
       (input.scanStatus === "scanning" || input.scanStatus === "idle") &&
