@@ -50,6 +50,7 @@ import {
   isUserCancelledGreenfieldFailure,
   USER_CANCELLED_GREENFIELD_MESSAGE,
 } from "@/core/greenfield/generationGuard";
+import { applyProjectInstructionPackToPrompt } from "@/core/projectRules/instructionPack";
 
 const MAX_FILE_REPAIR_ATTEMPTS = 2;
 const MAX_MALFORMED_REPAIR_ATTEMPTS = 1;
@@ -144,6 +145,7 @@ export interface GreenfieldGenerateReliabilityHost {
   readonly invokeGreenfieldRawCall?: GreenfieldGenerateReliabilityHost["invokeGreenfieldCall"];
   readonly generationId?: string;
   readonly isCancelled?: () => boolean;
+  readonly projectRules?: string;
 }
 
 function buildParseDiagnostics(
@@ -187,7 +189,11 @@ async function callProviderGenerate(
   provider: ProviderId,
   prompt: string,
 ): Promise<GreenfieldGenerateResult> {
-  return host.api.greenfieldGenerate(provider, prompt, host.generationId);
+  return host.api.greenfieldGenerate(
+    provider,
+    applyProjectInstructionPackToPrompt(prompt, host.projectRules),
+    host.generationId,
+  );
 }
 
 function cancelledPipelineResult(

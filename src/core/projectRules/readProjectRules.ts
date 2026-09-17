@@ -1,39 +1,57 @@
 import type { BryantLabsApi } from "@/types";
+import {
+  assembleInstructionPackFromTrusted,
+  emptyInstructionPack,
+  isTrustedInstructionLoad,
+  recordLastInstructionPack,
+  type InstructionPack,
+  type InstructionPackDiagnostic,
+  type InstructionSkip,
+  type InstructionSkipReason,
+} from "@/core/projectRules/instructionPack";
 
-export const PROJECT_RULES_REL_PATHS = [
-  ".bryantlabs/rules.md",
-  ".cursorrules",
-] as const;
-
-export const MAX_PROJECT_RULES_CHARS = 8_000;
-
-let cache: { readonly root: string; readonly text: string } | null = null;
+export {
+  MAX_PROJECT_RULES_CHARS,
+  PROJECT_RULES_REL_PATHS,
+  getLastInstructionPackDiagnostic,
+} from "@/core/projectRules/instructionPack";
+export type { InstructionPack, InstructionPackDiagnostic, InstructionSkip, InstructionSkipReason };
 
 export function clearProjectRulesCache(): void {
-  cache = null;
+  recordLastInstructionPack(null);
+}
+
+export async function loadProjectInstructionPack(
+  api: Pick<BryantLabsApi, "loadProjectInstructionPack">,
+  _projectRoot?: string,
+): Promise<InstructionPack> {
+  if (typeof api.loadProjectInstructionPack !== "function") {
+    const empty = emptyInstructionPack();
+    recordLastInstructionPack(empty);
+    return empty;
+  }
+  let loaded: unknown;
+  try {
+    loaded = await api.loadProjectInstructionPack();
+  } catch {
+    const empty = emptyInstructionPack();
+    recordLastInstructionPack(empty);
+    return empty;
+  }
+  if (!isTrustedInstructionLoad(loaded)) {
+    const empty = emptyInstructionPack();
+    recordLastInstructionPack(empty);
+    return empty;
+  }
+  const pack = assembleInstructionPackFromTrusted(loaded);
+  recordLastInstructionPack(pack);
+  return pack;
 }
 
 export async function readProjectRulesText(
-  api: BryantLabsApi,
-  projectRoot: string,
+  api: Pick<BryantLabsApi, "loadProjectInstructionPack">,
+  projectRoot?: string,
 ): Promise<string> {
-  const root = projectRoot.replace(/[/\\]+$/, "");
-  if (cache?.root === root) return cache.text;
-
-  for (const rel of PROJECT_RULES_REL_PATHS) {
-    const abs = `${root}/${rel}`;
-    try {
-      const res = await api.readFile(abs);
-      if (res.readable && res.content?.trim()) {
-        const text = res.content.trim().slice(0, MAX_PROJECT_RULES_CHARS);
-        cache = { root, text };
-        return text;
-      }
-    } catch {
-      /* try next path */
-    }
-  }
-
-  cache = { root, text: "" };
-  return "";
+  const pack = await loadProjectInstructionPack(api, projectRoot);
+  return pack.text;
 }

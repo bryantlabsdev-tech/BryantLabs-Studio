@@ -61,6 +61,7 @@ import {
   type GreenfieldDebugReport,
 } from "@/core/greenfield/debug";
 import { runGreenfieldGenerateWithReliability } from "@/core/greenfield/generatePipeline";
+import { readProjectRulesText } from "@/core/projectRules/readProjectRules";
 import {
   createGreenfieldGenerationId,
   isUserCancelledGreenfieldFailure,
@@ -681,12 +682,15 @@ export function NewAppView({
         model: activeModel,
       });
       if (cancelledRef.current || !isThisRun()) return;
+      const projectRules =
+        api && projectPath ? await readProjectRulesText(api, projectPath) : "";
       const res = settings
         ? await runGreenfieldGenerateWithReliability(
             {
               api,
               settings,
               generationId: runId,
+              projectRules,
               isCancelled: () =>
                 cancelledRef.current || cancelledGenerationIdsRef.current.has(runId),
               invokeGreenfieldCall,

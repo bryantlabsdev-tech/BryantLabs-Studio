@@ -4,6 +4,7 @@ import {
 } from "@/app/multiAgentPipeline";
 import { resolveEffectiveProjectScan } from "@/core/agent/resolveEffectiveProjectScan";
 import { buildAgentPlanContext } from "@/core/context/buildAgentContext";
+import { readProjectRulesText } from "@/core/projectRules/readProjectRules";
 import { recordPipelineRun } from "@/core/pipeline/analytics";
 import type { PipelineSession } from "@/core/pipeline/types";
 import {
@@ -92,6 +93,7 @@ export function buildPipelineRunnerDeps(
         host.setSessionMemory(memForPlan);
       }
       const memoryRetrieval = host.resolveMemoriesForPrompt(resolvedPrompt, "ai_plan");
+      const projectRules = await readProjectRulesText(api, project.path);
       const { context, diagnostics } = buildAgentPlanContext(
         scan,
         resolvedPrompt,
@@ -100,6 +102,10 @@ export function buildPipelineRunnerDeps(
         host.projectMemory,
         project.path,
         memoryRetrieval,
+        undefined,
+        undefined,
+        undefined,
+        projectRules,
       );
       host.setSessionMemoryDiagnostics(diagnostics);
       host.refreshSmartFileSelection(resolvedPrompt, memForPlan);

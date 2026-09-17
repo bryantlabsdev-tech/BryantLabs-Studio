@@ -4,12 +4,15 @@ import * as path from "node:path";
 import { promises as fs } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { execFile } from "node:child_process";
 import {
   validateWritePath,
   writeVerified,
   createProjectFile,
   deleteProjectFile,
   applyEdit,
+  inspectContainedInstructionPath,
+  inspectContainedInstructionDirectory,
   isCanonicalPathWithinRoot,
   PATH_OUTSIDE_PROJECT_ROOT,
 } from "./fileWriter.cjs";
@@ -247,5 +250,39 @@ describe("canonical path containment", () => {
     assert.equal(result.ok, false);
     assert.equal(result.reason, PATH_OUTSIDE_PROJECT_ROOT);
     assert.equal(isCanonicalPathWithinRoot(missingRoot, path.join(missingRoot, "a.ts")), false);
+  });
+
+  it("rejects a symlink that resolves outside the project for instruction reads", async () => {
+    const { project, sentinel } = await makeProjectPair();
+    const link = path.join(project, "AGENTS.md");
+    await fs.symlink(sentinel, link);
+    const result = inspectContainedInstructionPath(project, link);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, "symlink_escape");
+    assert.equal(await readSentinel(sentinel), "untouched\n");
+  });
+
+  it("rejects a FIFO as a non-regular instruction file", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "bl-fifo-"));
+    const fifo = path.join(root, "AGENTS.md");
+    try {
+      await new Promise<void>((resolve, reject) => {
+        execFile("mkfifo", [fifo], (err) => (err ? reject(err) : resolve()));
+      });
+    } catch {
+      return;
+    }
+    const result = inspectContainedInstructionPath(root, fifo);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, "not_regular_file");
+  });
+
+  it("rejects an instruction directory symlink that escapes the project", async () => {
+    const { project, outside } = await makeProjectPair();
+    const link = path.join(project, ".cursor-rules-dir");
+    await fs.symlink(outside, link);
+    const result = inspectContainedInstructionDirectory(project, link);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, "symlink_escape");
   });
 });

@@ -204,6 +204,161 @@ export function isCanonicalPathWithinRoot(root: string, target: string): boolean
   return contained.ok;
 }
 
+export type InstructionPathSkipReason =
+  | "outside_root"
+  | "symlink_escape"
+  | "not_regular_file"
+  | "not_found";
+
+export type ContainedInstructionPath =
+  | {
+      readonly ok: true;
+      readonly canonicalRoot: string;
+      readonly canonicalPath: string;
+      readonly relativePath: string;
+    }
+  | { readonly ok: false; readonly reason: InstructionPathSkipReason };
+
+/**
+ * Read-only instruction files must resolve inside the canonical project root
+ * and must be regular files (or symlinks to regular files still inside root).
+ */
+export function inspectContainedInstructionPath(
+  root: string,
+  target: string,
+): ContainedInstructionPath {
+  if (typeof root !== "string" || root.length === 0) {
+    return { ok: false, reason: "outside_root" };
+  }
+  if (typeof target !== "string" || target.length === 0) {
+    return { ok: false, reason: "outside_root" };
+  }
+
+  const resolvedRoot = path.resolve(root);
+  const resolvedTarget = path.resolve(target);
+  const lexicalInside = isLexicallyInsideRoot(resolvedRoot, resolvedTarget);
+  const contained = assertCanonicalPathContainment(root, target, "write");
+  if (!contained.ok) {
+    return {
+      ok: false,
+      reason: lexicalInside ? "symlink_escape" : "outside_root",
+    };
+  }
+
+  let lst: fsSync.Stats;
+  try {
+    lst = fsSync.lstatSync(resolvedTarget);
+  } catch (err) {
+    if (isFsCode(err, "ENOENT")) return { ok: false, reason: "not_found" };
+    return { ok: false, reason: "not_regular_file" };
+  }
+
+  if (lst.isDirectory() || lst.isFIFO() || lst.isSocket() || lst.isCharacterDevice() || lst.isBlockDevice()) {
+    return { ok: false, reason: "not_regular_file" };
+  }
+
+  if (lst.isSymbolicLink()) {
+    if (!isCanonicallyInsideRoot(contained.canonicalRoot, contained.effectivePath)) {
+      return { ok: false, reason: "symlink_escape" };
+    }
+    let followed: fsSync.Stats;
+    try {
+      followed = fsSync.statSync(resolvedTarget);
+    } catch {
+      return { ok: false, reason: "not_found" };
+    }
+    if (!followed.isFile()) {
+      return { ok: false, reason: "not_regular_file" };
+    }
+  } else if (!lst.isFile()) {
+    return { ok: false, reason: "not_regular_file" };
+  }
+
+  const relativePath = path.relative(contained.canonicalRoot, contained.effectivePath)
+    .split(path.sep)
+    .join("/");
+  if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return { ok: false, reason: "outside_root" };
+  }
+
+  return {
+    ok: true,
+    canonicalRoot: contained.canonicalRoot,
+    canonicalPath: contained.effectivePath,
+    relativePath,
+  };
+}
+
+/**
+ * Instruction-pack directory listing must resolve inside the canonical project
+ * root. Callers still open each child with a no-follow read.
+ */
+export function inspectContainedInstructionDirectory(
+  root: string,
+  target: string,
+): ContainedInstructionPath {
+  if (typeof root !== "string" || root.length === 0) {
+    return { ok: false, reason: "outside_root" };
+  }
+  if (typeof target !== "string" || target.length === 0) {
+    return { ok: false, reason: "outside_root" };
+  }
+
+  const resolvedRoot = path.resolve(root);
+  const resolvedTarget = path.resolve(target);
+  const lexicalInside = isLexicallyInsideRoot(resolvedRoot, resolvedTarget);
+  const contained = assertCanonicalPathContainment(root, target, "write");
+  if (!contained.ok) {
+    return {
+      ok: false,
+      reason: lexicalInside ? "symlink_escape" : "outside_root",
+    };
+  }
+
+  let lst: fsSync.Stats;
+  try {
+    lst = fsSync.lstatSync(resolvedTarget);
+  } catch (err) {
+    if (isFsCode(err, "ENOENT")) return { ok: false, reason: "not_found" };
+    return { ok: false, reason: "not_regular_file" };
+  }
+
+  if (lst.isFIFO() || lst.isSocket() || lst.isCharacterDevice() || lst.isBlockDevice()) {
+    return { ok: false, reason: "not_regular_file" };
+  }
+
+  if (lst.isSymbolicLink()) {
+    if (!isCanonicallyInsideRoot(contained.canonicalRoot, contained.effectivePath)) {
+      return { ok: false, reason: "symlink_escape" };
+    }
+    let followed: fsSync.Stats;
+    try {
+      followed = fsSync.statSync(resolvedTarget);
+    } catch {
+      return { ok: false, reason: "not_found" };
+    }
+    if (!followed.isDirectory()) {
+      return { ok: false, reason: "not_regular_file" };
+    }
+  } else if (!lst.isDirectory()) {
+    return { ok: false, reason: "not_regular_file" };
+  }
+
+  const relativePath = path.relative(contained.canonicalRoot, contained.effectivePath)
+    .split(path.sep)
+    .join("/");
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return { ok: false, reason: "outside_root" };
+  }
+
+  return {
+    ok: true,
+    canonicalRoot: contained.canonicalRoot,
+    canonicalPath: contained.effectivePath,
+    relativePath: relativePath || ".",
+  };
+}
+
 /** Validate that `target` is a writable path inside `root`. */
 export function validateWritePath(
   root: string | null,

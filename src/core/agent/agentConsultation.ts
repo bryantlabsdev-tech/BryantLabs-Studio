@@ -1,4 +1,7 @@
 import { ASK_MODE_READONLY_EXPLANATION } from "@/core/agent/askMode";
+import { isStudioTestCaptureEnabled } from "@/core/agent/studioTestCapture";
+import { formatProjectRulesForPrompt } from "@/core/projectRules/instructionPack";
+import { readProjectRulesText } from "@/core/projectRules/readProjectRules";
 import type { ActiveEditorContext } from "@/core/context/activeEditorContext";
 import {
   consultationPreviewLine,
@@ -20,6 +23,7 @@ export interface AgentConsultationInput {
   readonly askMode?: boolean;
   readonly scan?: ProjectScan | null;
   readonly activeEditorContext?: ActiveEditorContext | null;
+  readonly projectRules?: string | null;
 }
 
 export interface AgentConsultationResult {
@@ -44,7 +48,7 @@ function buildEditorContextBlock(context: ActiveEditorContext | null | undefined
   return parts.length > 0 ? `\n\n## Editor context\n${parts.join("\n\n")}` : "";
 }
 
-function buildConsultationPrompt(input: AgentConsultationInput): string {
+export function buildConsultationPrompt(input: AgentConsultationInput): string {
   const editorBlock = buildEditorContextBlock(input.activeEditorContext);
   const projectLine = input.projectPath
     ? `Project: ${input.projectPath}`
@@ -74,6 +78,8 @@ function buildConsultationPrompt(input: AgentConsultationInput): string {
   const askSuffix = input.askMode
     ? `\n\n${ASK_MODE_READONLY_EXPLANATION}\nDo NOT propose applying patches. Do NOT output file edits.`
     : "";
+  const rulesBlock = formatProjectRulesForPrompt(input.projectRules);
+  const askLockAfterUntrusted = input.askMode ? `\n${ASK_MODE_READONLY_EXPLANATION}` : "";
 
   return [
     "You are BryantLabs Studio — a coding assistant inside an IDE.",
@@ -84,6 +90,8 @@ function buildConsultationPrompt(input: AgentConsultationInput): string {
     `User request:\n${input.prompt.trim()}`,
     mixedSuffix,
     askSuffix,
+    rulesBlock,
+    askLockAfterUntrusted,
   ]
     .filter((line) => line !== "")
     .join("\n");
@@ -104,7 +112,16 @@ export async function runAgentConsultation(
 ): Promise<AgentConsultationResult> {
   const settings = normalizeProviderSettings(await input.api.getProviderSettings());
   const provider = settings.provider;
-  const consultationPrompt = buildConsultationPrompt(input);
+  const projectRules =
+    input.projectRules ??
+    (await readProjectRulesText(input.api, input.projectPath));
+  const consultationPrompt = buildConsultationPrompt({
+    ...input,
+    projectRules,
+  });
+  if (isStudioTestCaptureEnabled()) {
+    recordLastConsultationPrompt(consultationPrompt);
+  }
 
   try {
     const res = await input.api.testProvider(provider, consultationPrompt);
@@ -245,4 +262,19 @@ export function isStaleConsultationTurn(input: {
     input.generation !== input.currentGeneration ||
     input.currentProjectPath !== input.startedProjectPath
   );
+}
+
+let lastConsultationPrompt = "";
+
+export function recordLastConsultationPrompt(prompt: string): void {
+  if (!isStudioTestCaptureEnabled()) {
+    lastConsultationPrompt = "";
+    return;
+  }
+  lastConsultationPrompt = prompt;
+}
+
+export function getLastConsultationPrompt(): string {
+  if (!isStudioTestCaptureEnabled()) return "";
+  return lastConsultationPrompt;
 }

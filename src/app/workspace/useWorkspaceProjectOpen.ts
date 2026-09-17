@@ -10,6 +10,7 @@ import type { AgentLoopWorkspaceState } from "@/app/workspace/useAgentLoopWorksp
 import type { WorkspaceProjectState } from "@/app/workspace/useWorkspaceProjectState";
 import type { ProjectMemoryWorkspaceState } from "@/app/workspace/useProjectMemoryState";
 import { cancelAllPostApplyUiAudits } from "@/app/orchestration/postApplyUiAudit";
+import { clearProjectRulesCache } from "@/core/projectRules/readProjectRules";
 
 export function useWorkspaceProjectOpen(input: {
   readonly api: BryantLabsApi | null | undefined;
@@ -91,6 +92,7 @@ export function useWorkspaceProjectOpen(input: {
 }) {
   const resetWorkspaceForProject = useCallback(() => {
     cancelAllPostApplyUiAudits("project closed");
+    clearProjectRulesCache();
     input.file.setActiveFile(null);
     input.file.setActivePath(null);
     input.file.setOpenFileTabs([]);

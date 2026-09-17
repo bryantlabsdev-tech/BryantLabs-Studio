@@ -258,6 +258,10 @@ export interface BryantLabsApi {
   openProjectAt(folderPath: string): Promise<ProjectInfo | null>;
   listDirectory(dirPath: string): Promise<FileNode[]>;
   readFile(filePath: string): Promise<ReadFileResult>;
+  /** Trusted instruction-pack load: contained, bounded, relative-path metadata only. */
+  loadProjectInstructionPack(): Promise<
+    import("@/core/projectRules/instructionPack").InstructionPackTrustedLoad
+  >;
   scanProject(): Promise<ProjectScan | null>;
   /** Incremental project index status (warm cache / delta updates). */
   getProjectIndexStatus(): Promise<import("@/core/projectIndex/types").ProjectIndexStatus>;
