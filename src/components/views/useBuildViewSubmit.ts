@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ASK_MODE_PENDING_BLOCK_EXPLANATION, isAskComposerOverride, resolvePendingEditConfirmation } from "@/core/agent/askMode";
 import { buildGreenfieldFallbackSourceFileCount } from "@/core/agent/agentGreenfieldDispatch";
 import { isEmptyProjectFolder } from "@/core/agent/agentGreenfieldDispatch";
 import { isGreenfieldRunActive } from "@/core/agent/agentRunMutex";
@@ -85,6 +86,20 @@ export interface UseBuildViewSubmitInput {
   readonly resetAgentRunState: () => void;
   readonly recordAgentUserMessage: (text: string) => void;
   readonly recordAgentActivityMessage: (text: string) => void;
+  readonly runAgentConsultationFlow: (opts: {
+    prompt: string;
+    promptIntent: import("@/core/agent/agentIntentRouter").AgentPromptIntent;
+    mixedEdit?: boolean;
+    command?: boolean;
+    askMode?: boolean;
+  }) => Promise<void>;
+  readonly peekPendingMixedEdit: () => { readonly prompt: string } | null;
+  readonly consultationRunning: boolean;
+  readonly cancelConsultation: () => void;
+  readonly recordAgentStudioMessage: (
+    text: string,
+    meta?: { provider?: string; outcome?: "success" | "failure" | "neutral" },
+  ) => void;
   readonly providerStatus: { provider?: string; model?: string } | null;
   readonly rescan?: () => Promise<void>;
 }
@@ -147,7 +162,8 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     return () => input.setAgentGreenfieldPanelActive(false);
   }, [greenfieldMode, input.setAgentGreenfieldPanelActive]);
 
-  const active = input.buildRunning || input.pipelineRunning;
+  const active = input.buildRunning || input.pipelineRunning || input.consultationRunning;
+  const askMode = isAskComposerOverride(modeOverride);
   const greenfieldActive =
     greenfieldMode || isGreenfieldRunActive(input.greenfieldRun, greenfieldMode);
   const awaitingReview =
@@ -159,9 +175,9 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     Boolean(input.agentRunBlockReason) ||
     active ||
     greenfieldActive ||
-    awaitingReview ||
+    (awaitingReview && !askMode) ||
     input.greenfieldIndexSyncPending ||
-    (input.hasProject && input.scanStatus === "scanning");
+    (input.hasProject && input.scanStatus === "scanning" && !askMode);
   const sendDisabled =
     composerDisabled || submissionPending || !providerReady || prompt.trim().length < 4;
 
@@ -192,11 +208,12 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
 
   useEffect(() => {
     if (!submissionPending && submissionAt === null) return;
-    const hasActivity =
+      const hasActivity =
       input.greenfieldRun.entries.length > 0 ||
       input.greenfieldRun.genStatus === "running" ||
       input.buildRunning ||
       input.pipelineRunning ||
+      input.consultationRunning ||
       greenfieldActive;
     if (hasActivity) {
       setSubmissionPending(false);
@@ -204,10 +221,11 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
       return;
     }
     const timer = window.setTimeout(() => {
-      if (
+        if (
         input.greenfieldRun.entries.length === 0 &&
         !input.buildRunning &&
         !input.pipelineRunning &&
+        !input.consultationRunning &&
         input.greenfieldRun.genStatus !== "running"
       ) {
         setSubmitStallMessage(
@@ -223,6 +241,7 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     input.greenfieldRun.genStatus,
     input.buildRunning,
     input.pipelineRunning,
+    input.consultationRunning,
     greenfieldActive,
   ]);
 
@@ -257,6 +276,14 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
 
   const startFollowUpRun = useCallback(
     (trimmed: string, route: Pick<RouteAgentPromptResult, "execution" | "intent">) => {
+      if (isAskComposerOverride(modeOverride)) {
+        void input.runAgentConsultationFlow({
+          prompt: trimmed,
+          promptIntent: "ask",
+          askMode: true,
+        });
+        return;
+      }
       const effectivePrompt = prompt.trim().length >= 4 ? prompt.trim() : trimmed;
       const projectFilesExistOnDisk =
         input.greenfieldRun.filesWritten.length > 0 ||
@@ -316,7 +343,7 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
         },
       });
     },
-    [prompt, input, emptyProjectFolder, greenfieldFallbackCount],
+    [prompt, input, emptyProjectFolder, greenfieldFallbackCount, modeOverride],
   );
 
   const buildFreshFollowUpRoute = useCallback(
@@ -420,6 +447,24 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
         return;
       }
 
+      if (gate.kind === "consultation") {
+        if (route.activityNote) {
+          input.recordAgentActivityMessage(route.activityNote);
+        }
+        void input
+          .runAgentConsultationFlow({
+            prompt: gate.prompt,
+            promptIntent: gate.promptIntent,
+            mixedEdit: gate.mixedEdit,
+            ...(isAskComposerOverride(modeOverride) ? { askMode: true } : {}),
+          })
+          .finally(() => {
+            setSubmissionPending(false);
+            releaseSubmitLock();
+          });
+        return;
+      }
+
       setGreenfieldMode(false);
       setGreenfieldRecoveryMode(false);
       setGreenfieldPrompt("");
@@ -442,7 +487,7 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
         startFollowUpRun(gate.prompt, gate.route);
       }
     },
-    [flowInput, input, startFollowUpRun],
+    [flowInput, input, startFollowUpRun, modeOverride, releaseSubmitLock],
   );
 
   const dispatchPrompt = useCallback(
@@ -477,10 +522,26 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
       }
       setPrompt(text ?? prompt);
 
+      const pendingDecision = resolvePendingEditConfirmation({
+        modeOverride,
+        prompt: trimmed,
+        pendingPrompt: input.peekPendingMixedEdit()?.prompt ?? null,
+        hasPendingReview: awaitingReview,
+      });
+      if (pendingDecision.action === "keep_pending_explain_ask") {
+        input.recordAgentUserMessage(trimmed);
+        input.recordAgentStudioMessage(ASK_MODE_PENDING_BLOCK_EXPLANATION, {
+          outcome: "neutral",
+        });
+        return;
+      }
+
       const route = resolveBuildViewSubmitRoute(flowInput(trimmed));
       logAgentRoute(route.mode, route.reason, input.projectPath);
       input.updateGreenfieldRun({ routeDecision: route.decision });
-      detectGreenfieldForSubmit(flowInput(trimmed), route);
+      if (!isAskComposerOverride(modeOverride)) {
+        detectGreenfieldForSubmit(flowInput(trimmed), route);
+      }
 
       if (route.execution === "blocked") {
         setSubmissionPending(false);
@@ -488,7 +549,9 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
         setBlockedMessage(route.blockedReason);
         setSubmissionError(route.blockedReason ?? "Prompt could not be routed.");
         input.recordAgentUserMessage(trimmed);
-        if (route.needsEmptyFolder) void input.openProject();
+        if (route.needsEmptyFolder && !isAskComposerOverride(modeOverride)) {
+          void input.openProject();
+        }
         return;
       }
       if (input.staleRunContextPresent) {
@@ -507,6 +570,8 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
       flowInput,
       releaseSubmitLock,
       proceedWithSubmit,
+      modeOverride,
+      awaitingReview,
     ],
   );
 
@@ -529,6 +594,7 @@ export function useBuildViewSubmit(input: UseBuildViewSubmitInput) {
     setGreenfieldMode(false);
     setGreenfieldRecoveryMode(false);
     setGreenfieldPrompt("");
+    input.cancelConsultation();
     input.resetAgentRunState();
   }, [input]);
 

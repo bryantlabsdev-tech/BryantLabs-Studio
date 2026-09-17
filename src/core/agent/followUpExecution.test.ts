@@ -187,6 +187,21 @@ describe("followUpExecution", () => {
     assert.match(GREENFIELD_BLOCKED_BY_ROUTE_DETAIL, /build_loop/i);
   });
 
+  it("does not start an edit run from consultation or run_command execution", () => {
+    const scan = mockProjectScan(["package.json", "src/App.tsx"]);
+    for (const routeExecution of ["consultation", "mixed_confirm", "run_command"] as const) {
+      const action = resolveFollowUpSubmitAction({
+        hasProject: true,
+        routeExecution,
+        emptyProjectFolder: false,
+        scan,
+        scanStatus: "done",
+        useAgentLoopForEdits: false,
+      });
+      assert.equal(action.kind, "blocked_scan", routeExecution);
+    }
+  });
+
   it("derives execution from route decision trace", () => {
     assert.equal(
       routeExecutionFromDecision({

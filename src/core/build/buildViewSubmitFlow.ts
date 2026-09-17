@@ -1,3 +1,4 @@
+import { isAskComposerOverride } from "@/core/agent/askMode";
 import {
   GREENFIELD_BLOCKED_BY_ROUTE_DETAIL,
   GREENFIELD_BLOCKED_BY_ROUTE_LABEL,
@@ -101,6 +102,21 @@ export function evaluateBuildViewSubmit(
   input: BuildViewSubmitFlowInput,
   route: RouteAgentPromptResult,
 ): BuildViewSubmitGate | { readonly kind: "ok" } {
+  if (isAskComposerOverride(input.modeOverride)) {
+    return {
+      kind: "consultation",
+      prompt: input.trimmed,
+      promptIntent: route.promptIntent,
+      mixedEdit: false,
+      route: {
+        execution: "consultation",
+        intent: "consultation",
+        promptIntent: route.promptIntent,
+        mixedEdit: false,
+      },
+    };
+  }
+
   if (route.execution === "greenfield" || route.execution === "greenfield_recovery") {
     const canCreateHere =
       route.execution === "greenfield_recovery" ||

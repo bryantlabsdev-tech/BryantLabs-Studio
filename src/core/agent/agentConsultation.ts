@@ -1,3 +1,4 @@
+import { ASK_MODE_READONLY_EXPLANATION } from "@/core/agent/askMode";
 import type { ActiveEditorContext } from "@/core/context/activeEditorContext";
 import {
   consultationPreviewLine,
@@ -15,6 +16,8 @@ export interface AgentConsultationInput {
   readonly prompt: string;
   readonly intent: AgentPromptIntent;
   readonly mixedEdit?: boolean;
+  /** Hard Ask mode: never mutate; prepend a read-only explanation. */
+  readonly askMode?: boolean;
   readonly scan?: ProjectScan | null;
   readonly activeEditorContext?: ActiveEditorContext | null;
 }
@@ -64,8 +67,12 @@ function buildConsultationPrompt(input: AgentConsultationInput): string {
     terminal: "Describe the terminal command; do not edit files.",
   };
 
-  const mixedSuffix = input.mixedEdit
-    ? "\n\nAfter explaining, list suggested code improvements as bullet points. Do NOT apply changes."
+  const mixedSuffix =
+    input.mixedEdit && !input.askMode
+      ? "\n\nAfter explaining, list suggested code improvements as bullet points. Do NOT apply changes."
+      : "";
+  const askSuffix = input.askMode
+    ? `\n\n${ASK_MODE_READONLY_EXPLANATION}\nDo NOT propose applying patches. Do NOT output file edits.`
     : "";
 
   return [
@@ -76,6 +83,7 @@ function buildConsultationPrompt(input: AgentConsultationInput): string {
     "",
     `User request:\n${input.prompt.trim()}`,
     mixedSuffix,
+    askSuffix,
   ]
     .filter((line) => line !== "")
     .join("\n");
@@ -111,7 +119,9 @@ export async function runAgentConsultation(
     }
 
     let text = res.text.trim();
-    if (input.mixedEdit) {
+    if (input.askMode) {
+      text = `${ASK_MODE_READONLY_EXPLANATION}\n\n${text}`;
+    } else if (input.mixedEdit) {
       text = `${text}\n\n${MIXED_EDIT_CONFIRM_QUESTION}`;
     }
 
@@ -134,6 +144,12 @@ export async function runAgentConsultation(
 export async function runAgentCommandIntent(
   input: AgentConsultationInput,
 ): Promise<AgentConsultationResult> {
+  if (input.askMode) {
+    return {
+      ok: true,
+      text: `${ASK_MODE_READONLY_EXPLANATION}\n\nI did not run a terminal command or verification because Ask mode is read-only.`,
+    };
+  }
   if (input.intent === "run") {
     try {
       const verification = await input.api.verify();
@@ -208,4 +224,25 @@ export async function runAgentCommandIntent(
 
 export function consultationActivityLine(intent: AgentPromptIntent): string {
   return consultationPreviewLine(intent);
+}
+
+/** Ask never executes command intents, even if a caller sets `command: true`. */
+export function resolveConsultationExecution(opts: {
+  readonly askMode?: boolean;
+  readonly command?: boolean;
+}): "consultation" | "command" {
+  if (opts.askMode) return "consultation";
+  return opts.command ? "command" : "consultation";
+}
+
+export function isStaleConsultationTurn(input: {
+  readonly generation: number;
+  readonly currentGeneration: number;
+  readonly startedProjectPath: string;
+  readonly currentProjectPath: string | null;
+}): boolean {
+  return (
+    input.generation !== input.currentGeneration ||
+    input.currentProjectPath !== input.startedProjectPath
+  );
 }

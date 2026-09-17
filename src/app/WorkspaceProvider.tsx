@@ -90,6 +90,7 @@ import { useWorkspaceStudioActions } from "@/app/workspace/useWorkspaceStudioAct
 import { useWorkspaceRunContextReset } from "@/app/workspace/useWorkspaceRunContextReset";
 import { useWorkspacePlanApplyControls } from "@/app/workspace/useWorkspacePlanApplyControls";
 import { useWorkspaceProjectOpen } from "@/app/workspace/useWorkspaceProjectOpen";
+import { useAgentConsultation } from "@/app/workspace/useAgentConsultation";
 import { useWorkspaceFollowUpRecording } from "@/app/workspace/useWorkspaceFollowUpRecording";
 import { useWorkspaceGreenfieldRunHelpers } from "@/app/workspace/useWorkspaceGreenfieldRunHelpers";
 import { useWorkspaceRunCheckpointActions } from "@/app/workspace/useWorkspaceRunCheckpointActions";
@@ -1459,6 +1460,23 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
   });
 
   const {
+    consultationRunning,
+    runAgentConsultationFlow,
+    peekPendingMixedEdit,
+    consumePendingMixedEdit,
+    cancelConsultation,
+  } = useAgentConsultation({
+    api,
+    projectPath: project?.path ?? null,
+    scan,
+    activeEditorContextRef,
+    recordAgentActivityMessage,
+    recordAgentStudioMessage,
+    appendGreenfieldRunLog,
+    updateGreenfieldRun,
+  });
+
+  const {
     cancelApplyPlan,
     selectPlanApplyFile,
     setPlanApplyFileDecision,
@@ -1968,6 +1986,11 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     buildError,
     buildStatus,
     runBuildLoop,
+    runAgentConsultationFlow,
+    peekPendingMixedEdit,
+    consumePendingMixedEdit,
+    consultationRunning,
+    cancelConsultation,
     continueBuildAfterReview,
     cancelBuildLoop,
     retryApplyPlanReview,

@@ -46,7 +46,7 @@ export interface ExecutionModeResolution {
 export interface ResolveExecutionModeInput extends InspectWorkspaceProjectProfileInput {
   readonly route: RouteAgentPromptResult;
   readonly prompt: string;
-  readonly modeOverride?: "auto" | "new_app" | "edit" | "fix_errors";
+  readonly modeOverride?: import("@/core/agent/unifiedAgentRoute").ComposerModeOverride;
   readonly skipConfirmation?: boolean;
 }
 

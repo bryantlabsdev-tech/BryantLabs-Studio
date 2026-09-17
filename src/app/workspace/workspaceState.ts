@@ -275,9 +275,12 @@ export interface WorkspaceState {
     promptIntent: import("@/core/agent/agentIntentRouter").AgentPromptIntent;
     mixedEdit?: boolean;
     command?: boolean;
+    askMode?: boolean;
   }): Promise<void>;
+  peekPendingMixedEdit(): { readonly prompt: string } | null;
   consumePendingMixedEdit(): { readonly prompt: string } | null;
   readonly consultationRunning: boolean;
+  cancelConsultation(): void;
   continueBuildAfterReview(): Promise<void>;
   cancelBuildLoop(): void;
   retryApplyPlanReview(): Promise<void>;
