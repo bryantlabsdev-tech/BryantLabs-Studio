@@ -347,6 +347,15 @@ export interface BryantLabsApi {
     token: string,
   ): Promise<import("@/core/git/gitPushPolicy").GitPushExecuteResult>;
   gitPushCancel(token: string): Promise<{ readonly ok: true }>;
+  gitListLocalBranches(): Promise<import("@/core/git/gitBranchPolicy").GitBranchListResult>;
+  gitBranchPreflight(payload: {
+    readonly op: "create" | "switch";
+    readonly destination: string;
+  }): Promise<import("@/core/git/gitBranchPolicy").GitBranchPreflightResult>;
+  gitBranchExecute(
+    token: string,
+  ): Promise<import("@/core/git/gitBranchPolicy").GitBranchExecuteResult>;
+  gitBranchCancel(token: string): Promise<{ readonly ok: true }>;
   /** Apply a deterministic, user-approved edit (Phase 5). */
   applyEdit(
     filePath: string,

@@ -218,6 +218,106 @@ export function useWorkspaceGitWorkspace(input: {
     return current.api.gitPushCancel(token);
   }, []);
 
+  const gitListLocalBranches = useCallback(async () => {
+    const current = inputRef.current;
+    if (!current.api?.gitListLocalBranches) {
+      return {
+        ok: false as const,
+        code: "no_project" as const,
+        message: "Git branches are unavailable.",
+      };
+    }
+    return current.api.gitListLocalBranches();
+  }, []);
+
+  const gitBranchPreflight = useCallback(
+    async (payload: { readonly op: "create" | "switch"; readonly destination: string }) => {
+      const current = inputRef.current;
+      if (!current.api?.gitBranchPreflight) {
+        return {
+          ok: false as const,
+          code: "no_project" as const,
+          message: "Git branches are unavailable.",
+        };
+      }
+      const startedPath = current.projectPath;
+      current.setGitActionError(null);
+      try {
+        const result = await current.api.gitBranchPreflight(payload);
+        if (inputRef.current.projectPath !== startedPath) {
+          return result;
+        }
+        if (!result.ok) {
+          current.setGitActionError(result.message);
+        }
+        return result;
+      } catch {
+        if (inputRef.current.projectPath !== startedPath) {
+          return {
+            ok: false as const,
+            code: "generic_failure" as const,
+            message: "Branch change failed.",
+          };
+        }
+        current.setGitActionError("Branch change failed.");
+        return {
+          ok: false as const,
+          code: "generic_failure" as const,
+          message: "Branch change failed.",
+        };
+      }
+    },
+    [],
+  );
+
+  const gitBranchExecute = useCallback(
+    async (token: string) => {
+      const current = inputRef.current;
+      if (!current.api?.gitBranchExecute) {
+        return {
+          ok: false as const,
+          code: "no_project" as const,
+          message: "Git branches are unavailable.",
+        };
+      }
+      const startedPath = current.projectPath;
+      current.setGitActionError(null);
+      try {
+        const result = await current.api.gitBranchExecute(token);
+        if (inputRef.current.projectPath !== startedPath) {
+          return result;
+        }
+        if (!result.ok) {
+          current.setGitActionError(result.message);
+          return result;
+        }
+        await refreshGitStatus();
+        return result;
+      } catch {
+        if (inputRef.current.projectPath !== startedPath) {
+          return {
+            ok: false as const,
+            code: "generic_failure" as const,
+            message: "Branch change failed.",
+          };
+        }
+        current.setGitActionError("Branch change failed.");
+        return {
+          ok: false as const,
+          code: "generic_failure" as const,
+          message: "Branch change failed.",
+        };
+      }
+    },
+    [refreshGitStatus],
+  );
+
+  const gitBranchCancel = useCallback(async (token: string) => {
+    const current = inputRef.current;
+    if (!current.api?.gitBranchCancel) return { ok: true as const };
+    return current.api.gitBranchCancel(token);
+  }, []);
+
   return {
     refreshGitStatus,
     selectGitPath,
@@ -228,5 +328,9 @@ export function useWorkspaceGitWorkspace(input: {
     gitPushPreflight,
     gitPushExecute,
     gitPushCancel,
+    gitListLocalBranches,
+    gitBranchPreflight,
+    gitBranchExecute,
+    gitBranchCancel,
   };
 }

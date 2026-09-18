@@ -110,7 +110,10 @@ export function gitPushAllowsLocalRemotes(): boolean {
  * pager/editor, and trace variables. Values from this object are never copied
  * into UI errors.
  */
-export function buildGitPushEnv(): NodeJS.ProcessEnv {
+/** Sanitized spawn env for product-managed Git. Push keeps system/global config for credential helpers. */
+export function buildProductGitEnv(options?: {
+  readonly isolateConfigFiles?: boolean;
+}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of GIT_PUSH_ENV_KEEP) {
     const value = process.env[key];
@@ -123,7 +126,16 @@ export function buildGitPushEnv(): NodeJS.ProcessEnv {
     }
   }
   env.GIT_TERMINAL_PROMPT = "0";
+  if (options?.isolateConfigFiles) {
+    env.GIT_CONFIG_NOSYSTEM = "1";
+    env.GIT_CONFIG_GLOBAL = "/dev/null";
+    env.GIT_CONFIG_SYSTEM = "/dev/null";
+  }
   return env;
+}
+
+export function buildGitPushEnv(): NodeJS.ProcessEnv {
+  return buildProductGitEnv();
 }
 
 function fail(code: GitPushFailureCode): GitPushPreflightErr {

@@ -4,6 +4,12 @@ import { EmptyState } from "@/components/EmptyState";
 import { MonacoDiffView } from "@/components/editor/MonacoDiffView";
 import type { GitFileEntry } from "@/core/git/types";
 import type { GitPushPreflightOk } from "@/core/git/gitPushPolicy";
+import type { GitBranchPreflightOk } from "@/core/git/gitBranchPolicy";
+import {
+  GIT_BRANCH_IPC_FAILURE_MESSAGE,
+  isBackdropDismissTarget,
+  nextDialogControl,
+} from "@/components/views/gitConfirmDialog";
 
 function statusLabel(entry: GitFileEntry): string {
   if (entry.untracked) return "Untracked";
@@ -93,6 +99,10 @@ export function GitView() {
     gitPushPreflight,
     gitPushExecute,
     gitPushCancel,
+    gitListLocalBranches,
+    gitBranchPreflight,
+    gitBranchExecute,
+    gitBranchCancel,
     selectGitPath,
     openPath,
   } = useWorkspace();
@@ -102,11 +112,23 @@ export function GitView() {
   const [pushPreflight, setPushPreflight] = useState<GitPushPreflightOk | null>(null);
   const [pushing, setPushing] = useState(false);
   const [pushNotice, setPushNotice] = useState<string | null>(null);
+  const [localBranches, setLocalBranches] = useState<readonly string[]>([]);
+  const [branchPanelDirty, setBranchPanelDirty] = useState(false);
+  const [newBranchName, setNewBranchName] = useState("");
+  const [branchPreflight, setBranchPreflight] = useState<GitBranchPreflightOk | null>(null);
+  const [branching, setBranching] = useState(false);
+  const [branchNotice, setBranchNotice] = useState<string | null>(null);
   const projectPath = project?.path ?? null;
   const projectPathRef = useRef(projectPath);
   projectPathRef.current = projectPath;
   const tokenRef = useRef<string | null>(null);
+  const branchTokenRef = useRef<string | null>(null);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const branchCancelButtonRef = useRef<HTMLButtonElement>(null);
+  const branchConfirmButtonRef = useRef<HTMLButtonElement>(null);
+  const branchSelectRef = useRef<HTMLSelectElement>(null);
+  const branchCreateButtonRef = useRef<HTMLButtonElement>(null);
+  const branchInvokerRef = useRef<"select" | "create" | null>(null);
   const aliveRef = useRef(true);
 
   const stagedFiles = useMemo(
@@ -171,6 +193,115 @@ export function GitView() {
     }
   }, [gitPushExecute, pushPreflight, pushing]);
 
+  const closeBranchDialog = useCallback(() => {
+    const id = branchTokenRef.current;
+    branchTokenRef.current = null;
+    setBranchPreflight(null);
+    if (id) void gitBranchCancel(id);
+    const invoker = branchInvokerRef.current;
+    branchInvokerRef.current = null;
+    queueMicrotask(() => {
+      if (invoker === "select") branchSelectRef.current?.focus();
+      else if (invoker === "create") branchCreateButtonRef.current?.focus();
+    });
+  }, [gitBranchCancel]);
+
+  const handleCreateBranchClick = useCallback(async () => {
+    if (branching || branchPreflight || pushing || pushPreflight) return;
+    const destination = newBranchName.trim();
+    if (!destination) return;
+    setBranchNotice(null);
+    const pathAtStart = projectPathRef.current;
+    try {
+      const result = await gitBranchPreflight({ op: "create", destination });
+      if (!aliveRef.current || pathAtStart !== projectPathRef.current) {
+        if (result.ok) void gitBranchCancel(result.token);
+        return;
+      }
+      if (!result.ok) return;
+      branchInvokerRef.current = "create";
+      branchTokenRef.current = result.token;
+      setBranchPreflight(result);
+    } catch {
+      if (!aliveRef.current || pathAtStart !== projectPathRef.current) return;
+      setBranchNotice(GIT_BRANCH_IPC_FAILURE_MESSAGE);
+    }
+  }, [
+    branchPreflight,
+    branching,
+    gitBranchCancel,
+    gitBranchPreflight,
+    newBranchName,
+    pushPreflight,
+    pushing,
+  ]);
+
+  const handleSwitchBranch = useCallback(
+    async (destination: string) => {
+      if (branching || branchPreflight || pushing || pushPreflight) return;
+      if (!destination || destination === gitStatus?.branch) return;
+      setBranchNotice(null);
+      const pathAtStart = projectPathRef.current;
+      try {
+        const result = await gitBranchPreflight({ op: "switch", destination });
+        if (!aliveRef.current || pathAtStart !== projectPathRef.current) {
+          if (result.ok) void gitBranchCancel(result.token);
+          return;
+        }
+        if (!result.ok) return;
+        branchInvokerRef.current = "select";
+        branchTokenRef.current = result.token;
+        setBranchPreflight(result);
+      } catch {
+        if (!aliveRef.current || pathAtStart !== projectPathRef.current) return;
+        setBranchNotice(GIT_BRANCH_IPC_FAILURE_MESSAGE);
+      }
+    },
+    [
+      branchPreflight,
+      branching,
+      gitBranchCancel,
+      gitBranchPreflight,
+      gitStatus?.branch,
+      pushPreflight,
+      pushing,
+    ],
+  );
+
+  const handleBranchConfirm = useCallback(async () => {
+    if (!branchPreflight || branching) return;
+    const pathAtStart = projectPathRef.current;
+    const token = branchPreflight.token;
+    setBranching(true);
+    try {
+      const result = await gitBranchExecute(token);
+      branchTokenRef.current = null;
+      if (!aliveRef.current || pathAtStart !== projectPathRef.current) {
+        return;
+      }
+      setBranchPreflight(null);
+      branchInvokerRef.current = null;
+      if (result.ok) {
+        setNewBranchName("");
+        setBranchNotice(result.summary);
+        const listed = await gitListLocalBranches();
+        if (listed.ok && pathAtStart === projectPathRef.current) {
+          setLocalBranches(listed.branches);
+          setBranchPanelDirty(listed.dirty);
+        }
+      }
+    } catch {
+      if (!aliveRef.current || pathAtStart !== projectPathRef.current) return;
+      branchTokenRef.current = null;
+      setBranchPreflight(null);
+      setBranchNotice(GIT_BRANCH_IPC_FAILURE_MESSAGE);
+    } finally {
+      if (aliveRef.current && pathAtStart === projectPathRef.current) {
+        setBranching(false);
+      }
+    }
+  }, [branchPreflight, branching, gitBranchExecute, gitListLocalBranches]);
+
   useEffect(() => {
     aliveRef.current = true;
     return () => {
@@ -178,17 +309,28 @@ export function GitView() {
       const id = tokenRef.current;
       tokenRef.current = null;
       if (id) void gitPushCancel(id);
+      const branchId = branchTokenRef.current;
+      branchTokenRef.current = null;
+      if (branchId) void gitBranchCancel(branchId);
     };
-  }, [gitPushCancel]);
+  }, [gitBranchCancel, gitPushCancel]);
 
   useEffect(() => {
     setPushPreflight(null);
     setPushing(false);
     setPushNotice(null);
+    setBranchPreflight(null);
+    setBranching(false);
+    setBranchNotice(null);
+    setLocalBranches([]);
+    setBranchPanelDirty(false);
     const id = tokenRef.current;
     tokenRef.current = null;
     if (id) void gitPushCancel(id);
-  }, [projectPath, gitPushCancel]);
+    const branchId = branchTokenRef.current;
+    branchTokenRef.current = null;
+    if (branchId) void gitBranchCancel(branchId);
+  }, [projectPath, gitPushCancel, gitBranchCancel]);
 
   useEffect(() => {
     if (!pushPreflight) return;
@@ -196,15 +338,35 @@ export function GitView() {
   }, [pushPreflight]);
 
   useEffect(() => {
-    if (!pushPreflight) return;
+    if (!branchPreflight) return;
+    branchCancelButtonRef.current?.focus();
+  }, [branchPreflight]);
+
+  useEffect(() => {
+    if (!pushPreflight && !branchPreflight) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || pushing) return;
+      if (event.key !== "Escape") return;
+      if (pushing || branching) return;
       event.preventDefault();
-      closePushDialog();
+      if (branchPreflight) closeBranchDialog();
+      else closePushDialog();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closePushDialog, pushPreflight, pushing]);
+  }, [branchPreflight, branching, closeBranchDialog, closePushDialog, pushPreflight, pushing]);
+
+  useEffect(() => {
+    if (!projectPath) return;
+    let cancelled = false;
+    void gitListLocalBranches().then((result) => {
+      if (cancelled || !result.ok) return;
+      setLocalBranches(result.branches);
+      setBranchPanelDirty(result.dirty);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [gitListLocalBranches, gitStatus?.branch, gitStatus?.dirtyCount, gitStatusLoading, projectPath]);
 
   useEffect(() => {
     if (!gitStatus?.files.length) return;
@@ -239,9 +401,37 @@ export function GitView() {
     <div className="git-view">
       <header className="git-view__header">
         <div className="git-view__meta">
-          <span className="git-view__branch">
-            {gitStatus.branch ?? "detached"}
-          </span>
+          <label className="git-view__branch-label" htmlFor="git-branch-select">
+            Current branch
+          </label>
+          <select
+            id="git-branch-select"
+            ref={branchSelectRef}
+            className="git-view__branch-select"
+            data-testid="git-branch-select"
+            aria-label={`Current local branch ${gitStatus.branch ?? ""}. Choose another local branch to switch.`}
+            value={gitStatus.branch ?? ""}
+            disabled={
+              gitStatusLoading ||
+              pushing ||
+              branching ||
+              pushPreflight !== null ||
+              branchPreflight !== null ||
+              !gitStatus.branch ||
+              branchPanelDirty
+            }
+            onChange={(event) => {
+              void handleSwitchBranch(event.target.value);
+            }}
+          >
+            {(localBranches.length > 0 ? localBranches : gitStatus.branch ? [gitStatus.branch] : []).map(
+              (name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ),
+            )}
+          </select>
           <span className="git-view__dirty">
             {gitStatus.dirtyCount === 0
               ? "Clean working tree"
@@ -249,11 +439,59 @@ export function GitView() {
           </span>
         </div>
         <div className="git-view__header-actions">
+          <form
+            className="git-view__branch-create"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreateBranchClick();
+            }}
+          >
+            <label className="visually-hidden" htmlFor="git-branch-new">
+              New local branch name
+            </label>
+            <input
+              id="git-branch-new"
+              className="git-view__branch-input"
+              data-testid="git-branch-new"
+              value={newBranchName}
+              onChange={(event) => setNewBranchName(event.target.value)}
+              placeholder="new-branch"
+              disabled={
+                gitStatusLoading ||
+                pushing ||
+                branching ||
+                pushPreflight !== null ||
+                branchPreflight !== null ||
+                !gitStatus.branch ||
+                branchPanelDirty
+              }
+            />
+            <button
+              type="submit"
+              ref={branchCreateButtonRef}
+              className="git-view__refresh"
+              data-testid="git-branch-create-btn"
+              aria-label="Create new local branch from current HEAD"
+              aria-haspopup="dialog"
+              disabled={
+                gitStatusLoading ||
+                pushing ||
+                branching ||
+                pushPreflight !== null ||
+                branchPreflight !== null ||
+                !gitStatus.branch ||
+                branchPanelDirty ||
+                newBranchName.trim().length === 0
+              }
+            >
+              Create branch
+            </button>
+          </form>
           <button
             type="button"
             className="git-view__refresh"
             onClick={() => void refreshGitStatus()}
-            disabled={gitStatusLoading || pushing}
+            disabled={gitStatusLoading || pushing || branching}
           >
             {gitStatusLoading ? "Refreshing…" : "Refresh"}
           </button>
@@ -264,7 +502,13 @@ export function GitView() {
             aria-label="Push current branch to origin"
             aria-haspopup="dialog"
             onClick={() => void handlePushClick()}
-            disabled={gitStatusLoading || pushing || pushPreflight !== null}
+            disabled={
+              gitStatusLoading ||
+              pushing ||
+              branching ||
+              pushPreflight !== null ||
+              branchPreflight !== null
+            }
           >
             Push
           </button>
@@ -274,6 +518,12 @@ export function GitView() {
       {gitActionError ? (
         <p className="git-view__error" role="alert">
           {gitActionError}
+        </p>
+      ) : null}
+
+      {branchNotice ? (
+        <p className="git-view__notice" role="status" data-testid="git-branch-notice">
+          {branchNotice}
         </p>
       ) : null}
 
@@ -384,6 +634,94 @@ export function GitView() {
                 onClick={() => void handlePushConfirm()}
               >
                 {pushing ? "Pushing…" : "Confirm push"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {branchPreflight ? (
+        <div
+          className="git-push-dialog__backdrop"
+          role="presentation"
+          onClick={(event) => {
+            if (branching) return;
+            if (isBackdropDismissTarget(event.target, event.currentTarget)) {
+              closeBranchDialog();
+            }
+          }}
+        >
+          <div
+            className="git-push-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="git-branch-title"
+            aria-describedby="git-branch-lead"
+            data-testid="git-branch-dialog"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key !== "Tab") return;
+              event.preventDefault();
+              const next = nextDialogControl(
+                event.currentTarget.contains(branchConfirmButtonRef.current) &&
+                  document.activeElement === branchConfirmButtonRef.current
+                  ? "confirm"
+                  : "cancel",
+                event.shiftKey,
+              );
+              if (next === "cancel") branchCancelButtonRef.current?.focus();
+              else branchConfirmButtonRef.current?.focus();
+            }}
+          >
+            <h3 id="git-branch-title" className="git-push-dialog__title">
+              {branchPreflight.op === "create" ? "Create this local branch?" : "Switch local branch?"}
+            </h3>
+            <p id="git-branch-lead" className="git-push-dialog__lead">
+              {branchPreflight.op === "create" ? (
+                <>
+                  Create <strong>{branchPreflight.destination}</strong> from the current HEAD of{" "}
+                  <strong>{branchPreflight.currentBranch}</strong> ({branchPreflight.headSha.slice(0, 12)})
+                  and switch to it. This only changes the local HEAD/current branch.
+                </>
+              ) : (
+                <>
+                  Switch from <strong>{branchPreflight.currentBranch}</strong> to{" "}
+                  <strong>{branchPreflight.destination}</strong>. This only updates the local
+                  HEAD/current branch.
+                </>
+              )}
+            </p>
+            <div className="git-push-dialog__actions">
+              <button
+                type="button"
+                ref={branchCancelButtonRef}
+                className="git-view__refresh"
+                data-testid="git-branch-cancel"
+                aria-label={`Cancel ${branchPreflight.op === "create" ? "creating" : "switching to"} ${branchPreflight.destination}`}
+                disabled={branching}
+                onClick={() => closeBranchDialog()}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                ref={branchConfirmButtonRef}
+                className="git-view__push git-view__push--confirm"
+                data-testid="git-branch-confirm"
+                aria-label={
+                  branchPreflight.op === "create"
+                    ? `Confirm create branch ${branchPreflight.destination} from ${branchPreflight.currentBranch}`
+                    : `Confirm switch from ${branchPreflight.currentBranch} to ${branchPreflight.destination}`
+                }
+                aria-busy={branching}
+                disabled={branching}
+                onClick={() => void handleBranchConfirm()}
+              >
+                {branching
+                  ? "Working…"
+                  : branchPreflight.op === "create"
+                    ? "Confirm create"
+                    : "Confirm switch"}
               </button>
             </div>
           </div>

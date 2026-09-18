@@ -13,7 +13,7 @@ import {
 } from "./approvedWorkspaceRoot.cjs";
 
 configureE2eRuntimePaths();
-import { promises as fs } from "node:fs";
+import { promises as fs, realpathSync } from "node:fs";
 import { scanProject } from "./projectScanner.cjs";
 import {
   commitGit,
@@ -62,6 +62,14 @@ import {
   gitPushAllowsLocalRemotes,
   prepareGitPush,
 } from "./gitPush.cjs";
+import {
+  cancelGitBranchToken,
+  clearGitBranchSession,
+  executeApprovedGitBranch,
+  listLocalGitBranches,
+  prepareGitBranch,
+  revokeGitBranchOwner,
+} from "./gitBranch.cjs";
 import { createFsUndoIo, createLastEditStore, parseUndoBatchEntries } from "./lastEditBatch.cjs";
 import { runVerification, type VerificationResult } from "./verifier.cjs";
 import {
@@ -285,6 +293,7 @@ function createWindow(): void {
   mainWindow.on("closed", () => {
     mainWindow = null;
     clearGitPushSession();
+    void clearGitBranchSession();
   });
 
   if (DEV_SERVER_URL) {
@@ -301,6 +310,7 @@ async function switchProjectRoot(selected: string): Promise<void> {
     projectRoot = root;
     lastEditStore.clear();
     clearGitPushSession();
+    await clearGitBranchSession();
     hydrateProjectAfterSwitch(root);
     await activateProjectIndex(root, () => mainWindow);
   });
@@ -504,6 +514,64 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle("git:pushCancel", async (_event, token: unknown) => {
     if (typeof token === "string") cancelGitPushToken(token);
+    return { ok: true as const };
+  });
+
+  ipcMain.handle("git:listLocalBranches", async () => {
+    if (!projectRoot) {
+      return { ok: false as const, code: "no_project" as const, message: "Open a project before changing branches." };
+    }
+    return listLocalGitBranches(projectRoot);
+  });
+
+  const branchOwnersBound = new Set<number>();
+  const bindBranchOwner = (sender: Electron.WebContents): number => {
+    const ownerId = sender.id;
+    if (!branchOwnersBound.has(ownerId)) {
+      branchOwnersBound.add(ownerId);
+      sender.once("destroyed", () => {
+        branchOwnersBound.delete(ownerId);
+        revokeGitBranchOwner(ownerId);
+      });
+    }
+    return ownerId;
+  };
+
+  ipcMain.handle("git:branchPreflight", async (event, payload: unknown) => {
+    if (!projectRoot) {
+      return { ok: false as const, code: "no_project" as const, message: "Open a project before changing branches." };
+    }
+    const ownerId = bindBranchOwner(event.sender);
+    const body =
+      payload && typeof payload === "object"
+        ? (payload as { op?: unknown; destination?: unknown })
+        : {};
+    return prepareGitBranch(projectRoot, { op: body.op, destination: body.destination }, { ownerId });
+  });
+
+  ipcMain.handle("git:branchExecute", async (event, token: unknown) => {
+    if (!projectRoot) {
+      return { ok: false as const, code: "no_project" as const, message: "Open a project before changing branches." };
+    }
+    if (typeof token !== "string") {
+      return { ok: false as const, code: "token_invalid" as const, message: "Branch approval expired. Start again from the Git view." };
+    }
+    const ownerId = bindBranchOwner(event.sender);
+    return executeApprovedGitBranch(projectRoot, token, {
+      ownerId,
+      isStillOpenRoot: (canonical) => {
+        if (!projectRoot) return false;
+        try {
+          return realpathSync(projectRoot) === canonical;
+        } catch {
+          return false;
+        }
+      },
+    });
+  });
+
+  ipcMain.handle("git:branchCancel", async (event, token: unknown) => {
+    if (typeof token === "string") cancelGitBranchToken(token, event.sender.id);
     return { ok: true as const };
   });
 

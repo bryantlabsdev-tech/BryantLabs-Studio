@@ -2595,6 +2595,29 @@
   background: var(--bg-surface-2);
 }
 
+.git-view__branch-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.git-view__branch-select,
+.git-view__branch-input {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-surface-2);
+  color: inherit;
+  max-width: 220px;
+}
+
+.git-view__branch-create {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .git-view__dirty {
   font-size: 11px;
   color: var(--text-muted);

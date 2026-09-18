@@ -143,6 +143,11 @@ const api = {
   gitPushPreflight: () => ipcRenderer.invoke("git:pushPreflight"),
   gitPushExecute: (token: string) => ipcRenderer.invoke("git:pushExecute", token),
   gitPushCancel: (token: string) => ipcRenderer.invoke("git:pushCancel", token),
+  gitListLocalBranches: () => ipcRenderer.invoke("git:listLocalBranches"),
+  gitBranchPreflight: (payload: { op: "create" | "switch"; destination: string }) =>
+    ipcRenderer.invoke("git:branchPreflight", payload),
+  gitBranchExecute: (token: string) => ipcRenderer.invoke("git:branchExecute", token),
+  gitBranchCancel: (token: string) => ipcRenderer.invoke("git:branchCancel", token),
   applyEdit: (
     filePath: string,
     expectedBefore: string,

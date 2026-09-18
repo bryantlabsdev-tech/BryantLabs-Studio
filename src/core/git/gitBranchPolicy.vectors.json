@@ -1,0 +1,21 @@
+{
+  "safeNames": ["feature/safe-branch", "hotfix-1.2", "main"],
+  "unsafeNames": ["-c", "--force", "HEAD", "foo;rm", "feat\nmaster", "origin/main", ""],
+  "createContains": [
+    "-c",
+    "core.hooksPath=/dev/null",
+    "alias.switch=",
+    "switch",
+    "--no-guess",
+    "--create",
+    "feature/x"
+  ],
+  "switchContains": [
+    "alias.switch=",
+    "switch",
+    "--no-guess",
+    "--end-of-options",
+    "feature/x"
+  ],
+  "forbiddenTokens": ["--force", "--detach", "--guess", "HEAD", "-C", "--discard-changes", "origin", "refs/heads"]
+}
