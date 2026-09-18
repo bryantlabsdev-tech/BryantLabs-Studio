@@ -551,6 +551,23 @@ export interface WorkspaceState {
     token: string,
   ): Promise<import("@/core/git/gitBranchPolicy").GitBranchExecuteResult>;
   gitBranchCancel(token: string): Promise<{ readonly ok: true }>;
+  gitListWorktrees(): Promise<import("@/core/git/gitWorktreePolicy").GitWorktreeListResult>;
+  gitWorktreeCreatePreflight(payload: {
+    readonly destinationBranch: string;
+  }): Promise<import("@/core/git/gitWorktreePolicy").GitWorktreeCreatePreflightResult>;
+  gitWorktreeCreateExecute(
+    token: string,
+  ): Promise<import("@/core/git/gitWorktreePolicy").GitWorktreeExecuteResult>;
+  gitWorktreeRemovePreflight(payload: {
+    readonly id: string;
+  }): Promise<import("@/core/git/gitWorktreePolicy").GitWorktreeRemovePreflightResult>;
+  gitWorktreeRemoveExecute(
+    token: string,
+  ): Promise<import("@/core/git/gitWorktreePolicy").GitWorktreeExecuteResult>;
+  gitWorktreeCancel(token: string): Promise<{ readonly ok: true }>;
+  gitWorktreeOpen(payload: {
+    readonly id: string;
+  }): Promise<import("@/core/git/gitWorktreePolicy").GitWorktreeOpenResult>;
   selectGitPath(relPath: string | null): void;
   // ---- Run persistence (resume after restart) ----
   readonly pendingRunCheckpoint: PersistedRunCheckpoint | null;

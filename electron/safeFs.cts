@@ -196,6 +196,10 @@ export async function writeBryantlabsJson(
     logFailure(logTag, "write failed — path traversal blocked");
     return { ok: false, reason: "Invalid relative path." };
   }
+  const { shouldPersistBryantlabsRelative } = await import("./gitWorktree.cjs");
+  if (!(await shouldPersistBryantlabsRelative(check.path, norm))) {
+    return { ok: false, reason: "Studio-managed worktrees do not persist that project metadata." };
+  }
 
   const ensured = await ensureBryantlabsDir(check.path);
   if (!ensured.ok) {

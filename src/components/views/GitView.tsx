@@ -5,8 +5,14 @@ import { MonacoDiffView } from "@/components/editor/MonacoDiffView";
 import type { GitFileEntry } from "@/core/git/types";
 import type { GitPushPreflightOk } from "@/core/git/gitPushPolicy";
 import type { GitBranchPreflightOk } from "@/core/git/gitBranchPolicy";
+import type {
+  GitWorktreeCreatePreflightOk,
+  GitWorktreeListEntry,
+  GitWorktreeRemovePreflightOk,
+} from "@/core/git/gitWorktreePolicy";
 import {
   GIT_BRANCH_IPC_FAILURE_MESSAGE,
+  GIT_WORKTREE_IPC_FAILURE_MESSAGE,
   isBackdropDismissTarget,
   nextDialogControl,
 } from "@/components/views/gitConfirmDialog";
@@ -103,6 +109,13 @@ export function GitView() {
     gitBranchPreflight,
     gitBranchExecute,
     gitBranchCancel,
+    gitListWorktrees,
+    gitWorktreeCreatePreflight,
+    gitWorktreeCreateExecute,
+    gitWorktreeRemovePreflight,
+    gitWorktreeRemoveExecute,
+    gitWorktreeCancel,
+    gitWorktreeOpen,
     selectGitPath,
     openPath,
   } = useWorkspace();
@@ -118,6 +131,14 @@ export function GitView() {
   const [branchPreflight, setBranchPreflight] = useState<GitBranchPreflightOk | null>(null);
   const [branching, setBranching] = useState(false);
   const [branchNotice, setBranchNotice] = useState<string | null>(null);
+  const [worktrees, setWorktrees] = useState<readonly GitWorktreeListEntry[]>([]);
+  const [newWorktreeBranch, setNewWorktreeBranch] = useState("");
+  const [createWorktreePreflight, setCreateWorktreePreflight] =
+    useState<GitWorktreeCreatePreflightOk | null>(null);
+  const [removeWorktreePreflight, setRemoveWorktreePreflight] =
+    useState<GitWorktreeRemovePreflightOk | null>(null);
+  const [worktreeBusy, setWorktreeBusy] = useState(false);
+  const [worktreeNotice, setWorktreeNotice] = useState<string | null>(null);
   const projectPath = project?.path ?? null;
   const projectPathRef = useRef(projectPath);
   projectPathRef.current = projectPath;
@@ -129,6 +150,12 @@ export function GitView() {
   const branchSelectRef = useRef<HTMLSelectElement>(null);
   const branchCreateButtonRef = useRef<HTMLButtonElement>(null);
   const branchInvokerRef = useRef<"select" | "create" | null>(null);
+  const worktreeCreateTokenRef = useRef<string | null>(null);
+  const worktreeRemoveTokenRef = useRef<string | null>(null);
+  const worktreeCancelButtonRef = useRef<HTMLButtonElement>(null);
+  const worktreeConfirmButtonRef = useRef<HTMLButtonElement>(null);
+  const worktreeCreateButtonRef = useRef<HTMLButtonElement>(null);
+  const worktreeInvokerRef = useRef<HTMLElement | null>(null);
   const aliveRef = useRef(true);
 
   const stagedFiles = useMemo(
@@ -302,6 +329,181 @@ export function GitView() {
     }
   }, [branchPreflight, branching, gitBranchExecute, gitListLocalBranches]);
 
+  const closeWorktreeDialog = useCallback(() => {
+    const createId = worktreeCreateTokenRef.current;
+    const removeId = worktreeRemoveTokenRef.current;
+    worktreeCreateTokenRef.current = null;
+    worktreeRemoveTokenRef.current = null;
+    setCreateWorktreePreflight(null);
+    setRemoveWorktreePreflight(null);
+    if (createId) void gitWorktreeCancel(createId);
+    if (removeId) void gitWorktreeCancel(removeId);
+    const invoker = worktreeInvokerRef.current;
+    worktreeInvokerRef.current = null;
+    queueMicrotask(() => invoker?.focus());
+  }, [gitWorktreeCancel]);
+
+  const handleCreateWorktreeClick = useCallback(async () => {
+    if (
+      worktreeBusy ||
+      createWorktreePreflight ||
+      removeWorktreePreflight ||
+      branching ||
+      branchPreflight ||
+      pushing ||
+      pushPreflight
+    ) {
+      return;
+    }
+    const destinationBranch = newWorktreeBranch.trim();
+    if (!destinationBranch) return;
+    setWorktreeNotice(null);
+    const pathAtStart = projectPathRef.current;
+    try {
+      const result = await gitWorktreeCreatePreflight({ destinationBranch });
+      if (!aliveRef.current || pathAtStart !== projectPathRef.current) {
+        if (result.ok) void gitWorktreeCancel(result.token);
+        return;
+      }
+      if (!result.ok) return;
+      worktreeInvokerRef.current = worktreeCreateButtonRef.current;
+      worktreeCreateTokenRef.current = result.token;
+      setCreateWorktreePreflight(result);
+    } catch {
+      if (!aliveRef.current || pathAtStart !== projectPathRef.current) return;
+      setWorktreeNotice(GIT_WORKTREE_IPC_FAILURE_MESSAGE);
+    }
+  }, [
+    branchPreflight,
+    branching,
+    createWorktreePreflight,
+    gitWorktreeCancel,
+    gitWorktreeCreatePreflight,
+    newWorktreeBranch,
+    pushPreflight,
+    pushing,
+    removeWorktreePreflight,
+    worktreeBusy,
+  ]);
+
+  const handleCreateWorktreeConfirm = useCallback(async () => {
+    if (!createWorktreePreflight || worktreeBusy) return;
+    const pathAtStart = projectPathRef.current;
+    const token = createWorktreePreflight.token;
+    setWorktreeBusy(true);
+    try {
+      const result = await gitWorktreeCreateExecute(token);
+      worktreeCreateTokenRef.current = null;
+      if (!aliveRef.current || pathAtStart !== projectPathRef.current) return;
+      setCreateWorktreePreflight(null);
+      if (result.ok) {
+        setNewWorktreeBranch("");
+        setWorktreeNotice(result.summary);
+        const listed = await gitListWorktrees();
+        if (listed.ok && pathAtStart === projectPathRef.current) setWorktrees(listed.entries);
+      } else {
+        setWorktreeNotice(result.message);
+      }
+    } catch {
+      if (!aliveRef.current || pathAtStart !== projectPathRef.current) return;
+      worktreeCreateTokenRef.current = null;
+      setCreateWorktreePreflight(null);
+      setWorktreeNotice(GIT_WORKTREE_IPC_FAILURE_MESSAGE);
+    } finally {
+      if (aliveRef.current && pathAtStart === projectPathRef.current) setWorktreeBusy(false);
+    }
+  }, [createWorktreePreflight, gitListWorktrees, gitWorktreeCreateExecute, worktreeBusy]);
+
+  const handleRemoveWorktreeClick = useCallback(
+    async (id: string, invoker: HTMLElement | null) => {
+      if (
+        worktreeBusy ||
+        createWorktreePreflight ||
+        removeWorktreePreflight ||
+        branching ||
+        branchPreflight ||
+        pushing ||
+        pushPreflight
+      ) {
+        return;
+      }
+      setWorktreeNotice(null);
+      const pathAtStart = projectPathRef.current;
+      try {
+        const result = await gitWorktreeRemovePreflight({ id });
+        if (!aliveRef.current || pathAtStart !== projectPathRef.current) {
+          if (result.ok) void gitWorktreeCancel(result.token);
+          return;
+        }
+        if (!result.ok) return;
+        worktreeInvokerRef.current = invoker;
+        worktreeRemoveTokenRef.current = result.token;
+        setRemoveWorktreePreflight(result);
+      } catch {
+        if (!aliveRef.current || pathAtStart !== projectPathRef.current) return;
+        setWorktreeNotice(GIT_WORKTREE_IPC_FAILURE_MESSAGE);
+      }
+    },
+    [
+      branchPreflight,
+      branching,
+      createWorktreePreflight,
+      gitWorktreeCancel,
+      gitWorktreeRemovePreflight,
+      pushPreflight,
+      pushing,
+      removeWorktreePreflight,
+      worktreeBusy,
+    ],
+  );
+
+  const handleRemoveWorktreeConfirm = useCallback(async () => {
+    if (!removeWorktreePreflight || worktreeBusy) return;
+    const pathAtStart = projectPathRef.current;
+    const token = removeWorktreePreflight.token;
+    setWorktreeBusy(true);
+    try {
+      const result = await gitWorktreeRemoveExecute(token);
+      worktreeRemoveTokenRef.current = null;
+      if (!aliveRef.current || pathAtStart !== projectPathRef.current) return;
+      setRemoveWorktreePreflight(null);
+      if (result.ok) {
+        setWorktreeNotice(result.summary);
+        const listed = await gitListWorktrees();
+        if (listed.ok && pathAtStart === projectPathRef.current) setWorktrees(listed.entries);
+      } else {
+        setWorktreeNotice(result.message);
+      }
+    } catch {
+      if (!aliveRef.current || pathAtStart !== projectPathRef.current) return;
+      worktreeRemoveTokenRef.current = null;
+      setRemoveWorktreePreflight(null);
+      setWorktreeNotice(GIT_WORKTREE_IPC_FAILURE_MESSAGE);
+    } finally {
+      if (aliveRef.current && pathAtStart === projectPathRef.current) setWorktreeBusy(false);
+    }
+  }, [gitListWorktrees, gitWorktreeRemoveExecute, removeWorktreePreflight, worktreeBusy]);
+
+  const handleOpenWorktree = useCallback(
+    async (id: string) => {
+      if (worktreeBusy || createWorktreePreflight || removeWorktreePreflight) return;
+      setWorktreeNotice(null);
+      const pathAtStart = projectPathRef.current;
+      setWorktreeBusy(true);
+      try {
+        const result = await gitWorktreeOpen({ id });
+        if (!aliveRef.current) return;
+        if (result.ok) setWorktreeNotice("Opened worktree as the active project.");
+      } catch {
+        if (!aliveRef.current || pathAtStart !== projectPathRef.current) return;
+        setWorktreeNotice(GIT_WORKTREE_IPC_FAILURE_MESSAGE);
+      } finally {
+        if (aliveRef.current) setWorktreeBusy(false);
+      }
+    },
+    [createWorktreePreflight, gitWorktreeOpen, removeWorktreePreflight, worktreeBusy],
+  );
+
   useEffect(() => {
     aliveRef.current = true;
     return () => {
@@ -312,8 +514,14 @@ export function GitView() {
       const branchId = branchTokenRef.current;
       branchTokenRef.current = null;
       if (branchId) void gitBranchCancel(branchId);
+      const createWt = worktreeCreateTokenRef.current;
+      const removeWt = worktreeRemoveTokenRef.current;
+      worktreeCreateTokenRef.current = null;
+      worktreeRemoveTokenRef.current = null;
+      if (createWt) void gitWorktreeCancel(createWt);
+      if (removeWt) void gitWorktreeCancel(removeWt);
     };
-  }, [gitBranchCancel, gitPushCancel]);
+  }, [gitBranchCancel, gitPushCancel, gitWorktreeCancel]);
 
   useEffect(() => {
     setPushPreflight(null);
@@ -324,13 +532,24 @@ export function GitView() {
     setBranchNotice(null);
     setLocalBranches([]);
     setBranchPanelDirty(false);
+    setWorktrees([]);
+    setCreateWorktreePreflight(null);
+    setRemoveWorktreePreflight(null);
+    setWorktreeBusy(false);
+    setWorktreeNotice(null);
     const id = tokenRef.current;
     tokenRef.current = null;
     if (id) void gitPushCancel(id);
     const branchId = branchTokenRef.current;
     branchTokenRef.current = null;
     if (branchId) void gitBranchCancel(branchId);
-  }, [projectPath, gitPushCancel, gitBranchCancel]);
+    const createWt = worktreeCreateTokenRef.current;
+    const removeWt = worktreeRemoveTokenRef.current;
+    worktreeCreateTokenRef.current = null;
+    worktreeRemoveTokenRef.current = null;
+    if (createWt) void gitWorktreeCancel(createWt);
+    if (removeWt) void gitWorktreeCancel(removeWt);
+  }, [projectPath, gitPushCancel, gitBranchCancel, gitWorktreeCancel]);
 
   useEffect(() => {
     if (!pushPreflight) return;
@@ -343,17 +562,36 @@ export function GitView() {
   }, [branchPreflight]);
 
   useEffect(() => {
-    if (!pushPreflight && !branchPreflight) return;
+    if (!createWorktreePreflight && !removeWorktreePreflight) return;
+    worktreeCancelButtonRef.current?.focus();
+  }, [createWorktreePreflight, removeWorktreePreflight]);
+
+  useEffect(() => {
+    if (!pushPreflight && !branchPreflight && !createWorktreePreflight && !removeWorktreePreflight) {
+      return;
+    }
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (pushing || branching) return;
+      if (pushing || branching || worktreeBusy) return;
       event.preventDefault();
-      if (branchPreflight) closeBranchDialog();
+      if (createWorktreePreflight || removeWorktreePreflight) closeWorktreeDialog();
+      else if (branchPreflight) closeBranchDialog();
       else closePushDialog();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [branchPreflight, branching, closeBranchDialog, closePushDialog, pushPreflight, pushing]);
+  }, [
+    branchPreflight,
+    branching,
+    closeBranchDialog,
+    closePushDialog,
+    closeWorktreeDialog,
+    createWorktreePreflight,
+    pushPreflight,
+    pushing,
+    removeWorktreePreflight,
+    worktreeBusy,
+  ]);
 
   useEffect(() => {
     if (!projectPath) return;
@@ -363,10 +601,21 @@ export function GitView() {
       setLocalBranches(result.branches);
       setBranchPanelDirty(result.dirty);
     });
+    void gitListWorktrees().then((result) => {
+      if (cancelled || !result.ok) return;
+      setWorktrees(result.entries);
+    });
     return () => {
       cancelled = true;
     };
-  }, [gitListLocalBranches, gitStatus?.branch, gitStatus?.dirtyCount, gitStatusLoading, projectPath]);
+  }, [
+    gitListLocalBranches,
+    gitListWorktrees,
+    gitStatus?.branch,
+    gitStatus?.dirtyCount,
+    gitStatusLoading,
+    projectPath,
+  ]);
 
   useEffect(() => {
     if (!gitStatus?.files.length) return;
@@ -378,6 +627,16 @@ export function GitView() {
     }
     selectGitPath(gitStatus.files[0]?.path ?? null);
   }, [gitStatus, selectedGitPath, selectGitPath]);
+
+  const gitLocked =
+    gitStatusLoading ||
+    pushing ||
+    branching ||
+    worktreeBusy ||
+    pushPreflight !== null ||
+    branchPreflight !== null ||
+    createWorktreePreflight !== null ||
+    removeWorktreePreflight !== null;
 
   if (!project) {
     return (
@@ -412,11 +671,7 @@ export function GitView() {
             aria-label={`Current local branch ${gitStatus.branch ?? ""}. Choose another local branch to switch.`}
             value={gitStatus.branch ?? ""}
             disabled={
-              gitStatusLoading ||
-              pushing ||
-              branching ||
-              pushPreflight !== null ||
-              branchPreflight !== null ||
+              gitLocked ||
               !gitStatus.branch ||
               branchPanelDirty
             }
@@ -457,11 +712,7 @@ export function GitView() {
               onChange={(event) => setNewBranchName(event.target.value)}
               placeholder="new-branch"
               disabled={
-                gitStatusLoading ||
-                pushing ||
-                branching ||
-                pushPreflight !== null ||
-                branchPreflight !== null ||
+                gitLocked ||
                 !gitStatus.branch ||
                 branchPanelDirty
               }
@@ -474,11 +725,7 @@ export function GitView() {
               aria-label="Create new local branch from current HEAD"
               aria-haspopup="dialog"
               disabled={
-                gitStatusLoading ||
-                pushing ||
-                branching ||
-                pushPreflight !== null ||
-                branchPreflight !== null ||
+                gitLocked ||
                 !gitStatus.branch ||
                 branchPanelDirty ||
                 newBranchName.trim().length === 0
@@ -491,7 +738,7 @@ export function GitView() {
             type="button"
             className="git-view__refresh"
             onClick={() => void refreshGitStatus()}
-            disabled={gitStatusLoading || pushing || branching}
+            disabled={gitLocked}
           >
             {gitStatusLoading ? "Refreshing…" : "Refresh"}
           </button>
@@ -502,13 +749,7 @@ export function GitView() {
             aria-label="Push current branch to origin"
             aria-haspopup="dialog"
             onClick={() => void handlePushClick()}
-            disabled={
-              gitStatusLoading ||
-              pushing ||
-              branching ||
-              pushPreflight !== null ||
-              branchPreflight !== null
-            }
+            disabled={gitLocked}
           >
             Push
           </button>
@@ -524,6 +765,12 @@ export function GitView() {
       {branchNotice ? (
         <p className="git-view__notice" role="status" data-testid="git-branch-notice">
           {branchNotice}
+        </p>
+      ) : null}
+
+      {worktreeNotice ? (
+        <p className="git-view__notice" role="status" data-testid="git-worktree-notice">
+          {worktreeNotice}
         </p>
       ) : null}
 
@@ -728,8 +975,253 @@ export function GitView() {
         </div>
       ) : null}
 
+      {createWorktreePreflight ? (
+        <div
+          className="git-push-dialog__backdrop"
+          role="presentation"
+          onClick={(event) => {
+            if (worktreeBusy) return;
+            if (isBackdropDismissTarget(event.target, event.currentTarget)) {
+              closeWorktreeDialog();
+            }
+          }}
+        >
+          <div
+            className="git-push-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="git-worktree-create-title"
+            aria-describedby="git-worktree-create-lead"
+            data-testid="git-worktree-create-dialog"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key !== "Tab") return;
+              event.preventDefault();
+              const next = nextDialogControl(
+                event.currentTarget.contains(worktreeConfirmButtonRef.current) &&
+                  document.activeElement === worktreeConfirmButtonRef.current
+                  ? "confirm"
+                  : "cancel",
+                event.shiftKey,
+              );
+              if (next === "cancel") worktreeCancelButtonRef.current?.focus();
+              else worktreeConfirmButtonRef.current?.focus();
+            }}
+          >
+            <h3 id="git-worktree-create-title" className="git-push-dialog__title">
+              Create an isolated Studio worktree?
+            </h3>
+            <p id="git-worktree-create-lead" className="git-push-dialog__lead">
+              Studio will create a new local branch <strong>{createWorktreePreflight.destinationBranch}</strong>{" "}
+              from the current HEAD of <strong>{createWorktreePreflight.sourceBranch}</strong> (
+              {createWorktreePreflight.headSha.slice(0, 12)}) and check it out in a new directory at{" "}
+              <strong>{createWorktreePreflight.locationLabel}</strong>. The current project files and HEAD
+              stay unchanged. This writes to the filesystem and Git.
+            </p>
+            <div className="git-push-dialog__actions">
+              <button
+                type="button"
+                ref={worktreeCancelButtonRef}
+                className="git-view__refresh"
+                data-testid="git-worktree-create-cancel"
+                aria-label={`Cancel creating worktree ${createWorktreePreflight.destinationBranch}`}
+                disabled={worktreeBusy}
+                onClick={() => closeWorktreeDialog()}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                ref={worktreeConfirmButtonRef}
+                className="git-view__push git-view__push--confirm"
+                data-testid="git-worktree-create-confirm"
+                aria-label={`Confirm create worktree ${createWorktreePreflight.destinationBranch}`}
+                aria-busy={worktreeBusy}
+                disabled={worktreeBusy}
+                onClick={() => void handleCreateWorktreeConfirm()}
+              >
+                {worktreeBusy ? "Working…" : "Confirm create"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {removeWorktreePreflight ? (
+        <div
+          className="git-push-dialog__backdrop"
+          role="presentation"
+          onClick={(event) => {
+            if (worktreeBusy) return;
+            if (isBackdropDismissTarget(event.target, event.currentTarget)) {
+              closeWorktreeDialog();
+            }
+          }}
+        >
+          <div
+            className="git-push-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="git-worktree-remove-title"
+            aria-describedby="git-worktree-remove-lead"
+            data-testid="git-worktree-remove-dialog"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key !== "Tab") return;
+              event.preventDefault();
+              const next = nextDialogControl(
+                event.currentTarget.contains(worktreeConfirmButtonRef.current) &&
+                  document.activeElement === worktreeConfirmButtonRef.current
+                  ? "confirm"
+                  : "cancel",
+                event.shiftKey,
+              );
+              if (next === "cancel") worktreeCancelButtonRef.current?.focus();
+              else worktreeConfirmButtonRef.current?.focus();
+            }}
+          >
+            <h3 id="git-worktree-remove-title" className="git-push-dialog__title">
+              Remove this Studio worktree?
+            </h3>
+            <p id="git-worktree-remove-lead" className="git-push-dialog__lead">
+              Studio will unregister and delete the managed directory for{" "}
+              <strong>{removeWorktreePreflight.branch}</strong> at{" "}
+              <strong>{removeWorktreePreflight.locationLabel}</strong>. The local branch is kept. This
+              writes to the filesystem and Git.
+            </p>
+            <div className="git-push-dialog__actions">
+              <button
+                type="button"
+                ref={worktreeCancelButtonRef}
+                className="git-view__refresh"
+                data-testid="git-worktree-remove-cancel"
+                aria-label={`Cancel removing worktree ${removeWorktreePreflight.branch}`}
+                disabled={worktreeBusy}
+                onClick={() => closeWorktreeDialog()}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                ref={worktreeConfirmButtonRef}
+                className="git-view__push git-view__push--confirm"
+                data-testid="git-worktree-remove-confirm"
+                aria-label={`Confirm remove worktree ${removeWorktreePreflight.branch}`}
+                aria-busy={worktreeBusy}
+                disabled={worktreeBusy}
+                onClick={() => void handleRemoveWorktreeConfirm()}
+              >
+                {worktreeBusy ? "Working…" : "Confirm remove"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="git-view__layout">
         <aside className="git-view__sidebar">
+          <section className="git-view__section" data-testid="git-worktrees-section">
+            <div className="git-view__section-head">
+              <h3 className="git-view__section-title">Worktrees</h3>
+            </div>
+            <form
+              className="git-view__branch-create"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleCreateWorktreeClick();
+              }}
+            >
+              <label className="visually-hidden" htmlFor="git-worktree-new">
+                New worktree branch name
+              </label>
+              <input
+                id="git-worktree-new"
+                className="git-view__branch-input"
+                data-testid="git-worktree-new"
+                value={newWorktreeBranch}
+                onChange={(event) => setNewWorktreeBranch(event.target.value)}
+                placeholder="isolated-branch"
+                disabled={gitLocked || !gitStatus.branch || branchPanelDirty}
+              />
+              <button
+                type="submit"
+                ref={worktreeCreateButtonRef}
+                className="git-view__refresh"
+                data-testid="git-worktree-create-btn"
+                aria-label="Create isolated Studio worktree from current HEAD"
+                aria-haspopup="dialog"
+                disabled={
+                  gitLocked ||
+                  !gitStatus.branch ||
+                  branchPanelDirty ||
+                  newWorktreeBranch.trim().length === 0
+                }
+              >
+                Create worktree
+              </button>
+            </form>
+            {worktrees.length === 0 ? (
+              <p className="git-view__empty">No worktrees listed</p>
+            ) : (
+              <ul className="git-view__worktrees">
+                {worktrees.map((entry) => (
+                  <li
+                    key={entry.id}
+                    className="git-view__worktree"
+                    data-testid="git-worktree-row"
+                    data-worktree-kind={entry.kind}
+                    data-worktree-branch={entry.branch ?? ""}
+                    data-worktree-dirty={entry.dirty ? "1" : "0"}
+                    data-worktree-active={entry.active ? "1" : "0"}
+                    data-worktree-can-remove={entry.canRemove ? "1" : "0"}
+                  >
+                    <div className="git-view__worktree-main">
+                      <span className="git-view__worktree-branch">
+                        {entry.branch ?? "detached"}
+                      </span>
+                      <span className="git-view__file-badge">{entry.displayLabel}</span>
+                      <span className="git-view__worktree-meta">{entry.locationLabel}</span>
+                      <span className="git-view__worktree-meta">{entry.headShort}</span>
+                      <span className="git-view__worktree-meta">
+                        {entry.active ? "Active" : "Inactive"}
+                      </span>
+                      <span className="git-view__worktree-meta">
+                        {entry.dirty ? "Dirty" : "Clean"}
+                      </span>
+                    </div>
+                    <div className="git-view__file-actions">
+                      <button
+                        type="button"
+                        className="git-view__mini-btn"
+                        data-testid="git-worktree-open"
+                        disabled={gitLocked || !entry.canOpen || entry.active}
+                        onClick={() => void handleOpenWorktree(entry.id)}
+                      >
+                        Open
+                      </button>
+                      {entry.kind === "studio" ? (
+                        <button
+                          type="button"
+                          className="git-view__mini-btn git-view__mini-btn--danger"
+                          data-testid="git-worktree-remove"
+                          aria-haspopup="dialog"
+                          disabled={gitLocked || !entry.canRemove}
+                          onClick={(event) =>
+                            void handleRemoveWorktreeClick(entry.id, event.currentTarget)
+                          }
+                        >
+                          Remove
+                        </button>
+                      ) : (
+                        <span className="git-view__worktree-meta">Read-only</span>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           <section className="git-view__section">
             <div className="git-view__section-head">
               <h3 className="git-view__section-title">Staged</h3>

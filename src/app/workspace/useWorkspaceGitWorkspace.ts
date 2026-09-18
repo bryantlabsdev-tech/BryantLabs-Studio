@@ -318,6 +318,126 @@ export function useWorkspaceGitWorkspace(input: {
     return current.api.gitBranchCancel(token);
   }, []);
 
+  const gitListWorktrees = useCallback(async () => {
+    const current = inputRef.current;
+    if (!current.api?.gitListWorktrees) {
+      return {
+        ok: false as const,
+        code: "no_project" as const,
+        message: "Git worktrees are unavailable.",
+      };
+    }
+    return current.api.gitListWorktrees();
+  }, []);
+
+  const gitWorktreeCreatePreflight = useCallback(async (payload: { readonly destinationBranch: string }) => {
+    const current = inputRef.current;
+    if (!current.api?.gitWorktreeCreatePreflight) {
+      return {
+        ok: false as const,
+        code: "no_project" as const,
+        message: "Git worktrees are unavailable.",
+      };
+    }
+    const startedPath = current.projectPath;
+    current.setGitActionError(null);
+    try {
+      const result = await current.api.gitWorktreeCreatePreflight(payload);
+      if (inputRef.current.projectPath !== startedPath) return result;
+      if (!result.ok) current.setGitActionError(result.message);
+      return result;
+    } catch {
+      if (inputRef.current.projectPath !== startedPath) {
+        return { ok: false as const, code: "generic_failure" as const, message: "Worktree change failed." };
+      }
+      current.setGitActionError("Worktree change failed.");
+      return { ok: false as const, code: "generic_failure" as const, message: "Worktree change failed." };
+    }
+  }, []);
+
+  const gitWorktreeCreateExecute = useCallback(
+    async (token: string) => {
+      const current = inputRef.current;
+      if (!current.api?.gitWorktreeCreateExecute) {
+        return { ok: false as const, code: "no_project" as const, message: "Git worktrees are unavailable." };
+      }
+      const startedPath = current.projectPath;
+      current.setGitActionError(null);
+      try {
+        const result = await current.api.gitWorktreeCreateExecute(token);
+        if (inputRef.current.projectPath !== startedPath) return result;
+        if (!result.ok) {
+          current.setGitActionError(result.message);
+          return result;
+        }
+        await refreshGitStatus();
+        return result;
+      } catch {
+        if (inputRef.current.projectPath !== startedPath) {
+          return { ok: false as const, code: "generic_failure" as const, message: "Worktree change failed." };
+        }
+        current.setGitActionError("Worktree change failed.");
+        return { ok: false as const, code: "generic_failure" as const, message: "Worktree change failed." };
+      }
+    },
+    [refreshGitStatus],
+  );
+
+  const gitWorktreeRemovePreflight = useCallback(async (payload: { readonly id: string }) => {
+    const current = inputRef.current;
+    if (!current.api?.gitWorktreeRemovePreflight) {
+      return { ok: false as const, code: "no_project" as const, message: "Git worktrees are unavailable." };
+    }
+    const startedPath = current.projectPath;
+    current.setGitActionError(null);
+    try {
+      const result = await current.api.gitWorktreeRemovePreflight(payload);
+      if (inputRef.current.projectPath !== startedPath) return result;
+      if (!result.ok) current.setGitActionError(result.message);
+      return result;
+    } catch {
+      if (inputRef.current.projectPath !== startedPath) {
+        return { ok: false as const, code: "generic_failure" as const, message: "Worktree change failed." };
+      }
+      current.setGitActionError("Worktree change failed.");
+      return { ok: false as const, code: "generic_failure" as const, message: "Worktree change failed." };
+    }
+  }, []);
+
+  const gitWorktreeRemoveExecute = useCallback(
+    async (token: string) => {
+      const current = inputRef.current;
+      if (!current.api?.gitWorktreeRemoveExecute) {
+        return { ok: false as const, code: "no_project" as const, message: "Git worktrees are unavailable." };
+      }
+      const startedPath = current.projectPath;
+      current.setGitActionError(null);
+      try {
+        const result = await current.api.gitWorktreeRemoveExecute(token);
+        if (inputRef.current.projectPath !== startedPath) return result;
+        if (!result.ok) {
+          current.setGitActionError(result.message);
+          return result;
+        }
+        await refreshGitStatus();
+        return result;
+      } catch {
+        if (inputRef.current.projectPath !== startedPath) {
+          return { ok: false as const, code: "generic_failure" as const, message: "Worktree change failed." };
+        }
+        current.setGitActionError("Worktree change failed.");
+        return { ok: false as const, code: "generic_failure" as const, message: "Worktree change failed." };
+      }
+    },
+    [refreshGitStatus],
+  );
+
+  const gitWorktreeCancel = useCallback(async (token: string) => {
+    const current = inputRef.current;
+    if (!current.api?.gitWorktreeCancel) return { ok: true as const };
+    return current.api.gitWorktreeCancel(token);
+  }, []);
+
   return {
     refreshGitStatus,
     selectGitPath,
@@ -332,5 +452,11 @@ export function useWorkspaceGitWorkspace(input: {
     gitBranchPreflight,
     gitBranchExecute,
     gitBranchCancel,
+    gitListWorktrees,
+    gitWorktreeCreatePreflight,
+    gitWorktreeCreateExecute,
+    gitWorktreeRemovePreflight,
+    gitWorktreeRemoveExecute,
+    gitWorktreeCancel,
   };
 }
