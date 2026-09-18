@@ -7,6 +7,11 @@ describe("agentCommandAllowlist", () => {
     assert.equal(validateAgentCommand("npm run build").ok, true);
   });
 
+  it("blocks git push", () => {
+    assert.equal(validateAgentCommand("git push").ok, false);
+    assert.equal(validateAgentCommand("git push origin HEAD:main").ok, false);
+  });
+
   it("allows git status", () => {
     assert.equal(validateAgentCommand("git status").ok, true);
   });

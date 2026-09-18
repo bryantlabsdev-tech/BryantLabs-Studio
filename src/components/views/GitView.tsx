@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspace } from "@/app/workspaceContext";
 import { EmptyState } from "@/components/EmptyState";
 import { MonacoDiffView } from "@/components/editor/MonacoDiffView";
 import type { GitFileEntry } from "@/core/git/types";
+import type { GitPushPreflightOk } from "@/core/git/gitPushPolicy";
 
 function statusLabel(entry: GitFileEntry): string {
   if (entry.untracked) return "Untracked";
@@ -89,12 +90,24 @@ export function GitView() {
     gitUnstage,
     gitRestore,
     gitCommit,
+    gitPushPreflight,
+    gitPushExecute,
+    gitPushCancel,
     selectGitPath,
     openPath,
   } = useWorkspace();
 
   const [commitMessage, setCommitMessage] = useState("");
   const [committing, setCommitting] = useState(false);
+  const [pushPreflight, setPushPreflight] = useState<GitPushPreflightOk | null>(null);
+  const [pushing, setPushing] = useState(false);
+  const [pushNotice, setPushNotice] = useState<string | null>(null);
+  const projectPath = project?.path ?? null;
+  const projectPathRef = useRef(projectPath);
+  projectPathRef.current = projectPath;
+  const tokenRef = useRef<string | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const aliveRef = useRef(true);
 
   const stagedFiles = useMemo(
     () => gitStatus?.files.filter((f) => f.staged) ?? [],
@@ -119,6 +132,79 @@ export function GitView() {
       setCommitMessage("");
     }
   }, [commitMessage, gitCommit]);
+
+  const closePushDialog = useCallback(() => {
+    const id = tokenRef.current;
+    tokenRef.current = null;
+    setPushPreflight(null);
+    if (id) void gitPushCancel(id);
+  }, [gitPushCancel]);
+
+  const handlePushClick = useCallback(async () => {
+    if (pushing || pushPreflight) return;
+    setPushNotice(null);
+    const pathAtStart = projectPathRef.current;
+    const result = await gitPushPreflight();
+    if (!aliveRef.current || pathAtStart !== projectPathRef.current) {
+      if (result.ok) void gitPushCancel(result.token);
+      return;
+    }
+    if (!result.ok) return;
+    tokenRef.current = result.token;
+    setPushPreflight(result);
+  }, [gitPushCancel, gitPushPreflight, pushing, pushPreflight]);
+
+  const handlePushConfirm = useCallback(async () => {
+    if (!pushPreflight || pushing) return;
+    const pathAtStart = projectPathRef.current;
+    const token = pushPreflight.token;
+    setPushing(true);
+    const result = await gitPushExecute(token);
+    tokenRef.current = null;
+    if (!aliveRef.current || pathAtStart !== projectPathRef.current) {
+      return;
+    }
+    setPushing(false);
+    setPushPreflight(null);
+    if (result.ok) {
+      setPushNotice(`Pushed ${result.branch} to origin.`);
+    }
+  }, [gitPushExecute, pushPreflight, pushing]);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      const id = tokenRef.current;
+      tokenRef.current = null;
+      if (id) void gitPushCancel(id);
+    };
+  }, [gitPushCancel]);
+
+  useEffect(() => {
+    setPushPreflight(null);
+    setPushing(false);
+    setPushNotice(null);
+    const id = tokenRef.current;
+    tokenRef.current = null;
+    if (id) void gitPushCancel(id);
+  }, [projectPath, gitPushCancel]);
+
+  useEffect(() => {
+    if (!pushPreflight) return;
+    cancelButtonRef.current?.focus();
+  }, [pushPreflight]);
+
+  useEffect(() => {
+    if (!pushPreflight) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || pushing) return;
+      event.preventDefault();
+      closePushDialog();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [closePushDialog, pushPreflight, pushing]);
 
   useEffect(() => {
     if (!gitStatus?.files.length) return;
@@ -162,20 +248,146 @@ export function GitView() {
               : `${gitStatus.dirtyCount} change${gitStatus.dirtyCount === 1 ? "" : "s"}`}
           </span>
         </div>
-        <button
-          type="button"
-          className="git-view__refresh"
-          onClick={() => void refreshGitStatus()}
-          disabled={gitStatusLoading}
-        >
-          {gitStatusLoading ? "Refreshing…" : "Refresh"}
-        </button>
+        <div className="git-view__header-actions">
+          <button
+            type="button"
+            className="git-view__refresh"
+            onClick={() => void refreshGitStatus()}
+            disabled={gitStatusLoading || pushing}
+          >
+            {gitStatusLoading ? "Refreshing…" : "Refresh"}
+          </button>
+          <button
+            type="button"
+            className="git-view__push"
+            data-testid="git-push-btn"
+            aria-label="Push current branch to origin"
+            aria-haspopup="dialog"
+            onClick={() => void handlePushClick()}
+            disabled={gitStatusLoading || pushing || pushPreflight !== null}
+          >
+            Push
+          </button>
+        </div>
       </header>
 
       {gitActionError ? (
         <p className="git-view__error" role="alert">
           {gitActionError}
         </p>
+      ) : null}
+
+      {pushNotice ? (
+        <p className="git-view__notice" role="status">
+          {pushNotice}
+        </p>
+      ) : null}
+
+      {pushPreflight ? (
+        <div
+          className="git-push-dialog__backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!pushing) closePushDialog();
+          }}
+        >
+          <div
+            className="git-push-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="git-push-title"
+            aria-describedby="git-push-lead git-push-irreversible"
+            data-testid="git-push-dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="git-push-title" className="git-push-dialog__title">
+              Push this branch to origin?
+            </h3>
+            <p id="git-push-lead" className="git-push-dialog__lead">
+              This updates the remote repository at{" "}
+              <strong>{pushPreflight.originDisplay}</strong> by pushing{" "}
+              <strong>{pushPreflight.branch}</strong> to{" "}
+              <strong>origin/{pushPreflight.branch}</strong>.
+            </p>
+            <p id="git-push-irreversible" className="git-push-dialog__lead">
+              This change on the remote cannot be undone from Studio. Force-push is
+              not available. Confirming sends only this branch.
+            </p>
+            <dl className="git-push-dialog__facts">
+              <div>
+                <dt>Repository</dt>
+                <dd>{pushPreflight.identity}</dd>
+              </div>
+              <div>
+                <dt>Remote</dt>
+                <dd>origin ({pushPreflight.originDisplay})</dd>
+              </div>
+              <div>
+                <dt>Branch</dt>
+                <dd>{pushPreflight.branch}</dd>
+              </div>
+              <div>
+                <dt>Upstream</dt>
+                <dd>
+                  {pushPreflight.upstream
+                    ? pushPreflight.upstream
+                    : "none — first push will set origin/" + pushPreflight.branch}
+                </dd>
+              </div>
+              <div>
+                <dt>Ahead / behind</dt>
+                <dd>
+                  {pushPreflight.ahead ?? "—"} ahead, {pushPreflight.behind ?? "—"} behind
+                </dd>
+              </div>
+              <div>
+                <dt>Commits</dt>
+                <dd>{pushPreflight.commitCount}</dd>
+              </div>
+            </dl>
+            {pushPreflight.commitSubjects.length > 0 ? (
+              <ul className="git-push-dialog__commits">
+                {pushPreflight.commitSubjects.map((item, index) => (
+                  <li key={`${index}:${item.subject}`}>{item.subject}</li>
+                ))}
+              </ul>
+            ) : null}
+            {pushPreflight.dirtyWarning ? (
+              <p className="git-push-dialog__warning" data-testid="git-push-dirty-warning">
+                {pushPreflight.dirtyWarning}
+              </p>
+            ) : null}
+            <p className="git-push-dialog__auth">
+              {pushPreflight.networkMayBeRequired
+                ? "This remote may require network access and your normal Git credentials."
+                : "This remote is local; no network authentication is required."}
+            </p>
+            <div className="git-push-dialog__actions">
+              <button
+                type="button"
+                ref={cancelButtonRef}
+                className="git-view__refresh"
+                data-testid="git-push-cancel"
+                aria-label="Cancel push"
+                disabled={pushing}
+                onClick={() => closePushDialog()}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="git-view__push git-view__push--confirm"
+                data-testid="git-push-confirm"
+                aria-label="Confirm push to origin"
+                aria-busy={pushing}
+                disabled={pushing}
+                onClick={() => void handlePushConfirm()}
+              >
+                {pushing ? "Pushing…" : "Confirm push"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       <div className="git-view__layout">

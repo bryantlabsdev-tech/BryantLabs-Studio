@@ -140,6 +140,9 @@ const api = {
   gitUnstage: (paths: string[]) => ipcRenderer.invoke("git:unstage", paths),
   gitRestore: (paths: string[]) => ipcRenderer.invoke("git:restore", paths),
   gitCommit: (message: string) => ipcRenderer.invoke("git:commit", message),
+  gitPushPreflight: () => ipcRenderer.invoke("git:pushPreflight"),
+  gitPushExecute: (token: string) => ipcRenderer.invoke("git:pushExecute", token),
+  gitPushCancel: (token: string) => ipcRenderer.invoke("git:pushCancel", token),
   applyEdit: (
     filePath: string,
     expectedBefore: string,
