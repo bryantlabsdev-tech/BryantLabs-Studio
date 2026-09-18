@@ -356,6 +356,23 @@ export interface BryantLabsApi {
     token: string,
   ): Promise<import("@/core/git/gitBranchPolicy").GitBranchExecuteResult>;
   gitBranchCancel(token: string): Promise<{ readonly ok: true }>;
+  gitListWorktrees(): Promise<import("@/core/git/gitWorktreePolicy").GitWorktreeListResult>;
+  gitWorktreeCreatePreflight(payload: {
+    readonly destinationBranch: string;
+  }): Promise<import("@/core/git/gitWorktreePolicy").GitWorktreeCreatePreflightResult>;
+  gitWorktreeCreateExecute(
+    token: string,
+  ): Promise<import("@/core/git/gitWorktreePolicy").GitWorktreeExecuteResult>;
+  gitWorktreeRemovePreflight(payload: {
+    readonly id: string;
+  }): Promise<import("@/core/git/gitWorktreePolicy").GitWorktreeRemovePreflightResult>;
+  gitWorktreeRemoveExecute(
+    token: string,
+  ): Promise<import("@/core/git/gitWorktreePolicy").GitWorktreeExecuteResult>;
+  gitWorktreeCancel(token: string): Promise<{ readonly ok: true }>;
+  gitWorktreeOpen(payload: {
+    readonly id: string;
+  }): Promise<import("@/core/git/gitWorktreePolicy").GitWorktreeOpenResult>;
   /** Apply a deterministic, user-approved edit (Phase 5). */
   applyEdit(
     filePath: string,

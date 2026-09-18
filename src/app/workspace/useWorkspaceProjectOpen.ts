@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { recordRecentProject } from "@/core/project/recentProjects";
 import { EMPTY_PROJECT_MEMORY } from "@/core/projectMemory/types";
 import { emptySessionMemory } from "@/core/sessionMemory";
@@ -90,6 +90,8 @@ export function useWorkspaceProjectOpen(input: {
   readonly runScan: () => Promise<void>;
   readonly bindProjectSession: (path: string, name: string) => Promise<void>;
 }) {
+  const gitWorktreeOpenGeneration = useRef(0);
+
   const resetWorkspaceForProject = useCallback(() => {
     cancelAllPostApplyUiAudits("project closed");
     clearProjectRulesCache();
@@ -151,6 +153,7 @@ export function useWorkspaceProjectOpen(input: {
       return;
     }
     input.project.setError(null);
+    gitWorktreeOpenGeneration.current += 1;
     const result = await input.api.openProject();
     if (result) {
       input.project.setProject(result);
@@ -165,6 +168,7 @@ export function useWorkspaceProjectOpen(input: {
     async (folderPath: string) => {
       if (!input.api) return;
       input.project.setError(null);
+      gitWorktreeOpenGeneration.current += 1;
       const result = await input.api.openProjectAt(folderPath);
       if (result) {
         input.project.setProject(result);
@@ -177,9 +181,49 @@ export function useWorkspaceProjectOpen(input: {
     [input, resetWorkspaceForProject],
   );
 
+  const gitWorktreeOpen = useCallback(
+    async (payload: { readonly id: string }) => {
+      if (!input.api?.gitWorktreeOpen) {
+        return {
+          ok: false as const,
+          code: "no_project" as const,
+          message: "Git worktrees are unavailable.",
+        };
+      }
+      input.project.setError(null);
+      const generation = (gitWorktreeOpenGeneration.current += 1);
+      try {
+        const result = await input.api.gitWorktreeOpen(payload);
+        if (generation !== gitWorktreeOpenGeneration.current) {
+          return {
+            ok: false as const,
+            code: "stale_project" as const,
+            message: "The open project changed. Start again from the Git view.",
+          };
+        }
+        if (result.ok) {
+          input.project.setProject(result.project);
+          recordRecentProject(result.project.path, result.project.name);
+          resetWorkspaceForProject();
+          void input.runScan();
+          void input.bindProjectSession(result.project.path, result.project.name);
+        }
+        return result;
+      } catch {
+        return {
+          ok: false as const,
+          code: "generic_failure" as const,
+          message: "Worktree change failed.",
+        };
+      }
+    },
+    [input, resetWorkspaceForProject],
+  );
+
   return {
     resetWorkspaceForProject,
     openProject,
     openProjectAt,
+    gitWorktreeOpen,
   };
 }

@@ -204,8 +204,14 @@ function renameRecordPath(record: string): string | null {
  * or non-ignorable untracked path makes the tree dirty.
  */
 export function porcelainV2IndicatesDirty(stdout: string, truncated: boolean): boolean {
-  if (truncated) return true;
-  if (!stdout) return false;
+  return ignorableRuntimeUntrackedPaths(stdout, truncated) === null;
+}
+
+/** Returns ignorable untracked paths when the tree is otherwise clean; null if dirty/malformed. */
+export function ignorableRuntimeUntrackedPaths(stdout: string, truncated: boolean): string[] | null {
+  if (truncated) return null;
+  if (!stdout) return [];
+  const ignorable: string[] = [];
   const records = stdout.split("\0");
   for (let i = 0; i < records.length; i += 1) {
     const raw = records[i] ?? "";
@@ -214,23 +220,24 @@ export function porcelainV2IndicatesDirty(stdout: string, truncated: boolean): b
     if (raw.startsWith("! ")) continue;
     if (raw.startsWith("? ")) {
       const path = raw.slice(2);
-      if (!isIgnorableStudioRuntimeUntracked(path)) return true;
+      if (!isIgnorableStudioRuntimeUntracked(path)) return null;
+      ignorable.push(path);
       continue;
     }
-    if (raw.startsWith("u ")) return true;
+    if (raw.startsWith("u ")) return null;
     if (raw.startsWith("1 ")) {
       const path = ordinaryRecordPath(raw);
-      if (!path) return true;
-      return true;
+      if (!path) return null;
+      return null;
     }
     if (raw.startsWith("2 ")) {
-      if (!renameRecordPath(raw)) return true;
+      if (!renameRecordPath(raw)) return null;
       i += 1;
-      return true;
+      return null;
     }
-    return true;
+    return null;
   }
-  return false;
+  return ignorable;
 }
 
 export function parseNulRefNames(stdout: string, truncated: boolean): readonly string[] | null {

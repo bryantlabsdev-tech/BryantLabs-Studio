@@ -659,6 +659,12 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     gitBranchPreflight,
     gitBranchExecute,
     gitBranchCancel,
+    gitListWorktrees,
+    gitWorktreeCreatePreflight,
+    gitWorktreeCreateExecute,
+    gitWorktreeRemovePreflight,
+    gitWorktreeRemoveExecute,
+    gitWorktreeCancel,
   } = useWorkspaceGitWorkspace({
     api,
     projectPath: project?.path ?? null,
@@ -1104,7 +1110,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     [api, refreshGitStatus],
   );
 
-  const { openProject, openProjectAt } = useWorkspaceProjectOpen({
+  const { openProject, openProjectAt, gitWorktreeOpen } = useWorkspaceProjectOpen({
     api,
     project: { setProject, setError },
     file: {
@@ -2144,6 +2150,13 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
       gitBranchPreflight,
       gitBranchExecute,
       gitBranchCancel,
+      gitListWorktrees,
+      gitWorktreeCreatePreflight,
+      gitWorktreeCreateExecute,
+      gitWorktreeRemovePreflight,
+      gitWorktreeRemoveExecute,
+      gitWorktreeCancel,
+      gitWorktreeOpen,
       selectGitPath,
     pendingRunCheckpoint,
     resumePersistedRun,
