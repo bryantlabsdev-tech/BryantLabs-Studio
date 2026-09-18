@@ -10,9 +10,9 @@
  * Git consumes the next operand as the branch name (verified on Apple Git 2.50.1).
  * Switch uses `git switch --no-guess --end-of-options <existing-local-branch>`.
  *
- * Dirty-tree ignore list is only untracked Studio runtime metadata files written
- * by opening/using the product. Tracked, staged, deleted, renamed, or unknown
- * paths under `.bryantlabs` remain dirty. See STUDIO_RUNTIME_METADATA_PATHS.
+ * Dirty-tree ignore list is only untracked Studio hydrate/index cache files.
+ * Tracked, staged, deleted, renamed, mcp.json, and unknown `.bryantlabs`
+ * paths remain dirty. See STUDIO_RUNTIME_METADATA_PATHS.
  */
 
 import { gitSafeConfigPrefix, isSafeGitBranchName } from "./gitPushPolicy";
@@ -30,37 +30,27 @@ export const GIT_BRANCH_MAX_TOKENS = 8;
 export const MAX_BRANCH_OUTPUT_CHARS = 8_192;
 
 /**
- * Exact relative paths Studio writes as generated JSON/index metadata.
- * Ignored only when porcelain v2 records them as untracked (`?`).
+ * Exact Git-relative paths ignored only as untracked (`?`) porcelain v2 records.
+ * Matching is `===` on the canonical Git path: no prefix, suffix, basename,
+ * slash-folding, or case-folding.
  *
- * - session-memory.json: session snapshot written under `.bryantlabs` on project use/open helpers.
- * - agent-memory.json / project-memory.json: product memory stores.
- * - follow-up-chat.json: follow-up chat persistence.
- * - features.json: feature inventory cache.
- * - run-checkpoint.v1.json: run resume checkpoint.
- * - mcp.json: per-project MCP server config written by Studio.
- * - semantic-index/v1.json: written by hydrateSemanticIndex on project switch.
- * - scan-manifest/v1.json: written by the project index on activate/scan.
+ * Kept only because the product writes them by opening/hydrating/indexing, and
+ * they are derived caches — not instructions, tools, permissions, providers,
+ * execution policy, or project configuration:
  *
- * Not ignored: `.bryantlabs/rules.md` (instruction pack), shadow-runs, unknown files.
+ * - `.bryantlabs/session-memory.json` — written when a project is bound/opened
+ * - `.bryantlabs/semantic-index/v1.json` — `hydrateSemanticIndex` on project switch
+ * - `.bryantlabs/scan-manifest/v1.json` — project index activate/scan
+ *
+ * Not ignored: `.bryantlabs/mcp.json` (user MCP servers), `rules.md`,
+ * agent/project memory, follow-up chat, features inventory,
+ * run checkpoints, shadow-runs, directories, and any unknown path.
  */
 export const STUDIO_RUNTIME_METADATA_PATHS: readonly string[] = [
   ".bryantlabs/session-memory.json",
-  ".bryantlabs/agent-memory.json",
-  ".bryantlabs/project-memory.json",
-  ".bryantlabs/follow-up-chat.json",
-  ".bryantlabs/features.json",
-  ".bryantlabs/run-checkpoint.v1.json",
-  ".bryantlabs/mcp.json",
   ".bryantlabs/semantic-index/v1.json",
   ".bryantlabs/scan-manifest/v1.json",
 ];
-
-const STUDIO_RUNTIME_UNTRACKED_DIRS = new Set([
-  ".bryantlabs",
-  ".bryantlabs/semantic-index",
-  ".bryantlabs/scan-manifest",
-]);
 
 export const GIT_BRANCH_ALIAS_CLEARS: readonly string[] = [
   "alias.switch=",
@@ -178,15 +168,14 @@ export function buildGitBranchSwitchArgs(branch: string): string[] {
   ];
 }
 
-export function normalizeGitPath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/\/+$/g, "");
-}
-
-export function isIgnorableStudioRuntimeUntracked(path: string): boolean {
-  const normalized = normalizeGitPath(path);
-  if (!normalized || normalized.includes("\0")) return false;
-  if (STUDIO_RUNTIME_UNTRACKED_DIRS.has(normalized)) return true;
-  return STUDIO_RUNTIME_METADATA_PATHS.includes(normalized);
+export function isIgnorableStudioRuntimeUntracked(gitRelativePath: string): boolean {
+  if (typeof gitRelativePath !== "string" || gitRelativePath.length === 0) return false;
+  if (gitRelativePath.includes("\0") || gitRelativePath.includes("\\")) return false;
+  if (/[\u0000-\u001f\u007f]/.test(gitRelativePath)) return false;
+  for (const allowed of STUDIO_RUNTIME_METADATA_PATHS) {
+    if (gitRelativePath === allowed) return true;
+  }
+  return false;
 }
 
 function ordinaryRecordPath(record: string): string | null {

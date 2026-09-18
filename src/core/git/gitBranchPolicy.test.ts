@@ -104,11 +104,46 @@ describe("porcelain v2 dirty policy", () => {
   it("ignores only enumerated untracked Studio runtime metadata", () => {
     assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs/session-memory.json"), true);
     assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs/semantic-index/v1.json"), true);
+    assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs/scan-manifest/v1.json"), true);
+    assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs/mcp.json"), false);
     assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs/rules.md"), false);
     assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs/unknown.json"), false);
+    assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs"), false);
+    assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs/semantic-index"), false);
     assert.equal(
-      porcelainV2IndicatesDirty("? .bryantlabs/session-memory.json\0? .bryantlabs/semantic-index/v1.json\0", false),
+      porcelainV2IndicatesDirty(
+        "? .bryantlabs/session-memory.json\0? .bryantlabs/semantic-index/v1.json\0? .bryantlabs/scan-manifest/v1.json\0",
+        false,
+      ),
       false,
+    );
+  });
+
+  it("treats mcp.json as dirty in untracked, tracked, and staged porcelain", () => {
+    const trackedMcp =
+      "1 .M N... 100644 100644 100644 1d2f01491f783c8c7f0917cc68526c6307d80e39 1d2f01491f783c8c7f0917cc68526c6307d80e39 .bryantlabs/mcp.json";
+    const stagedMcp =
+      "1 A. N... 000000 100644 100644 0000000000000000000000000000000000000000 61780798228d17af2d34fce4cfbdf35556832472 .bryantlabs/mcp.json";
+    assert.equal(porcelainV2IndicatesDirty("? .bryantlabs/mcp.json\0", false), true);
+    assert.equal(porcelainV2IndicatesDirty(`${trackedMcp}\0`, false), true);
+    assert.equal(porcelainV2IndicatesDirty(`${stagedMcp}\0`, false), true);
+  });
+
+  it("does not match allowlist by prefix, suffix, basename, case, or lookalike", () => {
+    const allowed = ".bryantlabs/semantic-index/v1.json";
+    assert.equal(isIgnorableStudioRuntimeUntracked(allowed), true);
+    assert.equal(isIgnorableStudioRuntimeUntracked(`${allowed}/evil`), false);
+    assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs/session-memory.json/evil"), false);
+    assert.equal(isIgnorableStudioRuntimeUntracked("semantic-index/v1.json"), false);
+    assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs/semantic-index/v1.json "), false);
+    assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs/semantic-index/v1.json/"), false);
+    assert.equal(isIgnorableStudioRuntimeUntracked(".Bryantlabs/semantic-index/v1.json"), false);
+    assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs/Semantic-index/v1.json"), false);
+    assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs\\semantic-index\\v1.json"), false);
+    assert.equal(isIgnorableStudioRuntimeUntracked(".bryantlabs/semantic-index/v1.јson"), false);
+    assert.equal(
+      porcelainV2IndicatesDirty("? .bryantlabs/semantic-index/v1.json/evil\0", false),
+      true,
     );
   });
 

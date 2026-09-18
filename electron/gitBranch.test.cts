@@ -108,8 +108,10 @@ describe("approval-gated git branch create/switch", () => {
     await clearGitBranchSession();
     const { repo } = await makeRepo();
     await mkdir(path.join(repo, ".bryantlabs", "semantic-index"), { recursive: true });
+    await mkdir(path.join(repo, ".bryantlabs", "scan-manifest"), { recursive: true });
     await writeFile(path.join(repo, ".bryantlabs", "session-memory.json"), "{}\n", "utf8");
     await writeFile(path.join(repo, ".bryantlabs", "semantic-index", "v1.json"), "{}\n", "utf8");
+    await writeFile(path.join(repo, ".bryantlabs", "scan-manifest", "v1.json"), "{}\n", "utf8");
     const listed = await listLocalGitBranches(repo);
     assert.equal(listed.ok, true);
     if (!listed.ok) return;
@@ -311,13 +313,49 @@ describe("approval-gated git branch create/switch", () => {
     if (!unknown.ok) assert.equal(unknown.code, "dirty_worktree");
   });
 
-  it("refuses staged Studio metadata", async () => {
+  it("refuses untracked, tracked-modified, and staged .bryantlabs/mcp.json", async () => {
     await clearGitBranchSession();
     const { repo } = await makeRepo();
+    const before = await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
     await mkdir(path.join(repo, ".bryantlabs"), { recursive: true });
-    await writeFile(path.join(repo, ".bryantlabs", "session-memory.json"), "{}\n", "utf8");
-    await git(repo, ["add", ".bryantlabs/session-memory.json"]);
-    const staged = await prepareGitBranch(repo, { op: "create", destination: "feature/staged-meta" });
+    await writeFile(path.join(repo, ".bryantlabs", "mcp.json"), '{"mcpServers":{}}\n', "utf8");
+    const untracked = await prepareGitBranch(repo, { op: "create", destination: "feature/mcp-u" });
+    assert.equal(untracked.ok, false);
+    if (!untracked.ok) assert.equal(untracked.code, "dirty_worktree");
+    await git(repo, ["add", ".bryantlabs/mcp.json"]);
+    const staged = await prepareGitBranch(repo, { op: "create", destination: "feature/mcp-s" });
+    assert.equal(staged.ok, false);
+    if (!staged.ok) assert.equal(staged.code, "dirty_worktree");
+    await git(repo, ["commit", "-m", "mcp"]);
+    await writeFile(path.join(repo, ".bryantlabs", "mcp.json"), '{"mcpServers":{"x":{"command":"true"}}}\n', "utf8");
+    const tracked = await prepareGitBranch(repo, { op: "switch", destination: "feature/existing" });
+    assert.equal(tracked.ok, false);
+    if (!tracked.ok) assert.equal(tracked.code, "dirty_worktree");
+    assert.equal(await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]), before);
+  });
+
+  it("does not ignore nested prefix paths under a runtime metadata file name", async () => {
+    await clearGitBranchSession();
+    const { repo } = await makeRepo();
+    const nested = path.join(repo, ".bryantlabs", "semantic-index", "v1.json", "evil");
+    await mkdir(path.dirname(nested), { recursive: true });
+    await writeFile(nested, "x\n", "utf8");
+    const listed = await listLocalGitBranches(repo);
+    assert.equal(listed.ok, true);
+    if (!listed.ok) return;
+    assert.equal(listed.dirty, true);
+    const preflight = await prepareGitBranch(repo, { op: "create", destination: "feature/prefix" });
+    assert.equal(preflight.ok, false);
+    if (!preflight.ok) assert.equal(preflight.code, "dirty_worktree");
+  });
+
+  it("treats staged hydrate-cache metadata as dirty", async () => {
+    await clearGitBranchSession();
+    const { repo } = await makeRepo();
+    await mkdir(path.join(repo, ".bryantlabs", "semantic-index"), { recursive: true });
+    await writeFile(path.join(repo, ".bryantlabs", "semantic-index", "v1.json"), "{}\n", "utf8");
+    await git(repo, ["add", ".bryantlabs/semantic-index/v1.json"]);
+    const staged = await prepareGitBranch(repo, { op: "create", destination: "feature/staged-index" });
     assert.equal(staged.ok, false);
     if (!staged.ok) assert.equal(staged.code, "dirty_worktree");
   });
