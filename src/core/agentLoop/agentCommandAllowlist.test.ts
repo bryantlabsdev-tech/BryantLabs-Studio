@@ -12,6 +12,14 @@ describe("agentCommandAllowlist", () => {
     assert.equal(validateAgentCommand("git push origin HEAD:main").ok, false);
   });
 
+  it("blocks git switch, checkout, and branch creation", () => {
+    assert.equal(validateAgentCommand("git switch feature/x").ok, false);
+    assert.equal(validateAgentCommand("git checkout feature/x").ok, false);
+    assert.equal(validateAgentCommand("git branch").ok, false);
+    assert.equal(validateAgentCommand("git branch -c feature/x").ok, false);
+    assert.equal(validateAgentCommand("git switch -c feature/x").ok, false);
+  });
+
   it("allows git status", () => {
     assert.equal(validateAgentCommand("git status").ok, true);
   });
