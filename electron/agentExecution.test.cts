@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
+import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
@@ -46,6 +47,21 @@ async function makeRepo(): Promise<string> {
   await git(repo, ["add", "README.md"]);
   await git(repo, ["commit", "-m", "init"]);
   return repo;
+}
+
+async function replaceSealedSnapshot(target: string, contents: string): Promise<void> {
+  const writeReplacement = async () => {
+    await chmod(target, 0o600);
+    await writeFile(target, contents, "utf8");
+  };
+  try {
+    await writeReplacement();
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : "";
+    if (code !== "EPERM" || !existsSync("/usr/bin/chflags")) throw error;
+    execFileSync("/usr/bin/chflags", ["nouchg", target]);
+    await writeReplacement();
+  }
 }
 
 describe("agent execution runtime", () => {
@@ -591,9 +607,7 @@ describe("approval-gated project code", () => {
       beforeSpawn: async () => {
         const names = await readdir(snapshotRoot);
         const target = path.join(snapshotRoot, names[0] ?? "");
-        execFileSync("/usr/bin/chflags", ["nouchg", target]);
-        execFileSync("/bin/chmod", ["600", target]);
-        await writeFile(target, "process.stdout.write('replaced\\n');\n", "utf8");
+        await replaceSealedSnapshot(target, "process.stdout.write('replaced\\n');\n");
       },
     });
     const tampered = await executeApprovedProjectCode({
