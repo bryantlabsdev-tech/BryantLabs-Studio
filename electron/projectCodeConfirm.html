@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Approve project code</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; frame-src 'none';"
+    />
+  </head>
+  <body>
+    <h1>Approve project code</h1>
+    <p id="path-behavior"></p>
+    <dl>
+      <dt>Executable</dt>
+      <dd id="executable"></dd>
+      <dt>Arguments</dt>
+      <dd id="arguments"></dd>
+      <dt>Working directory</dt>
+      <dd id="cwd"></dd>
+      <dt>Network</dt>
+      <dd id="network"></dd>
+      <dt>Timeout</dt>
+      <dd id="timeout"></dd>
+      <dt>Script digest</dt>
+      <dd id="digest"></dd>
+      <dt>Risk</dt>
+      <dd id="risk"></dd>
+    </dl>
+    <button id="cancel" type="button">Cancel</button>
+    <button id="approve" type="button">Approve and run</button>
+  </body>
+</html>

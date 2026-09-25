@@ -6,10 +6,10 @@
  * after import-path normalization. Shared vectors plus collectAgentExecutionPolicyParity
  * cover recipes, argv, failure codes, env rules, and snapshot text.
  *
- * Autonomous agents may only run inspect recipes. Project-controlled package scripts,
- * npx, local binaries, and other project code are not agent-authorized this phase
- * (no auto-confirm approval path). User-confirmed Git push/branch/worktree remain
- * product-owned privileged operations outside this policy.
+ * Autonomous agents may only run inspect recipes. A Node script inside the open
+ * project may run only after a visible, single-use approval. Package scripts, npx,
+ * local binaries, Git push/branch/worktree, provider networking, interactive PTY,
+ * greenfield, and preview stay on their existing authority paths.
  */
 
 import { redactSensitiveText } from "../git/gitPushPolicy";
@@ -26,6 +26,16 @@ export const AGENT_DENIAL_LOG_LIMIT = 24;
 export const FORBIDDEN_GREENFIELD_MAIN = "/private/tmp/bryantlabs-greenfield-main";
 export const GIT_INSPECT_LOG_DEFAULT = 20;
 export const GIT_INSPECT_LOG_MAX = 99;
+export const PROJECT_CODE_APPROVAL_TTL_MS = 15_000;
+export const PROJECT_CODE_MAX_ARGS = 8;
+export const PROJECT_CODE_ARG_MAX_CHARS = 200;
+export const PROJECT_CODE_NETWORK_LIMITATION =
+  "Network is not limited. Project code can open connections and read or write files. This confirmation is not an OS, network, filesystem, container, or VM sandbox.";
+export const PROJECT_CODE_RISK_TEXT =
+  "Project code can access files and the network. Approve only this exact executable, these arguments, and this working directory.";
+export const PROJECT_CODE_PATH_BEHAVIOR =
+  "Studio runs the exact approved bytes from a private copy outside the project. __filename, __dirname, import.meta.url, and relative imports refer to that copy, not the project file. The working directory remains the project root. Arguments after the script are the arguments shown here.";
+export const PROJECT_CODE_SCRIPT_EXTENSIONS = [".js", ".mjs", ".cjs"] as const;
 
 export type AgentExecutionClass =
   | "agent_readonly_inspect"
@@ -68,6 +78,7 @@ export type AgentExecutionFailureCode =
   | "approval_expired"
   | "recipe_not_allowed"
   | "executable_identity_changed"
+  | "script_identity_changed"
   | "sender_not_allowed"
   | "project_code_not_isolated";
 
@@ -93,6 +104,7 @@ export const AGENT_EXECUTION_FAILURE_CODES: readonly AgentExecutionFailureCode[]
   "approval_expired",
   "recipe_not_allowed",
   "executable_identity_changed",
+  "script_identity_changed",
   "sender_not_allowed",
   "project_code_not_isolated",
 ];
@@ -136,6 +148,38 @@ export interface AgentInspectDenied {
 }
 
 export type AgentInspectDecision = AgentInspectPlan | AgentInspectDenied;
+
+export interface AgentProjectCodePlan {
+  readonly ok: true;
+  readonly executionClass: "user_approved_project_code";
+  readonly executable: "node";
+  readonly argv: readonly string[];
+  readonly network: "not_isolated";
+  readonly timeoutMs: number;
+  readonly maxOutputChars: number;
+  readonly cwdBinding: "canonical_project_root";
+  readonly networkLimitation: string;
+  readonly risk: string;
+  readonly planKey: string;
+}
+
+export interface AgentProjectCodeDenied {
+  readonly ok: false;
+  readonly executionClass: "user_approved_project_code";
+  readonly code: AgentExecutionFailureCode;
+  readonly message: string;
+}
+
+export type AgentProjectCodeDecision = AgentProjectCodePlan | AgentProjectCodeDenied;
+
+export interface AgentExecutionApprovalRecord {
+  readonly at: number;
+  readonly outcome: "approved" | "denied";
+  readonly code: string;
+  readonly executionClass: AgentExecutionClass;
+  readonly reason: string;
+  readonly ownerId: number;
+}
 
 export interface AgentExecutionPolicySnapshot {
   readonly label: string;
@@ -351,6 +395,8 @@ export function agentExecutionFailureMessage(code: AgentExecutionFailureCode): s
       return "That inspect recipe is not available to agents.";
     case "executable_identity_changed":
       return "The inspect executable changed before it could run.";
+    case "script_identity_changed":
+      return "The project script changed after it was previewed.";
     case "sender_not_allowed":
       return "That window cannot run agent inspection.";
     case "project_code_not_isolated":
@@ -369,7 +415,7 @@ export function buildAgentExecutionPolicySnapshot(): AgentExecutionPolicySnapsho
     autonomousInspection:
       "Autonomous inspection: no network-capable recipe is exposed by the application policy.",
     approvedProjectCode:
-      "Approved project-code execution: not network-isolated. Not available to agents in this phase.",
+      "Approved project-code execution is not network-isolated. A Node script runs only after a visible confirmation of the exact executable, arguments, working directory, network limitation, timeout, and script digest. Studio runs those approved bytes from a private copy; __filename, __dirname, and relative imports refer to that copy, not the project file. The working directory remains the project root. Project code can access files and the network. It is not available to autonomous agents.",
     filesystemScope:
       "Autonomous inspection accepts no arbitrary project code. Canonical cwd and operand validation protect Studio-owned inspect operands only; they do not confine executed project code. Safe filesystem transactions apply only to Studio-owned file operations. This is not filesystem isolation.",
     shellEnabled: false,
@@ -391,7 +437,7 @@ export function buildAgentExecutionPolicySnapshot(): AgentExecutionPolicySnapsho
       "Interactive PTY terminal (user UI, not an agent tool)",
       "Greenfield preview/install and product verification (product-owned)",
       "Provider API requests (product infrastructure)",
-      "Project package scripts, npx, and local binaries (not agent-authorized this phase)",
+      "Project package scripts, npx, and local binaries (not this approval; not autonomous)",
     ],
   };
 }
@@ -720,6 +766,126 @@ export function classifyRequestedExecutionClass(value: unknown): AgentExecutionC
   return null;
 }
 
+function projectCodeDeny(code: AgentExecutionFailureCode): AgentProjectCodeDenied {
+  return {
+    ok: false,
+    executionClass: "user_approved_project_code",
+    code,
+    message: agentExecutionFailureMessage(code),
+  };
+}
+
+function isSafeProjectCodeArgument(token: string): boolean {
+  if (typeof token !== "string" || token.length === 0 || token.length > PROJECT_CODE_ARG_MAX_CHARS) return false;
+  if (CONTROL_OR_NUL.test(token) || SHELL_METACHAR.test(token)) return false;
+  if (token.includes("..") || token.startsWith("/") || /^[a-zA-Z]:/.test(token)) return false;
+  if (token.includes("://") || token.startsWith("@")) return false;
+  return true;
+}
+
+/** Stable description of the child environment. Values from the process environment are not included. */
+export function projectCodeEnvironmentPolicyKey(): string {
+  return JSON.stringify({
+    keep: [...AGENT_EXEC_ENV_KEEP],
+    dropPrefixes: [...AGENT_EXEC_ENV_DROP_PREFIXES],
+    path: "trusted-inspect-directories-plus-executable-directory",
+    forced: {
+      TERM: "dumb",
+      NO_COLOR: "1",
+      CI: "1",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_SYSTEM: "/dev/null",
+      GIT_PAGER: "cat",
+      GIT_EDITOR: "true",
+      GIT_OPTIONAL_LOCKS: "0",
+      GIT_EXTERNAL_DIFF: "",
+      GIT_ASKPASS: "",
+      GIT_SSH_COMMAND: "",
+    },
+  });
+}
+
+function projectCodePlanKey(argv: readonly string[]): string {
+  return JSON.stringify({
+    executable: "node",
+    argv,
+    cwdBinding: "canonical_project_root",
+    network: "not_isolated",
+    timeoutMs: AGENT_COMMAND_TIMEOUT_MS,
+    maxOutputChars: AGENT_COMMAND_OUTPUT_CHARS,
+    environmentPolicy: projectCodeEnvironmentPolicyKey(),
+  });
+}
+
+/**
+ * Structured project-code plan. Not used by autonomous command routing.
+ * Rejects shell metacharacters, command substitution, and extra fields.
+ */
+export function planProjectCodeRequest(payload: unknown): AgentProjectCodeDecision {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return projectCodeDeny("invalid_request");
+  }
+  const record = payload as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (key !== "script" && key !== "args") return projectCodeDeny("invalid_request");
+  }
+  const script = record.script;
+  if (typeof script !== "string" || !isSafeAgentRelativePath(script) || SHELL_METACHAR.test(script)) {
+    return projectCodeDeny("arguments_not_allowed");
+  }
+  const lower = script.toLowerCase();
+  if (lower.split("/").includes("node_modules")) return projectCodeDeny("executable_not_allowed");
+  if (!PROJECT_CODE_SCRIPT_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+    return projectCodeDeny("executable_not_allowed");
+  }
+  let args: string[] = [];
+  if (record.args !== undefined) {
+    if (!Array.isArray(record.args) || record.args.length > PROJECT_CODE_MAX_ARGS) {
+      return projectCodeDeny("arguments_not_allowed");
+    }
+    for (const arg of record.args) {
+      if (typeof arg !== "string" || !isSafeProjectCodeArgument(arg)) {
+        return projectCodeDeny("arguments_not_allowed");
+      }
+    }
+    args = [...record.args];
+  }
+  const argv = [script, ...args];
+  return {
+    ok: true,
+    executionClass: "user_approved_project_code",
+    executable: "node",
+    argv,
+    network: "not_isolated",
+    timeoutMs: AGENT_COMMAND_TIMEOUT_MS,
+    maxOutputChars: AGENT_COMMAND_OUTPUT_CHARS,
+    cwdBinding: "canonical_project_root",
+    networkLimitation: PROJECT_CODE_NETWORK_LIMITATION,
+    risk: PROJECT_CODE_RISK_TEXT,
+    planKey: projectCodePlanKey(argv),
+  };
+}
+
+/** Execution accepts only a main-minted token. Extra fields are an altered approval. */
+export function parseProjectCodeExecutionToken(
+  payload: unknown,
+): { readonly ok: true; readonly token: string } | AgentProjectCodeDenied {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return projectCodeDeny("invalid_request");
+  }
+  const record = payload as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (key !== "token") return projectCodeDeny("approval_invalid");
+  }
+  const token = record.token;
+  if (typeof token !== "string" || !/^[a-f0-9]{32}$/.test(token)) {
+    return projectCodeDeny("approval_invalid");
+  }
+  return { ok: true, token };
+}
+
 export function collectAgentExecutionPolicyParity(): Record<string, unknown> {
   return {
     failureCodes: [...AGENT_EXECUTION_FAILURE_CODES],
@@ -734,6 +900,8 @@ export function collectAgentExecutionPolicyParity(): Record<string, unknown> {
     nodeVersion: planInspectRecipe("node_version"),
     npmVersion: planInspectRecipe("npm_version"),
     snapshot: buildAgentExecutionPolicySnapshot(),
+    projectCodePlan: planProjectCodeRequest({ script: "scripts/hello.js", args: ["ok"] }),
+    projectCodeSubstitution: planProjectCodeRequest({ script: "scripts/hello.js", args: ["$(id)"] }),
     messages: Object.fromEntries(
       AGENT_EXECUTION_FAILURE_CODES.map((code) => [code, agentExecutionFailureMessage(code)]),
     ),

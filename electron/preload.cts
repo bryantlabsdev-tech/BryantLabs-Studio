@@ -297,6 +297,12 @@ const api = {
   executeAgentInspect: (payload: unknown) => ipcRenderer.invoke("agent:inspect", payload),
   getAgentExecutionPolicy: () => ipcRenderer.invoke("agent:executionPolicy"),
   getAgentExecutionDenials: () => ipcRenderer.invoke("agent:executionDenials"),
+  getAgentExecutionApprovals: () => ipcRenderer.invoke("agent:executionApprovals"),
+  prepareProjectCodeExecution: (payload: unknown) => ipcRenderer.invoke("agent:projectCodePrepare", payload),
+  approveProjectCodeExecution: (previewId: unknown) => ipcRenderer.invoke("agent:projectCodeApprove", previewId),
+  executeApprovedProjectCode: (payload: unknown) => ipcRenderer.invoke("agent:projectCodeExecute", payload),
+  confirmProjectCodeExecution: (previewId: unknown) => ipcRenderer.invoke("agent:projectCodeConfirm", previewId),
+  cancelProjectCodeExecution: (payload: unknown) => ipcRenderer.invoke("agent:projectCodeCancel", payload),
   onTerminalData: (handler: (payload: { id: string; data: string }) => void) => {
     const listener = (_event: IpcRendererEvent, payload: { id: string; data: string }) => {
       handler(payload);

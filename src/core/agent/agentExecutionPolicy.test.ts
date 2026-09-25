@@ -11,7 +11,9 @@ import {
   collectAgentExecutionPolicyParity,
   isSafeAgentRelativePath,
   parseAgentInspectRequest,
+  parseProjectCodeExecutionToken,
   planAgentCommand,
+  planProjectCodeRequest,
   routeAgentCommandToInspect,
   validateAgentCommand,
 } from "@/core/agent/agentExecutionPolicy";
@@ -114,6 +116,7 @@ describe("agent execution policy", () => {
     assert.equal(AGENT_EXECUTION_POLICY_TEST_ID, "agent-execution-policy");
     assert.ok(AGENT_EXECUTION_FAILURE_CODES.includes("project_code_not_isolated"));
     assert.ok(AGENT_EXECUTION_FAILURE_CODES.includes("approval_required"));
+    assert.ok(AGENT_EXECUTION_FAILURE_CODES.includes("script_identity_changed"));
   });
 
   it("forbids credential, proxy, loader, and inherited PATH environment keys", () => {
@@ -141,6 +144,41 @@ describe("agent execution policy", () => {
     });
     assert.equal(JSON.stringify(route).includes("git:push"), false);
     assert.equal(JSON.stringify(route).includes("git:worktree"), false);
+  });
+
+  it("plans a node script only through the approval path", () => {
+    const planned = planProjectCodeRequest({ script: "scripts/hello.js", args: ["ok"] });
+    assert.equal(planned.ok, true);
+    if (!planned.ok) return;
+    assert.equal(planned.executionClass, "user_approved_project_code");
+    assert.equal(planned.network, "not_isolated");
+    assert.match(planned.risk, /access files and the network/);
+    assert.match(planned.networkLimitation, /not an OS, network, filesystem, container, or VM sandbox/);
+    assert.equal(planAgentCommand("node scripts/hello.js").ok, false);
+    assert.equal(planAgentCommand("npm test").ok, false);
+  });
+
+  it("rejects command substitution, mutation fields, and forged tokens", () => {
+    const attacks = [
+      { script: "scripts/hello.js", args: ["$(id)"] },
+      { script: "scripts/hello.js", args: ["`id`"] },
+      { script: "scripts/hello.js;id" },
+      { script: "scripts/hello.js", command: "id" },
+      { script: "node_modules/eslint/bin/eslint.js" },
+      { script: "scripts/hello.sh" },
+    ];
+    for (const attack of attacks) {
+      assert.equal(planProjectCodeRequest(attack).ok, false, JSON.stringify(attack));
+    }
+    const mutated = parseProjectCodeExecutionToken({
+      token: "ab".repeat(16),
+      script: "scripts/other.js",
+      argv: ["id"],
+    });
+    assert.equal(mutated.ok, false);
+    if (!mutated.ok) assert.equal(mutated.code, "approval_invalid");
+    assert.equal(parseProjectCodeExecutionToken({ token: "forged" }).ok, false);
+    assert.equal(parseProjectCodeExecutionToken({ token: "ab".repeat(16) }).ok, true);
   });
 
   it("exports a stable parity snapshot", () => {
