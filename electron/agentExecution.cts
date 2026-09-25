@@ -15,6 +15,10 @@ import {
   AGENT_DENIAL_LOG_LIMIT,
   AGENT_EXEC_ENV_KEEP,
   AGENT_EXECUTION_MAX_CONCURRENCY,
+  PACKAGE_SCRIPT_APPROVAL_TTL_MS,
+  PACKAGE_SCRIPT_BODY_MAX_CHARS,
+  PACKAGE_SCRIPT_ENVIRONMENT_TEXT,
+  PACKAGE_SCRIPT_SHELL_WARNING,
   PROJECT_CODE_APPROVAL_TTL_MS,
   PROJECT_CODE_NETWORK_LIMITATION,
   PROJECT_CODE_PATH_BEHAVIOR,
@@ -23,8 +27,11 @@ import {
   agentExecutionFailureMessage,
   buildAgentExecutionPolicySnapshot,
   isForbiddenAgentLocation,
+  packageScriptPlanKey,
   parseAgentInspectRequest,
+  parsePackageScriptExecutionToken,
   parseProjectCodeExecutionToken,
+  planPackageScriptRequest,
   planProjectCodeRequest,
   projectCodeEnvironmentPolicyKey,
   redactSensitiveText,
@@ -128,6 +135,9 @@ let activeSnapshotHandle: import("node:fs/promises").FileHandle | null = null;
 
 const projectCodePreviews = new Map<string, ProjectCodeBinding>();
 const projectCodeTokens = new Map<string, ProjectCodeBinding>();
+const packageScriptPreviews = new Map<string, PackageScriptBinding>();
+const packageScriptTokens = new Map<string, PackageScriptBinding>();
+let activePackageScriptConfirm: BrowserWindow | null = null;
 
 export function setAgentExecutionRuntimeForTests(runtime: Runtime): void {
   testRuntime = { ...testRuntime, ...runtime };
@@ -284,7 +294,11 @@ function pathExists(filePath: string): boolean {
 
 function locationRejected(real: string, projectRoot: string | null): boolean {
   const normalized = real.replace(/\\/g, "/");
-  if (normalized.includes("/node_modules/")) return true;
+  const systemNpm =
+    normalized.startsWith("/usr/local/lib/node_modules/npm/") ||
+    normalized.startsWith("/opt/homebrew/lib/node_modules/npm/") ||
+    normalized.startsWith("/usr/lib/node_modules/npm/");
+  if (normalized.includes("/node_modules/") && !systemNpm) return true;
   if (projectRoot && isCanonicalPathWithinRoot(projectRoot, real)) return true;
   if (isForbiddenAgentLocation(real)) return true;
   if (!testRuntime.allowTmpExecutables) {
@@ -372,6 +386,8 @@ export async function clearAgentExecutionSession(): Promise<void> {
     return;
   }
   sessionEpoch += 1;
+  packageScriptPreviews.clear();
+  packageScriptTokens.clear();
   const snapshotAtClear = activeSnapshotPath;
   activeSnapshotPath = null;
   const pid = activePid;
@@ -716,6 +732,12 @@ async function closeActiveSnapshotHandle(): Promise<void> {
 }
 
 export async function recoverProjectCodeSnapshots(): Promise<void> {
+  packageScriptPreviews.clear();
+  packageScriptTokens.clear();
+  if (activePackageScriptConfirm && !activePackageScriptConfirm.isDestroyed()) {
+    activePackageScriptConfirm.close();
+  }
+  activePackageScriptConfirm = null;
   await closeActiveSnapshotHandle();
   const pending = activeSnapshotPath;
   activeSnapshotPath = null;
@@ -1301,6 +1323,753 @@ export async function rejectRendererProjectCodeRedemption(input: {
   return projectCodeFailure("approval_invalid", input.ownerId);
 }
 
+interface PackageFileIdentity {
+  readonly present: boolean;
+  readonly canonicalPath: string;
+  readonly dev: number;
+  readonly ino: number;
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly sha256: string;
+}
+
+interface DirectoryIdentity {
+  readonly canonicalPath: string;
+  readonly dev: number;
+  readonly ino: number;
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly sha256: string;
+}
+
+interface ShellIdentity {
+  readonly path: "/bin/sh";
+  readonly linkDev: number;
+  readonly linkIno: number;
+  readonly linkSize: number;
+  readonly linkMtimeMs: number;
+  readonly realPath: string;
+  readonly dev: number;
+  readonly ino: number;
+  readonly size: number;
+  readonly mtimeMs: number;
+}
+
+interface PackageScriptBinding {
+  readonly id: string;
+  readonly ownerId: number;
+  readonly sessionEpoch: number;
+  readonly canonicalRoot: string;
+  readonly scriptName: "build" | "test" | "typecheck" | "lint";
+  readonly scriptBody: string;
+  readonly scriptBodySha256: string;
+  readonly planKey: string;
+  readonly pathValue: string;
+  readonly environmentPolicyKey: string;
+  readonly timeoutMs: number;
+  readonly shell: ShellIdentity;
+  readonly packageIdentity: PackageFileIdentity;
+  readonly lockIdentity: PackageFileIdentity;
+  readonly binIdentity: DirectoryIdentity;
+  readonly expiresAt: number;
+}
+
+const ALTERNATE_LOCKFILES = ["yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb", "npm-shrinkwrap.json"] as const;
+
+function packageScriptFailure(code: AgentExecutionFailureCode, ownerId: number): AgentExecResult {
+  const message = agentExecutionFailureMessage(code);
+  recordDenial("user_approved_package_script", code, message, ownerId);
+  recordApproval("denied", code, message, ownerId);
+  return {
+    ok: false,
+    exitCode: null,
+    stdout: "",
+    stderr: "",
+    durationMs: 0,
+    timedOut: code === "timeout",
+    truncated: code === "output_limit",
+    error: message,
+    code,
+  };
+}
+
+function samePackageIdentity(left: PackageFileIdentity, right: PackageFileIdentity): boolean {
+  return (
+    left.present === right.present &&
+    left.canonicalPath === right.canonicalPath &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    left.mtimeMs === right.mtimeMs &&
+    left.sha256 === right.sha256
+  );
+}
+
+async function capturePackageFile(
+  canonicalRoot: string,
+  name: string,
+  missingOk: boolean,
+): Promise<{ readonly ok: true; readonly identity: PackageFileIdentity; readonly bytes: Buffer } | { readonly ok: false; readonly code: AgentExecutionFailureCode }> {
+  const absolute = path.join(canonicalRoot, name);
+  if (path.resolve(absolute) !== absolute) return { ok: false, code: "outside_root" };
+  let listed;
+  try {
+    listed = await fs.lstat(absolute);
+  } catch {
+    if (!missingOk) return { ok: false, code: "no_project" };
+    return {
+      ok: true,
+      bytes: Buffer.alloc(0),
+      identity: { present: false, canonicalPath: absolute, dev: 0, ino: 0, size: 0, mtimeMs: 0, sha256: "" },
+    };
+  }
+  if (listed.isSymbolicLink()) return { ok: false, code: "symlink_escape" };
+  if (!listed.isFile()) return { ok: false, code: "invalid_request" };
+  const captured = await captureScriptIdentity(canonicalRoot, name);
+  if (!captured.ok) return captured;
+  return {
+    ok: true,
+    bytes: captured.bytes,
+    identity: {
+      present: true,
+      canonicalPath: captured.identity.canonicalPath,
+      dev: captured.identity.dev,
+      ino: captured.identity.ino,
+      size: captured.identity.size,
+      mtimeMs: captured.identity.mtimeMs,
+      sha256: captured.identity.sha256,
+    },
+  };
+}
+
+async function rejectAlternateLockfiles(canonicalRoot: string): Promise<AgentExecutionFailureCode | null> {
+  for (const name of ALTERNATE_LOCKFILES) {
+    const absolute = path.join(canonicalRoot, name);
+    try {
+      await fs.lstat(absolute);
+      return "executable_not_allowed";
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+function scriptBodyFromManifest(bytes: Buffer, scriptName: string): { readonly ok: true; readonly body: string } | { readonly ok: false; readonly code: AgentExecutionFailureCode } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    return { ok: false, code: "invalid_request" };
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return { ok: false, code: "invalid_request" };
+  const scripts = (parsed as { scripts?: unknown }).scripts;
+  if (scripts === null || typeof scripts !== "object" || Array.isArray(scripts)) return { ok: false, code: "execution_not_allowed" };
+  const body = (scripts as Record<string, unknown>)[scriptName];
+  if (typeof body !== "string" || body.length === 0 || body.length > PACKAGE_SCRIPT_BODY_MAX_CHARS) {
+    return { ok: false, code: "execution_not_allowed" };
+  }
+  if (body.includes("\0")) return { ok: false, code: "arguments_not_allowed" };
+  return { ok: true, body };
+}
+
+function captureTrustedShell(projectRoot: string): ShellIdentity | null {
+  if (process.platform === "win32") return null;
+  let link;
+  try {
+    link = lstatSync("/bin/sh");
+  } catch {
+    return null;
+  }
+  const real = realpathOrNull("/bin/sh");
+  if (!real) return null;
+  if (real === projectRoot || real.startsWith(`${projectRoot}${path.sep}`)) return null;
+  if (isForbiddenAgentLocation(real)) return null;
+  if (!(real === "/bin/sh" || real === "/bin/bash" || real.startsWith("/bin/") || real.startsWith("/usr/bin/"))) return null;
+  let file;
+  try {
+    file = lstatSync(real);
+  } catch {
+    return null;
+  }
+  if (!file.isFile() || file.isSymbolicLink()) return null;
+  return {
+    path: "/bin/sh",
+    linkDev: link.dev,
+    linkIno: link.ino,
+    linkSize: link.size,
+    linkMtimeMs: link.mtimeMs,
+    realPath: real,
+    dev: file.dev,
+    ino: file.ino,
+    size: file.size,
+    mtimeMs: file.mtimeMs,
+  };
+}
+
+function sameShell(left: ShellIdentity, right: ShellIdentity): boolean {
+  return (
+    left.realPath === right.realPath &&
+    left.linkDev === right.linkDev &&
+    left.linkIno === right.linkIno &&
+    left.linkSize === right.linkSize &&
+    left.linkMtimeMs === right.linkMtimeMs &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    left.mtimeMs === right.mtimeMs
+  );
+}
+
+function packageScriptChildPath(binDir: string): string {
+  return [binDir, ...trustedInspectPath().split(path.delimiter)].filter(Boolean).join(path.delimiter);
+}
+
+function packageBindingFresh(binding: PackageScriptBinding, ownerId: number, canonicalRoot: string): AgentExecutionFailureCode | null {
+  if (binding.ownerId !== ownerId) return "approval_invalid";
+  if (binding.sessionEpoch !== sessionEpoch) return "project_changed";
+  if (binding.canonicalRoot !== canonicalRoot) return "project_changed";
+  if (binding.expiresAt <= nowMs()) return "approval_expired";
+  if (binding.environmentPolicyKey !== projectCodeEnvironmentPolicyKey()) return "environment_not_allowed";
+  if (binding.timeoutMs !== (testRuntime.timeoutMs ?? AGENT_COMMAND_TIMEOUT_MS)) return "approval_invalid";
+  const key = packageScriptPlanKey({
+    scriptName: binding.scriptName,
+    scriptBodySha256: binding.scriptBodySha256,
+    pathValue: binding.pathValue,
+    shellPath: "/bin/sh",
+  });
+  if (key !== binding.planKey) return "approval_invalid";
+  return null;
+}
+
+async function rejectProjectNpmrc(canonicalRoot: string): Promise<AgentExecutionFailureCode | null> {
+  try {
+    await fs.lstat(path.join(canonicalRoot, ".npmrc"));
+    return "environment_not_allowed";
+  } catch {
+    return null;
+  }
+}
+
+async function captureBinDirectory(
+  canonicalRoot: string,
+): Promise<{ readonly ok: true; readonly identity: DirectoryIdentity } | { readonly ok: false; readonly code: AgentExecutionFailureCode }> {
+  const modulesPath = path.join(canonicalRoot, "node_modules");
+  const binPath = path.join(modulesPath, ".bin");
+  let modulesStat;
+  try {
+    modulesStat = await fs.lstat(modulesPath);
+  } catch {
+    return { ok: false, code: "executable_not_allowed" };
+  }
+  if (modulesStat.isSymbolicLink()) return { ok: false, code: "symlink_escape" };
+  if (!modulesStat.isDirectory()) return { ok: false, code: "executable_not_allowed" };
+  let binStat;
+  try {
+    binStat = await fs.lstat(binPath);
+  } catch {
+    return { ok: false, code: "executable_not_allowed" };
+  }
+  if (binStat.isSymbolicLink()) return { ok: false, code: "symlink_escape" };
+  if (!binStat.isDirectory()) return { ok: false, code: "executable_not_allowed" };
+  const real = realpathOrNull(binPath);
+  if (!real || real !== binPath) return { ok: false, code: "symlink_escape" };
+  const names = (await fs.readdir(binPath)).sort();
+  const lines: string[] = [];
+  for (const name of names) {
+    if (name.includes("\0") || name.includes("/") || name.includes("\\")) return { ok: false, code: "executable_not_allowed" };
+    const entry = path.join(binPath, name);
+    const st = await fs.lstat(entry);
+    if (st.isSymbolicLink()) {
+      const target = await fs.readlink(entry);
+      const resolved = path.resolve(binPath, target);
+      let targetStat;
+      try {
+        targetStat = await fs.lstat(resolved);
+      } catch {
+        return { ok: false, code: "executable_not_allowed" };
+      }
+      if (targetStat.isSymbolicLink() || !targetStat.isFile()) return { ok: false, code: "executable_not_allowed" };
+      lines.push(
+        `${name}\tsymlink\t${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}\t${target}\t${targetStat.dev}:${targetStat.ino}:${targetStat.size}:${targetStat.mtimeMs}`,
+      );
+      continue;
+    }
+    const kind = st.isFile() ? "file" : st.isDirectory() ? "dir" : "other";
+    lines.push(`${name}\t${kind}\t${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}`);
+  }
+  const again = await fs.lstat(binPath);
+  if (again.isSymbolicLink() || !again.isDirectory() || again.ino !== binStat.ino || again.mtimeMs !== binStat.mtimeMs) {
+    return { ok: false, code: "executable_identity_changed" };
+  }
+  return {
+    ok: true,
+    identity: {
+      canonicalPath: binPath,
+      dev: again.dev,
+      ino: again.ino,
+      size: again.size,
+      mtimeMs: again.mtimeMs,
+      sha256: createHash("sha256").update(lines.join("\n")).digest("hex"),
+    },
+  };
+}
+
+function sameDirectoryIdentity(left: DirectoryIdentity, right: DirectoryIdentity): boolean {
+  return (
+    left.canonicalPath === right.canonicalPath &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    left.mtimeMs === right.mtimeMs &&
+    left.sha256 === right.sha256
+  );
+}
+
+async function loadPackageScriptFacts(
+  canonicalRoot: string,
+  scriptName: PackageScriptBinding["scriptName"],
+): Promise<
+  | {
+      readonly ok: true;
+      readonly body: string;
+      readonly packageIdentity: PackageFileIdentity;
+      readonly lockIdentity: PackageFileIdentity;
+      readonly binIdentity: DirectoryIdentity;
+      readonly shell: ShellIdentity;
+      readonly pathValue: string;
+    }
+  | { readonly ok: false; readonly code: AgentExecutionFailureCode }
+> {
+  const npmrc = await rejectProjectNpmrc(canonicalRoot);
+  if (npmrc) return { ok: false, code: npmrc };
+  const alternate = await rejectAlternateLockfiles(canonicalRoot);
+  if (alternate) return { ok: false, code: alternate };
+  const manifest = await capturePackageFile(canonicalRoot, "package.json", false);
+  if (!manifest.ok) return manifest;
+  const body = scriptBodyFromManifest(manifest.bytes, scriptName);
+  if (!body.ok) return body;
+  const lock = await capturePackageFile(canonicalRoot, "package-lock.json", true);
+  if (!lock.ok) return lock;
+  const bin = await captureBinDirectory(canonicalRoot);
+  if (!bin.ok) return bin;
+  const shell = captureTrustedShell(canonicalRoot);
+  if (!shell) return { ok: false, code: "executable_not_allowed" };
+  return {
+    ok: true,
+    body: body.body,
+    packageIdentity: manifest.identity,
+    lockIdentity: lock.identity,
+    binIdentity: bin.identity,
+    shell,
+    pathValue: packageScriptChildPath(bin.identity.canonicalPath),
+  };
+}
+
+export async function preparePackageScriptApproval(input: {
+  readonly payload: unknown;
+  readonly projectRoot: string | null;
+  readonly ownerId: number;
+  readonly senderAllowed: boolean;
+}): Promise<
+  | {
+      readonly ok: true;
+      readonly previewId: string;
+      readonly scriptName: string;
+      readonly scriptBody: string;
+      readonly executable: string;
+      readonly arguments: readonly string[];
+      readonly path: string;
+      readonly workingDirectory: string;
+      readonly timeoutMs: number;
+      readonly environmentPolicy: string;
+      readonly shellWarning: string;
+      readonly packageJsonSha256: string;
+      readonly scriptBodySha256: string;
+      readonly lockfileSha256: string;
+      readonly binDirectorySha256: string;
+    }
+  | AgentExecResult
+> {
+  if (clearing) await clearing;
+  if (!input.senderAllowed) return packageScriptFailure("sender_not_allowed", input.ownerId);
+  const project = await resolveCanonicalProject(input.projectRoot);
+  if (!project.ok) return packageScriptFailure(project.code, input.ownerId);
+  const planned = planPackageScriptRequest(input.payload);
+  if (!planned.ok) {
+    recordDenial(planned.executionClass, planned.code, planned.message, input.ownerId);
+    recordApproval("denied", planned.code, planned.message, input.ownerId);
+    return {
+      ok: false,
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      durationMs: 0,
+      timedOut: false,
+      truncated: false,
+      error: planned.message,
+      code: planned.code,
+    };
+  }
+  const facts = await loadPackageScriptFacts(project.canonicalRoot, planned.scriptName);
+  if (!facts.ok) return packageScriptFailure(facts.code, input.ownerId);
+  const scriptBodySha256 = createHash("sha256").update(facts.body).digest("hex");
+  const previewId = randomBytes(16).toString("hex");
+  const ttl = testRuntime.approvalTtlMs ?? PACKAGE_SCRIPT_APPROVAL_TTL_MS;
+  const timeoutMs = testRuntime.timeoutMs ?? planned.timeoutMs;
+  packageScriptPreviews.set(previewId, {
+    id: previewId,
+    ownerId: input.ownerId,
+    sessionEpoch,
+    canonicalRoot: project.canonicalRoot,
+    scriptName: planned.scriptName,
+    scriptBody: facts.body,
+    scriptBodySha256,
+    planKey: packageScriptPlanKey({
+      scriptName: planned.scriptName,
+      scriptBodySha256,
+      pathValue: facts.pathValue,
+      shellPath: "/bin/sh",
+    }),
+    pathValue: facts.pathValue,
+    environmentPolicyKey: projectCodeEnvironmentPolicyKey(),
+    timeoutMs,
+    shell: facts.shell,
+    packageIdentity: facts.packageIdentity,
+    lockIdentity: facts.lockIdentity,
+    binIdentity: facts.binIdentity,
+    expiresAt: nowMs() + Math.max(0, ttl),
+  });
+  return {
+    ok: true,
+    previewId,
+    scriptName: planned.scriptName,
+    scriptBody: facts.body,
+    executable: "/bin/sh",
+    arguments: [],
+    path: facts.pathValue,
+    workingDirectory: project.canonicalRoot,
+    timeoutMs,
+    environmentPolicy: PACKAGE_SCRIPT_ENVIRONMENT_TEXT,
+    shellWarning: PACKAGE_SCRIPT_SHELL_WARNING,
+    packageJsonSha256: facts.packageIdentity.sha256,
+    scriptBodySha256,
+    lockfileSha256: facts.lockIdentity.sha256,
+    binDirectorySha256: facts.binIdentity.sha256,
+  };
+}
+
+export async function approvePackageScriptPreview(input: {
+  readonly previewId: unknown;
+  readonly ownerId: number;
+  readonly senderAllowed: boolean;
+}): Promise<AgentExecResult> {
+  void input.previewId;
+  if (!input.senderAllowed) return packageScriptFailure("sender_not_allowed", input.ownerId);
+  return packageScriptFailure("approval_invalid", input.ownerId);
+}
+
+async function revalidatePackageScript(
+  binding: PackageScriptBinding,
+  ownerId: number,
+  projectRoot: string | null,
+): Promise<{ readonly ok: true; readonly canonicalRoot: string } | { readonly ok: false; readonly code: AgentExecutionFailureCode }> {
+  const project = await resolveCanonicalProject(projectRoot);
+  if (!project.ok) return project;
+  const stale = packageBindingFresh(binding, ownerId, project.canonicalRoot);
+  if (stale) return { ok: false, code: stale };
+  const facts = await loadPackageScriptFacts(project.canonicalRoot, binding.scriptName);
+  if (!facts.ok) return facts;
+  if (facts.body !== binding.scriptBody) return { ok: false, code: "package_manifest_changed" };
+  if (createHash("sha256").update(facts.body).digest("hex") !== binding.scriptBodySha256) {
+    return { ok: false, code: "package_manifest_changed" };
+  }
+  if (!samePackageIdentity(facts.packageIdentity, binding.packageIdentity)) {
+    return { ok: false, code: "package_manifest_changed" };
+  }
+  if (!samePackageIdentity(facts.lockIdentity, binding.lockIdentity)) return { ok: false, code: "lockfile_changed" };
+  if (!sameDirectoryIdentity(facts.binIdentity, binding.binIdentity)) return { ok: false, code: "executable_identity_changed" };
+  if (!sameShell(facts.shell, binding.shell)) return { ok: false, code: "executable_identity_changed" };
+  if (facts.pathValue !== binding.pathValue) return { ok: false, code: "environment_not_allowed" };
+  return { ok: true, canonicalRoot: project.canonicalRoot };
+}
+
+export async function executeApprovedPackageScript(input: {
+  readonly payload: unknown;
+  readonly projectRoot: string | null;
+  readonly ownerId: number;
+  readonly senderAllowed: boolean;
+}): Promise<AgentExecResult> {
+  if (clearing) await clearing;
+  const burnPresentedToken = () => {
+    if (input.payload && typeof input.payload === "object" && !Array.isArray(input.payload)) {
+      const presented = (input.payload as { token?: unknown }).token;
+      if (typeof presented === "string") packageScriptTokens.delete(presented);
+    }
+  };
+  if (!input.senderAllowed) {
+    burnPresentedToken();
+    return packageScriptFailure("sender_not_allowed", input.ownerId);
+  }
+  if (inFlight >= AGENT_EXECUTION_MAX_CONCURRENCY) {
+    burnPresentedToken();
+    return packageScriptFailure("operation_in_progress", input.ownerId);
+  }
+  const parsed = parsePackageScriptExecutionToken(input.payload);
+  if (!parsed.ok) {
+    if (input.payload && typeof input.payload === "object" && !Array.isArray(input.payload)) {
+      const presented = (input.payload as { token?: unknown }).token;
+      if (typeof presented === "string" && /^[a-f0-9]{32}$/.test(presented)) packageScriptTokens.delete(presented);
+    }
+    recordDenial(parsed.executionClass, parsed.code, parsed.message, input.ownerId);
+    recordApproval("denied", parsed.code, parsed.message, input.ownerId);
+    return {
+      ok: false,
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      durationMs: 0,
+      timedOut: false,
+      truncated: false,
+      error: parsed.message,
+      code: parsed.code,
+    };
+  }
+  const token = packageScriptTokens.get(parsed.token);
+  packageScriptTokens.delete(parsed.token);
+  if (!token) return packageScriptFailure("approval_invalid", input.ownerId);
+  const checked = await revalidatePackageScript(token, input.ownerId, input.projectRoot);
+  if (!checked.ok) return packageScriptFailure(checked.code, input.ownerId);
+  if (testRuntime.beforeSpawn) await testRuntime.beforeSpawn();
+  const again = await revalidatePackageScript(token, input.ownerId, input.projectRoot);
+  if (!again.ok) return packageScriptFailure(again.code, input.ownerId);
+  const shellNow = captureTrustedShell(again.canonicalRoot);
+  if (!shellNow || !sameShell(shellNow, token.shell)) return packageScriptFailure("executable_identity_changed", input.ownerId);
+
+  const epochAtStart = sessionEpoch;
+  const rootAtStart = again.canonicalRoot;
+  cancelRequested = false;
+  inFlight += 1;
+  activeOwnerId = input.ownerId;
+  const start = Date.now();
+  let stdout = "";
+  let stderr = "";
+  let truncated = false;
+  let timedOut = false;
+  const cap = testRuntime.maxOutputChars ?? AGENT_COMMAND_OUTPUT_CHARS;
+  try {
+    const result = await new Promise<AgentExecResult>((resolve) => {
+      const env = buildAgentExecutionEnv("/bin");
+      env.PATH = token.pathValue;
+      const child = spawn("/bin/sh", ["-c", token.scriptBody], {
+        cwd: rootAtStart,
+        env,
+        windowsHide: true,
+        shell: false,
+        detached: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      if (typeof child.pid === "number") activePid = child.pid;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        if (typeof child.pid === "number") void terminateTrackedPids([child.pid], { termGraceMs: 200 });
+        else child.kill("SIGTERM");
+      }, token.timeoutMs);
+      const append = (dest: "out" | "err", chunk: Buffer) => {
+        const text = chunk.toString("utf8");
+        const next = (dest === "out" ? stdout : stderr) + text;
+        const clipped = next.length > cap;
+        if (clipped) truncated = true;
+        if (dest === "out") stdout = clipped ? next.slice(0, cap) : next;
+        else stderr = clipped ? next.slice(0, cap) : next;
+        if (truncated && typeof child.pid === "number") void terminateTrackedPids([child.pid], { termGraceMs: 200 });
+      };
+      child.stdout?.on("data", (chunk: Buffer) => append("out", chunk));
+      child.stderr?.on("data", (chunk: Buffer) => append("err", chunk));
+      child.on("error", (err) => {
+        clearTimeout(timer);
+        resolve({
+          ok: false,
+          exitCode: null,
+          stdout: redactSensitiveText(stdout).slice(0, cap),
+          stderr: redactSensitiveText(stderr).slice(0, cap),
+          durationMs: Date.now() - start,
+          timedOut,
+          truncated,
+          error: formatPosixSpawnError(err),
+          code: "generic_failure",
+        });
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        const exitCode = typeof code === "number" ? code : null;
+        let resultCode: AgentExecutionFailureCode | undefined;
+        if (sessionEpoch !== epochAtStart) resultCode = "project_changed";
+        else if (cancelRequested) resultCode = "cancelled";
+        else if (timedOut) resultCode = "timeout";
+        else if (truncated) resultCode = "output_limit";
+        resolve({
+          ok: exitCode === 0 && !timedOut && !truncated && !resultCode,
+          exitCode,
+          stdout: redactSensitiveText(stdout).slice(0, cap),
+          stderr: redactSensitiveText(stderr).slice(0, cap),
+          durationMs: Date.now() - start,
+          timedOut,
+          truncated,
+          error: resultCode ? agentExecutionFailureMessage(resultCode) : undefined,
+          code: resultCode,
+        });
+      });
+    });
+    if (!result.ok && result.code) {
+      recordDenial("user_approved_package_script", result.code, result.error ?? agentExecutionFailureMessage(result.code), input.ownerId);
+      recordApproval("denied", result.code, result.error ?? agentExecutionFailureMessage(result.code), input.ownerId);
+    } else {
+      recordApproval("approved", "completed", "Approved package script finished.", input.ownerId);
+    }
+    return result;
+  } finally {
+    inFlight = Math.max(0, inFlight - 1);
+    activePid = null;
+    activeOwnerId = null;
+  }
+}
+
+export async function cancelPackageScriptApproval(input: {
+  readonly previewId?: unknown;
+  readonly token?: unknown;
+  readonly ownerId: number;
+  readonly senderAllowed: boolean;
+}): Promise<{ readonly ok: true } | AgentExecResult> {
+  if (!input.senderAllowed) return packageScriptFailure("sender_not_allowed", input.ownerId);
+  if (typeof input.previewId === "string") {
+    const preview = packageScriptPreviews.get(input.previewId);
+    if (preview && preview.ownerId === input.ownerId) packageScriptPreviews.delete(input.previewId);
+  }
+  if (typeof input.token === "string") {
+    const token = packageScriptTokens.get(input.token);
+    if (token && token.ownerId === input.ownerId) packageScriptTokens.delete(input.token);
+  }
+  if (activeOwnerId === input.ownerId) {
+    cancelRequested = true;
+    const pid = activePid;
+    if (typeof pid === "number") await terminateTrackedPids([pid], { termGraceMs: 200 });
+  }
+  recordApproval("denied", "cancelled", "User cancelled package-script approval.", input.ownerId);
+  return { ok: true };
+}
+
+async function askPackageScriptConfirmation(
+  binding: PackageScriptBinding,
+  parentWindow: BrowserWindow | null,
+): Promise<"approve" | "cancel"> {
+  if (testRuntime.trustedDecision) return testRuntime.trustedDecision();
+  const nonce = randomBytes(16).toString("hex");
+  const win = new BrowserWindow({
+    parent: parentWindow ?? undefined,
+    modal: Boolean(parentWindow),
+    width: 720,
+    height: 640,
+    show: true,
+    title: "Approve package script",
+    webPreferences: {
+      preload: path.join(__dirname, "packageScriptConfirmPreload.cjs"),
+      additionalArguments: [`--project-code-nonce=${nonce}`],
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  activePackageScriptConfirm = win;
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event) => event.preventDefault());
+  win.webContents.on("will-redirect", (event) => event.preventDefault());
+  const senderId = win.webContents.id;
+  const decision = await new Promise<"approve" | "cancel">((resolve) => {
+    openChallenges.set(senderId, { nonce, resolve });
+    win.on("closed", () => {
+      if (activePackageScriptConfirm === win) activePackageScriptConfirm = null;
+      if (openChallenges.delete(senderId)) resolve("cancel");
+    });
+    win.webContents.once("did-finish-load", () => {
+      if (win.isDestroyed()) return;
+      win.webContents.send("package-script-confirm-details", {
+        scriptName: binding.scriptName,
+        scriptBody: binding.scriptBody,
+        executable: "/bin/sh",
+        arguments: "none",
+        path: binding.pathValue,
+        workingDirectory: binding.canonicalRoot,
+        timeout: `${binding.timeoutMs}ms`,
+        environmentPolicy: PACKAGE_SCRIPT_ENVIRONMENT_TEXT,
+        shellWarning: PACKAGE_SCRIPT_SHELL_WARNING,
+        packageJsonSha256: binding.packageIdentity.sha256,
+        scriptBodySha256: binding.scriptBodySha256,
+        lockfileSha256: binding.lockIdentity.present ? binding.lockIdentity.sha256 : "(no package-lock.json)",
+        binDirectorySha256: binding.binIdentity.sha256,
+      });
+    });
+    void win.loadFile(path.join(__dirname, "packageScriptConfirm.html"));
+  });
+  if (!win.isDestroyed()) win.close();
+  return decision;
+}
+
+export async function runTrustedPackageScriptConfirmation(input: {
+  readonly previewId: unknown;
+  readonly projectRoot: string | null;
+  readonly ownerId: number;
+  readonly senderAllowed: boolean;
+  readonly parentWindow?: BrowserWindow | null;
+}): Promise<AgentExecResult | { readonly ok: true; readonly held: true }> {
+  if (clearing) await clearing;
+  if (!input.senderAllowed) return packageScriptFailure("sender_not_allowed", input.ownerId);
+  if (typeof input.previewId !== "string" || !/^[a-f0-9]{32}$/.test(input.previewId)) {
+    return packageScriptFailure("approval_invalid", input.ownerId);
+  }
+  const preview = packageScriptPreviews.get(input.previewId);
+  if (!preview || !packageScriptPreviews.delete(input.previewId)) {
+    return packageScriptFailure("approval_invalid", input.ownerId);
+  }
+  const decision = await askPackageScriptConfirmation(preview, input.parentWindow ?? null);
+  if (decision !== "approve") return packageScriptFailure("cancelled", input.ownerId);
+  const checked = await revalidatePackageScript(preview, input.ownerId, input.projectRoot);
+  if (!checked.ok) return packageScriptFailure(checked.code, input.ownerId);
+  const token = randomBytes(16).toString("hex");
+  const ttl = testRuntime.approvalTtlMs ?? PACKAGE_SCRIPT_APPROVAL_TTL_MS;
+  packageScriptTokens.set(token, {
+    ...preview,
+    id: token,
+    expiresAt: nowMs() + Math.max(0, ttl),
+    sessionEpoch,
+    canonicalRoot: checked.canonicalRoot,
+  });
+  recordApproval("approved", "approved", "User approved package-script execution.", input.ownerId);
+  if (testRuntime.holdToken) {
+    testRuntime.holdToken(token);
+    return { ok: true, held: true };
+  }
+  return executeApprovedPackageScript({
+    payload: { token },
+    projectRoot: input.projectRoot,
+    ownerId: input.ownerId,
+    senderAllowed: true,
+  });
+}
+
+export async function rejectRendererPackageScriptRedemption(input: {
+  readonly payload: unknown;
+  readonly ownerId: number;
+  readonly senderAllowed: boolean;
+}): Promise<AgentExecResult> {
+  if (input.payload && typeof input.payload === "object" && !Array.isArray(input.payload)) {
+    const presented = (input.payload as { token?: unknown }).token;
+    if (typeof presented === "string") packageScriptTokens.delete(presented);
+  }
+  if (!input.senderAllowed) return packageScriptFailure("sender_not_allowed", input.ownerId);
+  return packageScriptFailure("approval_invalid", input.ownerId);
+}
+
 export function registerTerminalExecIpc(
   ipcMain: IpcMain,
   _isWithinProject: (target: string) => boolean,
@@ -1381,6 +2150,56 @@ export function registerTerminalExecIpc(
     const allowed = isAgentExecutionSenderAllowed(event, getMainWindow);
     const record = payload && typeof payload === "object" ? (payload as { previewId?: unknown; token?: unknown }) : {};
     return cancelProjectCodeApproval({
+      previewId: record.previewId,
+      token: record.token,
+      ownerId: event.sender.id,
+      senderAllowed: allowed,
+    });
+  });
+
+  ipcMain.handle("agent:packageScriptPrepare", async (event, payload: unknown) => {
+    const allowed = isAgentExecutionSenderAllowed(event, getMainWindow);
+    return preparePackageScriptApproval({
+      payload,
+      projectRoot: getProjectRoot(),
+      ownerId: event.sender.id,
+      senderAllowed: allowed,
+    });
+  });
+
+  ipcMain.handle("agent:packageScriptApprove", async (event, previewId: unknown) => {
+    const allowed = isAgentExecutionSenderAllowed(event, getMainWindow);
+    return approvePackageScriptPreview({
+      previewId,
+      ownerId: event.sender.id,
+      senderAllowed: allowed,
+    });
+  });
+
+  ipcMain.handle("agent:packageScriptExecute", async (event, payload: unknown) => {
+    const allowed = isAgentExecutionSenderAllowed(event, getMainWindow);
+    return rejectRendererPackageScriptRedemption({
+      payload,
+      ownerId: event.sender.id,
+      senderAllowed: allowed,
+    });
+  });
+
+  ipcMain.handle("agent:packageScriptConfirm", async (event, previewId: unknown) => {
+    const allowed = isAgentExecutionSenderAllowed(event, getMainWindow);
+    return runTrustedPackageScriptConfirmation({
+      previewId,
+      projectRoot: getProjectRoot(),
+      ownerId: event.sender.id,
+      senderAllowed: allowed,
+      parentWindow: getMainWindow(),
+    });
+  });
+
+  ipcMain.handle("agent:packageScriptCancel", async (event, payload: unknown) => {
+    const allowed = isAgentExecutionSenderAllowed(event, getMainWindow);
+    const record = payload && typeof payload === "object" ? (payload as { previewId?: unknown; token?: unknown }) : {};
+    return cancelPackageScriptApproval({
       previewId: record.previewId,
       token: record.token,
       ownerId: event.sender.id,

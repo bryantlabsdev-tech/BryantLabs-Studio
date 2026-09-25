@@ -9,6 +9,7 @@ interface PolicySnapshot {
   readonly kernelFirewall?: boolean;
   readonly autonomousInspection?: string;
   readonly approvedProjectCode?: string;
+  readonly approvedPackageScripts?: string;
   readonly filesystemScope: string;
   readonly shellEnabled: boolean;
   readonly gitMutationAvailableToAgents: boolean;
@@ -59,6 +60,8 @@ export function AgentExecutionPolicyPanel(props: {
           <dd data-testid="agent-execution-autonomous">{snapshot.autonomousInspection}</dd>
           <dt>Project code</dt>
           <dd data-testid="agent-execution-project-code">{snapshot.approvedProjectCode}</dd>
+          <dt>Package scripts</dt>
+          <dd data-testid="agent-execution-package-scripts">{snapshot.approvedPackageScripts}</dd>
           <dt>Filesystem</dt>
           <dd data-testid="agent-execution-filesystem">{snapshot.filesystemScope}</dd>
           <dt>Network</dt>

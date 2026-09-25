@@ -11,8 +11,10 @@ import {
   collectAgentExecutionPolicyParity,
   isSafeAgentRelativePath,
   parseAgentInspectRequest,
+  parsePackageScriptExecutionToken,
   parseProjectCodeExecutionToken,
   planAgentCommand,
+  planPackageScriptRequest,
   planProjectCodeRequest,
   routeAgentCommandToInspect,
   validateAgentCommand,
@@ -110,6 +112,8 @@ describe("agent execution policy", () => {
     assert.equal(snapshot.gitMutationAvailableToAgents, false);
     assert.match(snapshot.autonomousInspection, /no network-capable recipe/i);
     assert.match(snapshot.approvedProjectCode, /not network-isolated/i);
+    assert.match(snapshot.approvedPackageScripts, /not OS, filesystem, process, or network isolated/i);
+    assert.match(snapshot.approvedPackageScripts, /shell semantics/i);
     assert.match(snapshot.network, /No kernel firewall or OS sandbox/);
     assert.match(snapshot.filesystemScope, /do not confine/i);
     assert.match(snapshot.processLimits, /not containment/i);
@@ -179,6 +183,48 @@ describe("agent execution policy", () => {
     if (!mutated.ok) assert.equal(mutated.code, "approval_invalid");
     assert.equal(parseProjectCodeExecutionToken({ token: "forged" }).ok, false);
     assert.equal(parseProjectCodeExecutionToken({ token: "ab".repeat(16) }).ok, true);
+  });
+
+  it("plans only allowlisted package scripts and rejects shell injection", () => {
+    const planned = planPackageScriptRequest({ script: "test" });
+    assert.equal(planned.ok, true);
+    if (!planned.ok) return;
+    assert.equal(planned.executionClass, "user_approved_package_script");
+    assert.equal(planned.executable, "/bin/sh");
+    assert.deepEqual(planned.argv, ["-c"]);
+    assert.equal(planned.network, "not_isolated");
+    assert.match(planned.shellWarning, /exact script body/);
+    assert.match(planned.shellWarning, /does not run npm/i);
+    assert.match(planned.environmentPolicy, /node_modules\/\.bin/);
+    const denied = [
+      { script: "install" },
+      { script: "pretest" },
+      { script: "postbuild" },
+      { script: "dev" },
+      { script: "preview" },
+      { script: "start" },
+      { script: "npx" },
+      { script: "test", args: ["ok"] },
+      { script: "test", args: ["$(id)"] },
+      { script: "test", args: [] },
+      { script: "test", command: "npm install" },
+      { script: "npm" },
+      { script: "test:watch" },
+      { script: "--prefix" },
+    ];
+    for (const attack of denied) {
+      assert.equal(planPackageScriptRequest(attack).ok, false, JSON.stringify(attack));
+    }
+    assert.equal(planAgentCommand("npm run test").ok, false);
+    assert.equal(planAgentCommand("npx eslint").ok, false);
+    assert.equal(planAgentCommand("npm install").ok, false);
+    const mutated = parsePackageScriptExecutionToken({
+      token: "ab".repeat(16),
+      script: "lint",
+      argv: ["install"],
+    });
+    assert.equal(mutated.ok, false);
+    if (!mutated.ok) assert.equal(mutated.code, "approval_invalid");
   });
 
   it("exports a stable parity snapshot", () => {

@@ -1,6 +1,10 @@
 import { ProvidersView } from "@/components/views/ProvidersView";
 import { AgentExecutionPolicyPanel } from "@/components/views/AgentExecutionPolicyPanel";
 import {
+  PackageScriptApprovalDialog,
+  type PackageScriptApprovalPreview,
+} from "@/components/views/PackageScriptApprovalDialog";
+import {
   ProjectCodeApprovalDialog,
   type ProjectCodeApprovalPreview,
 } from "@/components/views/ProjectCodeApprovalDialog";
@@ -19,6 +23,9 @@ export function SettingsView() {
   const [preview, setPreview] = useState<ProjectCodeApprovalPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [runNote, setRunNote] = useState("");
+  const [packageScriptName, setPackageScriptName] = useState("test");
+  const [packagePreview, setPackagePreview] = useState<PackageScriptApprovalPreview | null>(null);
+  const [packageNote, setPackageNote] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +99,62 @@ export function SettingsView() {
               const ran = await api.confirmProjectCodeExecution(preview.previewId);
               setRunNote(ran.ok ? "Project script finished." : (ran.error ?? "Project script failed."));
               setPreview(null);
+              setBusy(false);
+              const nextDenials = (await api.getAgentExecutionDenials?.()) ?? [];
+              setDenials(nextDenials);
+            })();
+          }}
+        />
+      ) : null}
+      <form
+        className="project-code-request"
+        data-testid="package-script-request"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!api?.preparePackageScriptExecution || busy) return;
+          setBusy(true);
+          setPackageNote("");
+          void api
+            .preparePackageScriptExecution({ script: packageScriptName })
+            .then((result) => {
+              if (result && "previewId" in result && result.ok) {
+                setPackagePreview(result);
+              } else {
+                setPackagePreview(null);
+                setPackageNote(result && "error" in result ? (result.error ?? "Request denied.") : "Request denied.");
+              }
+            })
+            .finally(() => setBusy(false));
+        }}
+      >
+        <label htmlFor="package-script-name-input">Package script</label>
+        <input
+          id="package-script-name-input"
+          data-testid="package-script-name-input"
+          value={packageScriptName}
+          onChange={(event) => setPackageScriptName(event.target.value)}
+        />
+        <button type="submit" data-testid="package-script-review" disabled={busy}>
+          Review package script
+        </button>
+        {packageNote ? <p data-testid="package-script-note">{packageNote}</p> : null}
+      </form>
+      {packagePreview ? (
+        <PackageScriptApprovalDialog
+          preview={packagePreview}
+          busy={busy}
+          onCancel={() => {
+            const current = packagePreview;
+            setPackagePreview(null);
+            void api?.cancelPackageScriptExecution?.({ previewId: current.previewId });
+          }}
+          onApprove={() => {
+            if (!api?.confirmPackageScriptExecution) return;
+            setBusy(true);
+            void (async () => {
+              const ran = await api.confirmPackageScriptExecution(packagePreview.previewId);
+              setPackageNote(ran.ok ? "Package script finished." : (ran.error ?? "Package script failed."));
+              setPackagePreview(null);
               setBusy(false);
               const nextDenials = (await api.getAgentExecutionDenials?.()) ?? [];
               setDenials(nextDenials);

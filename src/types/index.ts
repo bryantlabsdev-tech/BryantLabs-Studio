@@ -649,6 +649,79 @@ export interface BryantLabsApi {
     readonly previewId?: string;
     readonly token?: string;
   }): Promise<{ ok: true } | { ok: false; error?: string; code?: string }>;
+  preparePackageScriptExecution(payload: {
+    readonly script: string;
+    readonly args?: readonly string[];
+  }): Promise<
+    | {
+        ok: true;
+        previewId: string;
+        scriptName: string;
+        scriptBody: string;
+        executable: string;
+        arguments: readonly string[];
+        path: string;
+        workingDirectory: string;
+        timeoutMs: number;
+        environmentPolicy: string;
+        shellWarning: string;
+        packageJsonSha256: string;
+        scriptBodySha256: string;
+        lockfileSha256: string;
+        binDirectorySha256: string;
+      }
+    | {
+        ok: false;
+        error?: string;
+        code?: string;
+        exitCode: number | null;
+        stdout: string;
+        stderr: string;
+        durationMs: number;
+        timedOut: boolean;
+        truncated: boolean;
+      }
+  >;
+  approvePackageScriptExecution(previewId: string): Promise<{
+    ok: false;
+    error?: string;
+    code?: string;
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    durationMs: number;
+    timedOut: boolean;
+    truncated: boolean;
+  }>;
+  confirmPackageScriptExecution(previewId: string): Promise<
+    | { ok: true; held?: true; exitCode?: number | null; stdout?: string; stderr?: string; durationMs?: number; timedOut?: boolean; truncated?: boolean }
+    | {
+        ok: false;
+        error?: string;
+        code?: string;
+        exitCode: number | null;
+        stdout: string;
+        stderr: string;
+        durationMs: number;
+        timedOut: boolean;
+        truncated: boolean;
+      }
+  >;
+  executeApprovedPackageScript(payload: { readonly token: string }): Promise<{
+    ok: boolean;
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    durationMs: number;
+    timedOut: boolean;
+    truncated: boolean;
+    error?: string;
+    code?: string;
+  }>;
+  cancelPackageScriptExecution(payload: {
+    readonly previewId?: string;
+    readonly token?: string;
+  }): Promise<{ ok: true } | { ok: false; error?: string; code?: string }>;
   onTerminalData(handler: (payload: { id: string; data: string }) => void): () => void;
   onTerminalExit(handler: (payload: { id: string; exitCode: number }) => void): () => void;
 }

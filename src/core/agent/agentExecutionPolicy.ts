@@ -7,8 +7,10 @@
  * cover recipes, argv, failure codes, env rules, and snapshot text.
  *
  * Autonomous agents may only run inspect recipes. A Node script inside the open
- * project may run only after a visible, single-use approval. Package scripts, npx,
- * local binaries, Git push/branch/worktree, provider networking, interactive PTY,
+ * project may run only after a visible, single-use approval. An existing
+ * package.json script may run only after a separate visible approval of that
+ * script name and body. npx, npm install, publishing, lifecycle hooks, local
+ * binaries, Git push/branch/worktree, provider networking, interactive PTY,
  * greenfield, and preview stay on their existing authority paths.
  */
 
@@ -36,10 +38,18 @@ export const PROJECT_CODE_RISK_TEXT =
 export const PROJECT_CODE_PATH_BEHAVIOR =
   "Studio runs the exact approved bytes from a private copy outside the project. __filename, __dirname, import.meta.url, and relative imports refer to that copy, not the project file. The working directory remains the project root. Arguments after the script are the arguments shown here.";
 export const PROJECT_CODE_SCRIPT_EXTENSIONS = [".js", ".mjs", ".cjs"] as const;
+export const PACKAGE_SCRIPT_APPROVAL_TTL_MS = 15_000;
+export const PACKAGE_SCRIPT_NAMES = ["build", "test", "typecheck", "lint"] as const;
+export const PACKAGE_SCRIPT_BODY_MAX_CHARS = 4_000;
+export const PACKAGE_SCRIPT_SHELL_WARNING =
+  "The exact script body shown here runs with shell semantics through /bin/sh -c. It may invoke local binaries from node_modules/.bin, nested npm or npx commands, network clients, subprocesses, and filesystem operations. Local binaries and downstream project files are not content-bound and can change independently of this approval. This confirmation is not an OS, filesystem, process, or network sandbox. Studio does not run npm, and it does not pass script arguments.";
+export const PACKAGE_SCRIPT_ENVIRONMENT_TEXT =
+  "The child receives the inspect environment allowlist. PATH is only the project's node_modules/.bin plus trusted system directories. Inherited PATH, NODE_OPTIONS, NPM_CONFIG_*, credentials, and proxy variables are not passed. A project .npmrc is rejected. Lifecycle hooks are not run.";
 
 export type AgentExecutionClass =
   | "agent_readonly_inspect"
   | "user_approved_project_code"
+  | "user_approved_package_script"
   | "product_owned_fixed"
   | "product_git_privileged"
   | "product_provider_network"
@@ -79,6 +89,9 @@ export type AgentExecutionFailureCode =
   | "recipe_not_allowed"
   | "executable_identity_changed"
   | "script_identity_changed"
+  | "package_manifest_changed"
+  | "lockfile_changed"
+  | "lifecycle_not_allowed"
   | "sender_not_allowed"
   | "project_code_not_isolated";
 
@@ -105,6 +118,9 @@ export const AGENT_EXECUTION_FAILURE_CODES: readonly AgentExecutionFailureCode[]
   "recipe_not_allowed",
   "executable_identity_changed",
   "script_identity_changed",
+  "package_manifest_changed",
+  "lockfile_changed",
+  "lifecycle_not_allowed",
   "sender_not_allowed",
   "project_code_not_isolated",
 ];
@@ -172,6 +188,32 @@ export interface AgentProjectCodeDenied {
 
 export type AgentProjectCodeDecision = AgentProjectCodePlan | AgentProjectCodeDenied;
 
+export type PackageScriptName = (typeof PACKAGE_SCRIPT_NAMES)[number];
+
+export interface AgentPackageScriptPlan {
+  readonly ok: true;
+  readonly executionClass: "user_approved_package_script";
+  readonly executable: "/bin/sh";
+  readonly scriptName: PackageScriptName;
+  readonly argv: readonly ["-c"];
+  readonly network: "not_isolated";
+  readonly timeoutMs: number;
+  readonly maxOutputChars: number;
+  readonly cwdBinding: "canonical_project_root";
+  readonly shellWarning: string;
+  readonly environmentPolicy: string;
+  readonly planKey: string;
+}
+
+export interface AgentPackageScriptDenied {
+  readonly ok: false;
+  readonly executionClass: "user_approved_package_script";
+  readonly code: AgentExecutionFailureCode;
+  readonly message: string;
+}
+
+export type AgentPackageScriptDecision = AgentPackageScriptPlan | AgentPackageScriptDenied;
+
 export interface AgentExecutionApprovalRecord {
   readonly at: number;
   readonly outcome: "approved" | "denied";
@@ -188,6 +230,7 @@ export interface AgentExecutionPolicySnapshot {
   readonly kernelFirewall: false;
   readonly autonomousInspection: string;
   readonly approvedProjectCode: string;
+  readonly approvedPackageScripts: string;
   readonly filesystemScope: string;
   readonly shellEnabled: false;
   readonly gitMutationAvailableToAgents: false;
@@ -397,6 +440,12 @@ export function agentExecutionFailureMessage(code: AgentExecutionFailureCode): s
       return "The inspect executable changed before it could run.";
     case "script_identity_changed":
       return "The project script changed after it was previewed.";
+    case "package_manifest_changed":
+      return "package.json changed after it was previewed.";
+    case "lockfile_changed":
+      return "The package lockfile changed after it was previewed.";
+    case "lifecycle_not_allowed":
+      return "Lifecycle, install, publish, and server scripts are not available on this approval.";
     case "sender_not_allowed":
       return "That window cannot run agent inspection.";
     case "project_code_not_isolated":
@@ -416,6 +465,8 @@ export function buildAgentExecutionPolicySnapshot(): AgentExecutionPolicySnapsho
       "Autonomous inspection: no network-capable recipe is exposed by the application policy.",
     approvedProjectCode:
       "Approved project-code execution is not network-isolated. A Node script runs only after a visible confirmation of the exact executable, arguments, working directory, network limitation, timeout, and script digest. Studio runs those approved bytes from a private copy; __filename, __dirname, and relative imports refer to that copy, not the project file. The working directory remains the project root. Project code can access files and the network. It is not available to autonomous agents.",
+    approvedPackageScripts:
+      "Approved package scripts are not OS, filesystem, process, or network isolated. Only an existing package.json script named build, test, typecheck, or lint can run, and only after a visible confirmation of the exact script body. Studio runs that body with shell semantics through /bin/sh -c. It does not invoke npm and it does not pass script arguments. The body may invoke local binaries, nested npm or npx, network clients, subprocesses, and filesystem operations. npm install, publishing, lifecycle hooks, preview, dev, and server commands are not this approval. Autonomous agents cannot run them.",
     filesystemScope:
       "Autonomous inspection accepts no arbitrary project code. Canonical cwd and operand validation protect Studio-owned inspect operands only; they do not confine executed project code. Safe filesystem transactions apply only to Studio-owned file operations. This is not filesystem isolation.",
     shellEnabled: false,
@@ -437,7 +488,7 @@ export function buildAgentExecutionPolicySnapshot(): AgentExecutionPolicySnapsho
       "Interactive PTY terminal (user UI, not an agent tool)",
       "Greenfield preview/install and product verification (product-owned)",
       "Provider API requests (product infrastructure)",
-      "Project package scripts, npx, and local binaries (not this approval; not autonomous)",
+      "npx, npm install, publishing, lifecycle hooks, and local binaries (not this approval; not autonomous)",
     ],
   };
 }
@@ -756,6 +807,7 @@ export function classifyRequestedExecutionClass(value: unknown): AgentExecutionC
   if (
     value === "agent_readonly_inspect" ||
     value === "user_approved_project_code" ||
+    value === "user_approved_package_script" ||
     value === "product_owned_fixed" ||
     value === "product_git_privileged" ||
     value === "product_provider_network" ||
@@ -868,6 +920,153 @@ export function planProjectCodeRequest(payload: unknown): AgentProjectCodeDecisi
   };
 }
 
+const PACKAGE_SCRIPT_LIFECYCLE = new Set([
+  "install",
+  "uninstall",
+  "preinstall",
+  "postinstall",
+  "prepare",
+  "preprepare",
+  "postprepare",
+  "prepublish",
+  "prepublishOnly",
+  "publish",
+  "postpublish",
+  "prepack",
+  "postpack",
+  "preuninstall",
+  "postuninstall",
+  "dependencies",
+  "predependencies",
+  "postdependencies",
+]);
+
+const PACKAGE_SCRIPT_BLOCKED = new Set([
+  "dev",
+  "start",
+  "serve",
+  "server",
+  "preview",
+  "watch",
+  "update",
+  "ci",
+  "pack",
+  "explore",
+  "exec",
+  "npx",
+]);
+
+function packageScriptDeny(code: AgentExecutionFailureCode): AgentPackageScriptDenied {
+  return {
+    ok: false,
+    executionClass: "user_approved_package_script",
+    code,
+    message: agentExecutionFailureMessage(code),
+  };
+}
+
+export function isAllowedPackageScriptName(value: string): value is PackageScriptName {
+  return (PACKAGE_SCRIPT_NAMES as readonly string[]).includes(value);
+}
+
+/** Approval key for the captured body. Main fills the body digest, PATH, and shell path. */
+export function packageScriptPlanKey(input: {
+  readonly scriptName: string;
+  readonly scriptBodySha256: string;
+  readonly pathValue: string;
+  readonly shellPath: string;
+}): string {
+  return JSON.stringify({
+    executable: "/bin/sh",
+    argv: ["-c"],
+    scriptName: input.scriptName,
+    scriptBodySha256: input.scriptBodySha256,
+    arguments: "rejected",
+    cwdBinding: "canonical_project_root",
+    network: "not_isolated",
+    timeoutMs: AGENT_COMMAND_TIMEOUT_MS,
+    maxOutputChars: AGENT_COMMAND_OUTPUT_CHARS,
+    environmentPolicy: projectCodeEnvironmentPolicyKey(),
+    path: input.pathValue,
+    shell: input.shellPath,
+  });
+}
+
+/**
+ * Structured package-script plan. The renderer may supply only a script name.
+ * Arguments are rejected. Main reads package.json. Not used by autonomous routing.
+ */
+export function planPackageScriptRequest(payload: unknown): AgentPackageScriptDecision {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return packageScriptDeny("invalid_request");
+  }
+  const record = payload as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (key === "args" || key === "arguments" || key === "argv") return packageScriptDeny("arguments_not_allowed");
+    if (key !== "script") return packageScriptDeny("invalid_request");
+  }
+  const script = record.script;
+  if (typeof script !== "string" || script.length === 0 || script.length > 64) {
+    return packageScriptDeny("arguments_not_allowed");
+  }
+  if (CONTROL_OR_NUL.test(script) || SHELL_METACHAR.test(script) || script.includes("/") || script.includes("\\")) {
+    return packageScriptDeny("arguments_not_allowed");
+  }
+  if (script.startsWith("-") || script.includes("=") || script.includes(" ")) {
+    return packageScriptDeny("arguments_not_allowed");
+  }
+  const lower = script.toLowerCase();
+  if (
+    PACKAGE_SCRIPT_LIFECYCLE.has(script) ||
+    PACKAGE_SCRIPT_BLOCKED.has(lower) ||
+    lower.startsWith("pre") ||
+    lower.startsWith("post") ||
+    lower.includes("install") ||
+    lower.includes("publish") ||
+    lower.includes("npx") ||
+    lower.includes("exec")
+  ) {
+    return packageScriptDeny("lifecycle_not_allowed");
+  }
+  if (!isAllowedPackageScriptName(script)) return packageScriptDeny("execution_not_allowed");
+  return {
+    ok: true,
+    executionClass: "user_approved_package_script",
+    executable: "/bin/sh",
+    scriptName: script,
+    argv: ["-c"],
+    network: "not_isolated",
+    timeoutMs: AGENT_COMMAND_TIMEOUT_MS,
+    maxOutputChars: AGENT_COMMAND_OUTPUT_CHARS,
+    cwdBinding: "canonical_project_root",
+    shellWarning: PACKAGE_SCRIPT_SHELL_WARNING,
+    environmentPolicy: PACKAGE_SCRIPT_ENVIRONMENT_TEXT,
+    planKey: packageScriptPlanKey({
+      scriptName: script,
+      scriptBodySha256: "captured-by-main",
+      pathValue: "project-node-modules-bin-plus-trusted-system-path",
+      shellPath: "/bin/sh",
+    }),
+  };
+}
+
+export function parsePackageScriptExecutionToken(
+  payload: unknown,
+): { readonly ok: true; readonly token: string } | AgentPackageScriptDenied {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return packageScriptDeny("invalid_request");
+  }
+  const record = payload as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (key !== "token") return packageScriptDeny("approval_invalid");
+  }
+  const token = record.token;
+  if (typeof token !== "string" || !/^[a-f0-9]{32}$/.test(token)) {
+    return packageScriptDeny("approval_invalid");
+  }
+  return { ok: true, token };
+}
+
 /** Execution accepts only a main-minted token. Extra fields are an altered approval. */
 export function parseProjectCodeExecutionToken(
   payload: unknown,
@@ -902,6 +1101,10 @@ export function collectAgentExecutionPolicyParity(): Record<string, unknown> {
     snapshot: buildAgentExecutionPolicySnapshot(),
     projectCodePlan: planProjectCodeRequest({ script: "scripts/hello.js", args: ["ok"] }),
     projectCodeSubstitution: planProjectCodeRequest({ script: "scripts/hello.js", args: ["$(id)"] }),
+    packageScriptPlan: planPackageScriptRequest({ script: "test" }),
+    packageScriptInstall: planPackageScriptRequest({ script: "install" }),
+    packageScriptDev: planPackageScriptRequest({ script: "dev" }),
+    packageScriptArguments: planPackageScriptRequest({ script: "test", args: ["ok"] }),
     messages: Object.fromEntries(
       AGENT_EXECUTION_FAILURE_CODES.map((code) => [code, agentExecutionFailureMessage(code)]),
     ),

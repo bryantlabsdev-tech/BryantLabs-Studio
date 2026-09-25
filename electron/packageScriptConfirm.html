@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Approve package script</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; frame-src 'none';"
+    />
+  </head>
+  <body>
+    <h1>Approve package script</h1>
+    <p id="shell-warning"></p>
+    <dl>
+      <dt>Script name</dt>
+      <dd id="script-name"></dd>
+      <dt>Script body</dt>
+      <dd id="script-body"></dd>
+      <dt>Shell</dt>
+      <dd id="executable"></dd>
+      <dt>Script arguments</dt>
+      <dd id="arguments"></dd>
+      <dt>PATH</dt>
+      <dd id="path"></dd>
+      <dt>node_modules/.bin</dt>
+      <dd id="bin-digest"></dd>
+      <dt>Project root</dt>
+      <dd id="cwd"></dd>
+      <dt>Timeout</dt>
+      <dd id="timeout"></dd>
+      <dt>Environment policy</dt>
+      <dd id="environment"></dd>
+      <dt>package.json</dt>
+      <dd id="package-digest"></dd>
+      <dt>Lockfile</dt>
+      <dd id="lock-digest"></dd>
+    </dl>
+    <button id="cancel" type="button">Cancel</button>
+    <button id="approve" type="button">Approve and run</button>
+  </body>
+</html>

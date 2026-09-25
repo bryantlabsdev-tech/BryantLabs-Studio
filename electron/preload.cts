@@ -303,6 +303,11 @@ const api = {
   executeApprovedProjectCode: (payload: unknown) => ipcRenderer.invoke("agent:projectCodeExecute", payload),
   confirmProjectCodeExecution: (previewId: unknown) => ipcRenderer.invoke("agent:projectCodeConfirm", previewId),
   cancelProjectCodeExecution: (payload: unknown) => ipcRenderer.invoke("agent:projectCodeCancel", payload),
+  preparePackageScriptExecution: (payload: unknown) => ipcRenderer.invoke("agent:packageScriptPrepare", payload),
+  approvePackageScriptExecution: (previewId: unknown) => ipcRenderer.invoke("agent:packageScriptApprove", previewId),
+  executeApprovedPackageScript: (payload: unknown) => ipcRenderer.invoke("agent:packageScriptExecute", payload),
+  confirmPackageScriptExecution: (previewId: unknown) => ipcRenderer.invoke("agent:packageScriptConfirm", previewId),
+  cancelPackageScriptExecution: (payload: unknown) => ipcRenderer.invoke("agent:packageScriptCancel", payload),
   onTerminalData: (handler: (payload: { id: string; data: string }) => void) => {
     const listener = (_event: IpcRendererEvent, payload: { id: string; data: string }) => {
       handler(payload);
