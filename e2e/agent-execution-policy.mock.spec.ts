@@ -73,6 +73,8 @@ test.describe("Agent execution policy (mock provider)", () => {
     await expect(page.getByTestId("agent-execution-project-code")).toContainText("not network-isolated");
     await expect(page.getByTestId("agent-execution-network")).toContainText("No kernel firewall or OS sandbox");
     await expect(page.getByTestId("agent-execution-filesystem")).toContainText("do not confine");
+    await expect(page.getByTestId("agent-execution-package-scripts")).toContainText("/bin/sh -c");
+    await expect(page.getByTestId("agent-execution-package-scripts")).toContainText("cmd.exe /d /s /c");
 
     const attacks = [
       { recipe: "npm_run_build" },

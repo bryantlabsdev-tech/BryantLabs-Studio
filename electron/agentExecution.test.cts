@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -1020,5 +1020,252 @@ describe("approval-gated package scripts", () => {
       senderAllowed: true,
     });
     assert.equal(oddLock.ok, false);
+  });
+
+  async function windowsFixture(): Promise<{ cmd: string; log: string }> {
+    const fixtureRoot = await realpath(await mkdtemp(path.join(tmpdir(), "bl-cmd-")));
+    const system32 = path.join(fixtureRoot, "Windows", "System32");
+    await mkdir(system32, { recursive: true });
+    const cmd = path.join(system32, "cmd.exe");
+    const log = path.join(fixtureRoot, "argv.json");
+    await writeFile(
+      cmd,
+      `#!${process.execPath}
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+const argv = process.argv.slice(2);
+const log = path.join(path.dirname(process.argv[1]), "..", "..", "argv.json");
+fs.writeFileSync(log, JSON.stringify({ argv, path: process.env.PATH, comspec: process.env.COMSPEC, pathext: process.env.PATHEXT, systemRoot: process.env.SystemRoot }));
+if (argv.length !== 4 || argv[0] !== "/d" || argv[1] !== "/s" || argv[2] !== "/c") process.exit(2);
+const env = { ...process.env, PATH: "/usr/bin:/bin:/usr/local/bin:" + (process.env.PATH || "") };
+const result = spawnSync("/bin/sh", ["-c", argv[3]], { stdio: "inherit", env });
+process.exit(result.status ?? 1);
+`,
+      "utf8",
+    );
+    await chmod(cmd, 0o755);
+    return { cmd, log };
+  }
+
+  it("runs the approved body through a verified Windows cmd argv and ignores COMSPEC", async () => {
+    const repo = await makeRepo();
+    const { cmd, log } = await windowsFixture();
+    const previousComspec = process.env.COMSPEC;
+    const previousPath = process.env.PATH;
+    process.env.COMSPEC = "/bin/echo";
+    process.env.PATH = "/tmp/evil-path";
+    process.env.SystemRoot = "D:\\AttackerWin";
+    process.env.WINDIR = "D:\\AttackerWin";
+    setAgentExecutionRuntimeForTests({
+      now: 1_700_000_000_000,
+      trustedDecision: async () => "approve",
+      platform: "win32",
+      windowsShellFixture: cmd,
+    });
+    const body = `${process.execPath} -e "process.stdout.write('win-ok')"`;
+    try {
+      await writePackage(repo, { test: body });
+      const prepared = await preparePackageScriptApproval({
+        payload: { script: "test" },
+        projectRoot: repo,
+        ownerId: 7,
+        senderAllowed: true,
+      });
+      assert.equal(prepared.ok, true, !prepared.ok ? `${prepared.code} ${prepared.error}` : "");
+      if (!prepared.ok || !("previewId" in prepared)) return;
+      assert.equal(prepared.executable, cmd);
+      assert.match(prepared.shellWarning, /cmd\.exe \/d \/s \/c/);
+      assert.match(prepared.path, /node_modules\/\.bin;.*System32;/);
+      assert.equal(prepared.path.includes("/tmp/evil-path"), false);
+      let token = "";
+      setAgentExecutionRuntimeForTests({
+        holdToken: (value) => {
+          token = value;
+        },
+      });
+      const held = await runTrustedPackageScriptConfirmation({
+        previewId: prepared.previewId,
+        projectRoot: repo,
+        ownerId: 7,
+        senderAllowed: true,
+      });
+      assert.equal(held.ok, true, !held.ok ? `${held.code} ${held.error}` : "");
+      const ran = await executeApprovedPackageScript({
+        payload: { token },
+        projectRoot: repo,
+        ownerId: 7,
+        senderAllowed: true,
+      });
+      assert.equal(ran.ok, true, `${ran.code ?? ""} ${ran.stderr}`);
+      assert.equal(ran.stdout, "win-ok");
+      const recorded = JSON.parse(await readFile(log, "utf8")) as {
+        argv: string[];
+        path: string;
+        comspec: string;
+        pathext: string;
+        systemRoot: string;
+      };
+      assert.deepEqual(recorded.argv, ["/d", "/s", "/c", body]);
+      assert.equal(recorded.comspec, cmd);
+      assert.equal(recorded.pathext, ".COM;.EXE;.BAT;.CMD");
+      assert.equal(recorded.systemRoot, path.dirname(path.dirname(cmd)));
+      assert.equal(recorded.path.includes("/tmp/evil-path"), false);
+      const replay = await executeApprovedPackageScript({
+        payload: { token },
+        projectRoot: repo,
+        ownerId: 7,
+        senderAllowed: true,
+      });
+      assert.equal(replay.code, "approval_invalid");
+    } finally {
+      if (previousComspec === undefined) delete process.env.COMSPEC;
+      else process.env.COMSPEC = previousComspec;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      delete process.env.SystemRoot;
+      delete process.env.WINDIR;
+      resetAgentExecutionRuntimeForTests();
+    }
+  });
+
+  it("fails closed on Windows when COMSPEC, a symlink, identity, npmrc, or the window changes", async () => {
+    const repo = await makeRepo();
+    await writePackage(repo, { test: `${process.execPath} -e "process.stdout.write('no')"` });
+    const previous = process.env.COMSPEC;
+    process.env.COMSPEC = "/bin/sh";
+    process.env.SystemRoot = "D:\\AttackerWin";
+    process.env.WINDIR = "D:\\AttackerWin";
+    setAgentExecutionRuntimeForTests({ platform: "win32" });
+    const missing = await preparePackageScriptApproval({
+      payload: { script: "test" },
+      projectRoot: repo,
+      ownerId: 7,
+      senderAllowed: true,
+    });
+    assert.equal(missing.ok, false);
+    if (!missing.ok) assert.equal(missing.code, "executable_not_allowed");
+    if (previous === undefined) delete process.env.COMSPEC;
+    else process.env.COMSPEC = previous;
+    delete process.env.SystemRoot;
+    delete process.env.WINDIR;
+
+    const fixtureRoot = await mkdtemp(path.join(tmpdir(), "bl-cmd-link-"));
+    const real = path.join(fixtureRoot, "real-cmd");
+    const link = path.join(fixtureRoot, "cmd.exe");
+    await writeFile(real, "#!/bin/sh\nexit 0\n", "utf8");
+    await chmod(real, 0o755);
+    await symlink(real, link);
+    setAgentExecutionRuntimeForTests({ platform: "win32", windowsShellFixture: link });
+    const linked = await preparePackageScriptApproval({
+      payload: { script: "test" },
+      projectRoot: repo,
+      ownerId: 7,
+      senderAllowed: true,
+    });
+    assert.equal(linked.ok, false);
+    if (!linked.ok) assert.equal(linked.code, "executable_not_allowed");
+
+    const { cmd } = await windowsFixture();
+    setAgentExecutionRuntimeForTests({
+      platform: "win32",
+      windowsShellFixture: cmd,
+      trustedDecision: async () => "approve",
+    });
+    await writeFile(path.join(repo, ".npmrc"), "script-shell=/bin/echo\n", "utf8");
+    const npmrc = await preparePackageScriptApproval({
+      payload: { script: "test" },
+      projectRoot: repo,
+      ownerId: 7,
+      senderAllowed: true,
+    });
+    assert.equal(npmrc.ok, false);
+    if (!npmrc.ok) assert.equal(npmrc.code, "environment_not_allowed");
+    await rm(path.join(repo, ".npmrc"));
+
+    await writePackage(repo, { test: `${process.execPath} -e "process.stdout.write('ok')"` });
+    const preview = await preparePackageScriptApproval({
+      payload: { script: "test" },
+      projectRoot: repo,
+      ownerId: 7,
+      senderAllowed: true,
+    });
+    assert.equal(preview.ok, true);
+    if (!preview.ok || !("previewId" in preview)) return;
+    let token = "";
+    setAgentExecutionRuntimeForTests({
+      holdToken: (value) => {
+        token = value;
+      },
+    });
+    const held = await runTrustedPackageScriptConfirmation({
+      previewId: preview.previewId,
+      projectRoot: repo,
+      ownerId: 7,
+      senderAllowed: true,
+    });
+    assert.equal(held.ok, true, !held.ok ? `${held.code}` : "");
+    await writeFile(cmd, `${await readFile(cmd, "utf8")}\n`, "utf8");
+    const changed = await executeApprovedPackageScript({
+      payload: { token },
+      projectRoot: repo,
+      ownerId: 7,
+      senderAllowed: true,
+    });
+    assert.equal(changed.code, "executable_identity_changed");
+
+    const previewAgain = await preparePackageScriptApproval({
+      payload: { script: "test" },
+      projectRoot: repo,
+      ownerId: 7,
+      senderAllowed: true,
+    });
+    assert.equal(previewAgain.ok, true);
+    if (!previewAgain.ok || !("previewId" in previewAgain)) return;
+    let cross = "";
+    setAgentExecutionRuntimeForTests({
+      holdToken: (value) => {
+        cross = value;
+      },
+    });
+    const heldCross = await runTrustedPackageScriptConfirmation({
+      previewId: previewAgain.previewId,
+      projectRoot: repo,
+      ownerId: 7,
+      senderAllowed: true,
+    });
+    assert.equal(heldCross.ok, true);
+    const otherWindow = await executeApprovedPackageScript({
+      payload: { token: cross },
+      projectRoot: repo,
+      ownerId: 8,
+      senderAllowed: true,
+    });
+    assert.equal(otherWindow.code, "approval_invalid");
+    resetAgentExecutionRuntimeForTests();
+  });
+
+  it("ignores Windows shell fixtures outside the test runner", async () => {
+    const repo = await makeRepo();
+    const { cmd } = await windowsFixture();
+    await writePackage(repo, { test: `${process.execPath} -e "process.stdout.write('no')"` });
+    const previous = process.env.NODE_TEST_CONTEXT;
+    delete process.env.NODE_TEST_CONTEXT;
+    setAgentExecutionRuntimeForTests({ platform: "win32", windowsShellFixture: cmd });
+    try {
+      const prepared = await preparePackageScriptApproval({
+        payload: { script: "test" },
+        projectRoot: repo,
+        ownerId: 7,
+        senderAllowed: true,
+      });
+      assert.equal(prepared.ok, true, !prepared.ok ? `${prepared.code}` : "");
+      if (!prepared.ok || !("previewId" in prepared)) return;
+      assert.equal(prepared.executable, "/bin/sh");
+    } finally {
+      if (previous === undefined) delete process.env.NODE_TEST_CONTEXT;
+      else process.env.NODE_TEST_CONTEXT = previous;
+      resetAgentExecutionRuntimeForTests();
+    }
   });
 });

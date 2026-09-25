@@ -14,6 +14,8 @@ import {
   parsePackageScriptExecutionToken,
   parseProjectCodeExecutionToken,
   planAgentCommand,
+  isTrustedWindowsSystemShellPath,
+  packageScriptShellWarning,
   planPackageScriptRequest,
   planProjectCodeRequest,
   routeAgentCommandToInspect,
@@ -193,6 +195,17 @@ describe("agent execution policy", () => {
     assert.equal(planned.executable, "/bin/sh");
     assert.deepEqual(planned.argv, ["-c"]);
     assert.equal(planned.network, "not_isolated");
+    assert.match(packageScriptShellWarning("win32"), /cmd\.exe \/d \/s \/c/);
+    assert.match(packageScriptShellWarning("win32"), /C:\\Windows\\System32\\reg.exe/);
+    assert.match(packageScriptShellWarning("win32"), /canonicalizes to C:\\Windows/);
+    assert.match(packageScriptShellWarning("win32"), /does not trust COMSPEC, PATH, SystemRoot, or WINDIR/);
+    assert.equal(isTrustedWindowsSystemShellPath("C:\\Windows\\System32\\cmd.exe"), true);
+    assert.equal(isTrustedWindowsSystemShellPath("C:\\Windows\\Sysnative\\cmd.exe"), true);
+    assert.equal(isTrustedWindowsSystemShellPath("D:\\Windows\\System32\\cmd.exe"), false);
+    assert.equal(isTrustedWindowsSystemShellPath("C:\\Windows\\SysWOW64\\cmd.exe"), false);
+    assert.equal(isTrustedWindowsSystemShellPath("C:\\Windows\\System32\\powershell.exe"), false);
+    assert.equal(isTrustedWindowsSystemShellPath("C:\\evil\\cmd.exe"), false);
+    assert.equal(isTrustedWindowsSystemShellPath("%COMSPEC%"), false);
     assert.match(planned.shellWarning, /exact script body/);
     assert.match(planned.shellWarning, /does not run npm/i);
     assert.match(planned.environmentPolicy, /node_modules\/\.bin/);

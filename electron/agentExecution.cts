@@ -18,7 +18,6 @@ import {
   PACKAGE_SCRIPT_APPROVAL_TTL_MS,
   PACKAGE_SCRIPT_BODY_MAX_CHARS,
   PACKAGE_SCRIPT_ENVIRONMENT_TEXT,
-  PACKAGE_SCRIPT_SHELL_WARNING,
   PROJECT_CODE_APPROVAL_TTL_MS,
   PROJECT_CODE_NETWORK_LIMITATION,
   PROJECT_CODE_PATH_BEHAVIOR,
@@ -27,7 +26,11 @@ import {
   agentExecutionFailureMessage,
   buildAgentExecutionPolicySnapshot,
   isForbiddenAgentLocation,
+  PACKAGE_SCRIPT_POSIX_ARGV,
+  PACKAGE_SCRIPT_WINDOWS_ARGV,
+  isTrustedWindowsSystemShellPath,
   packageScriptPlanKey,
+  packageScriptShellWarning,
   parseAgentInspectRequest,
   parsePackageScriptExecutionToken,
   parseProjectCodeExecutionToken,
@@ -85,6 +88,8 @@ interface Runtime {
   executableOverrides?: Partial<Record<AgentExecutableIdentity, string>>;
   beforeSpawn?: () => Promise<void> | void;
   trustedDecision?: () => Promise<"approve" | "cancel">;
+  platform?: "win32" | "darwin" | "linux";
+  windowsShellFixture?: string;
   holdToken?: (token: string) => void;
   snapshotRoot?: string;
   afterSeal?: () => Promise<void> | void;
@@ -1343,7 +1348,8 @@ interface DirectoryIdentity {
 }
 
 interface ShellIdentity {
-  readonly path: "/bin/sh";
+  readonly requestedPath: string;
+  readonly argvPrefix: readonly string[];
   readonly linkDev: number;
   readonly linkIno: number;
   readonly linkSize: number;
@@ -1473,28 +1479,66 @@ function scriptBodyFromManifest(bytes: Buffer, scriptName: string): { readonly o
   return { ok: true, body };
 }
 
-function captureTrustedShell(projectRoot: string): ShellIdentity | null {
-  if (process.platform === "win32") return null;
+function packageScriptTestOverridesEnabled(): boolean {
+  return typeof process.env.NODE_TEST_CONTEXT === "string" && process.env.NODE_TEST_CONTEXT.length > 0;
+}
+
+function executionPlatform(): "win32" | "posix" {
+  const platform = packageScriptTestOverridesEnabled() ? testRuntime.platform ?? process.platform : process.platform;
+  return platform === "win32" ? "win32" : "posix";
+}
+
+function shellInsideProject(real: string, projectRoot: string): boolean {
+  return real === projectRoot || real.startsWith(`${projectRoot}${path.sep}`) || real.startsWith(`${projectRoot}/`);
+}
+
+function captureShellFile(requestedPath: string, argvPrefix: readonly string[], projectRoot: string): ShellIdentity | null {
+  let link;
+  try {
+    link = lstatSync(requestedPath);
+  } catch {
+    return null;
+  }
+  if (link.isSymbolicLink() || !link.isFile()) return null;
+  const real = realpathOrNull(requestedPath);
+  if (!real || real !== requestedPath) return null;
+  if (shellInsideProject(real, projectRoot) || isForbiddenAgentLocation(real)) return null;
+  return {
+    requestedPath,
+    argvPrefix,
+    linkDev: link.dev,
+    linkIno: link.ino,
+    linkSize: link.size,
+    linkMtimeMs: link.mtimeMs,
+    realPath: real,
+    dev: link.dev,
+    ino: link.ino,
+    size: link.size,
+    mtimeMs: link.mtimeMs,
+  };
+}
+
+function captureTrustedPosixShell(projectRoot: string): ShellIdentity | null {
+  const real = realpathOrNull("/bin/sh");
+  if (!real) return null;
+  if (!(real === "/bin/sh" || real === "/bin/bash" || real.startsWith("/bin/") || real.startsWith("/usr/bin/"))) return null;
+  if (shellInsideProject(real, projectRoot) || isForbiddenAgentLocation(real)) return null;
   let link;
   try {
     link = lstatSync("/bin/sh");
   } catch {
     return null;
   }
-  const real = realpathOrNull("/bin/sh");
-  if (!real) return null;
-  if (real === projectRoot || real.startsWith(`${projectRoot}${path.sep}`)) return null;
-  if (isForbiddenAgentLocation(real)) return null;
-  if (!(real === "/bin/sh" || real === "/bin/bash" || real.startsWith("/bin/") || real.startsWith("/usr/bin/"))) return null;
   let file;
   try {
     file = lstatSync(real);
   } catch {
     return null;
   }
-  if (!file.isFile() || file.isSymbolicLink()) return null;
+  if (file.isSymbolicLink() || !file.isFile()) return null;
   return {
-    path: "/bin/sh",
+    requestedPath: "/bin/sh",
+    argvPrefix: PACKAGE_SCRIPT_POSIX_ARGV,
     linkDev: link.dev,
     linkIno: link.ino,
     linkSize: link.size,
@@ -1507,8 +1551,89 @@ function captureTrustedShell(projectRoot: string): ShellIdentity | null {
   };
 }
 
+const CANONICAL_WINDOWS_ROOT = "C:\\Windows";
+const CANONICAL_WINDOWS_REG = "C:\\Windows\\System32\\reg.exe";
+
+function windowsInstallRoot(): string | null {
+  if (process.platform !== "win32") return null;
+  let link;
+  try {
+    link = lstatSync(CANONICAL_WINDOWS_REG);
+  } catch {
+    return null;
+  }
+  if (!link.isFile() || link.isSymbolicLink()) return null;
+  if (realpathOrNull(CANONICAL_WINDOWS_REG) !== CANONICAL_WINDOWS_REG) return null;
+  let output = "";
+  try {
+    output = execFileSync(
+      CANONICAL_WINDOWS_REG,
+      ["query", "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "/v", "SystemRoot"],
+      {
+        encoding: "utf8",
+        windowsHide: true,
+        shell: false,
+        timeout: 5_000,
+        env: {
+          SystemRoot: CANONICAL_WINDOWS_ROOT,
+          SYSTEMROOT: CANONICAL_WINDOWS_ROOT,
+          WINDIR: CANONICAL_WINDOWS_ROOT,
+          PATH: "C:\\Windows\\System32",
+        },
+      },
+    );
+  } catch {
+    return null;
+  }
+  const match = output.match(/SystemRoot\s+REG_SZ\s+(\S+)/i);
+  if (!match) return null;
+  const reported = match[1].replace(/\//g, "\\").replace(/\\+$/, "");
+  if (reported !== CANONICAL_WINDOWS_ROOT) return null;
+  let rootStat;
+  try {
+    rootStat = lstatSync(reported);
+  } catch {
+    return null;
+  }
+  if (rootStat.isSymbolicLink()) return null;
+  if (realpathOrNull(reported) !== CANONICAL_WINDOWS_ROOT) return null;
+  return CANONICAL_WINDOWS_ROOT;
+}
+
+function windowsShellCandidates(): readonly string[] {
+  const fixture = packageScriptTestOverridesEnabled() ? testRuntime.windowsShellFixture : undefined;
+  if (typeof fixture === "string" && fixture.length > 0) return [fixture];
+  const root = windowsInstallRoot();
+  if (!root) return [];
+  return ["System32", "Sysnative"].map((folder) => path.win32.join(root, folder, "cmd.exe"));
+}
+
+function captureTrustedWindowsShell(projectRoot: string): ShellIdentity | null {
+  const fixture =
+    packageScriptTestOverridesEnabled() &&
+    typeof testRuntime.windowsShellFixture === "string" &&
+    testRuntime.windowsShellFixture.length > 0;
+  for (const candidate of windowsShellCandidates()) {
+    if (fixture) {
+      if (candidate.includes("\0") || !path.isAbsolute(candidate)) continue;
+    } else if (!isTrustedWindowsSystemShellPath(candidate)) {
+      continue;
+    }
+    const shell = captureShellFile(candidate, PACKAGE_SCRIPT_WINDOWS_ARGV, projectRoot);
+    if (shell) return shell;
+  }
+  return null;
+}
+
+function captureTrustedShell(projectRoot: string): ShellIdentity | null {
+  if (executionPlatform() === "win32") return captureTrustedWindowsShell(projectRoot);
+  return captureTrustedPosixShell(projectRoot);
+}
+
 function sameShell(left: ShellIdentity, right: ShellIdentity): boolean {
   return (
+    left.requestedPath === right.requestedPath &&
+    left.argvPrefix.join("\0") === right.argvPrefix.join("\0") &&
     left.realPath === right.realPath &&
     left.linkDev === right.linkDev &&
     left.linkIno === right.linkIno &&
@@ -1521,8 +1646,28 @@ function sameShell(left: ShellIdentity, right: ShellIdentity): boolean {
   );
 }
 
-function packageScriptChildPath(binDir: string): string {
+function packageScriptChildPath(binDir: string, shell: ShellIdentity): string {
+  if (executionPlatform() === "win32") {
+    const systemDir = path.dirname(shell.requestedPath);
+    const windowsDir = path.dirname(systemDir);
+    if (!systemDir || !windowsDir || systemDir === "." || windowsDir === ".") return "";
+    return [binDir, systemDir, windowsDir].join(";");
+  }
   return [binDir, ...trustedInspectPath().split(path.delimiter)].filter(Boolean).join(path.delimiter);
+}
+
+function buildPackageScriptEnv(shellReal: string, pathValue: string): NodeJS.ProcessEnv {
+  const env = buildAgentExecutionEnv(path.dirname(shellReal));
+  env.PATH = pathValue;
+  if (executionPlatform() === "win32") {
+    const windowsDir = path.dirname(path.dirname(shellReal));
+    env.COMSPEC = shellReal;
+    env.PATHEXT = ".COM;.EXE;.BAT;.CMD";
+    env.SYSTEMROOT = windowsDir;
+    env.SystemRoot = windowsDir;
+    env.WINDIR = windowsDir;
+  }
+  return env;
 }
 
 function packageBindingFresh(binding: PackageScriptBinding, ownerId: number, canonicalRoot: string): AgentExecutionFailureCode | null {
@@ -1536,7 +1681,8 @@ function packageBindingFresh(binding: PackageScriptBinding, ownerId: number, can
     scriptName: binding.scriptName,
     scriptBodySha256: binding.scriptBodySha256,
     pathValue: binding.pathValue,
-    shellPath: "/bin/sh",
+    shellPath: binding.shell.requestedPath,
+    argvPrefix: binding.shell.argvPrefix,
   });
   if (key !== binding.planKey) return "approval_invalid";
   return null;
@@ -1655,6 +1801,8 @@ async function loadPackageScriptFacts(
   if (!bin.ok) return bin;
   const shell = captureTrustedShell(canonicalRoot);
   if (!shell) return { ok: false, code: "executable_not_allowed" };
+  const pathValue = packageScriptChildPath(bin.identity.canonicalPath, shell);
+  if (pathValue.length === 0 || pathValue.includes("\0")) return { ok: false, code: "environment_not_allowed" };
   return {
     ok: true,
     body: body.body,
@@ -1662,7 +1810,7 @@ async function loadPackageScriptFacts(
     lockIdentity: lock.identity,
     binIdentity: bin.identity,
     shell,
-    pathValue: packageScriptChildPath(bin.identity.canonicalPath),
+    pathValue,
   };
 }
 
@@ -1729,7 +1877,8 @@ export async function preparePackageScriptApproval(input: {
       scriptName: planned.scriptName,
       scriptBodySha256,
       pathValue: facts.pathValue,
-      shellPath: "/bin/sh",
+      shellPath: facts.shell.requestedPath,
+      argvPrefix: facts.shell.argvPrefix,
     }),
     pathValue: facts.pathValue,
     environmentPolicyKey: projectCodeEnvironmentPolicyKey(),
@@ -1745,13 +1894,13 @@ export async function preparePackageScriptApproval(input: {
     previewId,
     scriptName: planned.scriptName,
     scriptBody: facts.body,
-    executable: "/bin/sh",
+    executable: facts.shell.requestedPath,
     arguments: [],
     path: facts.pathValue,
     workingDirectory: project.canonicalRoot,
     timeoutMs,
     environmentPolicy: PACKAGE_SCRIPT_ENVIRONMENT_TEXT,
-    shellWarning: PACKAGE_SCRIPT_SHELL_WARNING,
+    shellWarning: packageScriptShellWarning(executionPlatform()),
     packageJsonSha256: facts.packageIdentity.sha256,
     scriptBodySha256,
     lockfileSha256: facts.lockIdentity.sha256,
@@ -1859,11 +2008,9 @@ export async function executeApprovedPackageScript(input: {
   const cap = testRuntime.maxOutputChars ?? AGENT_COMMAND_OUTPUT_CHARS;
   try {
     const result = await new Promise<AgentExecResult>((resolve) => {
-      const env = buildAgentExecutionEnv("/bin");
-      env.PATH = token.pathValue;
-      const child = spawn("/bin/sh", ["-c", token.scriptBody], {
+      const child = spawn(shellNow.realPath, [...shellNow.argvPrefix, token.scriptBody], {
         cwd: rootAtStart,
-        env,
+        env: buildPackageScriptEnv(shellNow.realPath, token.pathValue),
         windowsHide: true,
         shell: false,
         detached: false,
@@ -1996,13 +2143,13 @@ async function askPackageScriptConfirmation(
       win.webContents.send("package-script-confirm-details", {
         scriptName: binding.scriptName,
         scriptBody: binding.scriptBody,
-        executable: "/bin/sh",
+        executable: binding.shell.requestedPath,
         arguments: "none",
         path: binding.pathValue,
         workingDirectory: binding.canonicalRoot,
         timeout: `${binding.timeoutMs}ms`,
         environmentPolicy: PACKAGE_SCRIPT_ENVIRONMENT_TEXT,
-        shellWarning: PACKAGE_SCRIPT_SHELL_WARNING,
+        shellWarning: packageScriptShellWarning(executionPlatform()),
         packageJsonSha256: binding.packageIdentity.sha256,
         scriptBodySha256: binding.scriptBodySha256,
         lockfileSha256: binding.lockIdentity.present ? binding.lockIdentity.sha256 : "(no package-lock.json)",

@@ -83,6 +83,7 @@ test.describe("Approval-gated package scripts (mock provider)", () => {
     await expect(page.getByTestId("package-script-timeout")).toContainText("ms");
     await expect(page.getByTestId("package-script-environment")).toContainText("node_modules/.bin");
     await expect(page.getByTestId("package-script-warning")).toContainText("not content-bound");
+    await expect(page.getByTestId("package-script-warning")).toContainText("/bin/sh -c");
     await page.getByTestId("package-script-cancel").click();
     await expect(page.getByTestId("package-script-approval")).toHaveCount(0);
 
