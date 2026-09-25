@@ -1,4 +1,5 @@
 export const GIT_BRANCH_IPC_FAILURE_MESSAGE = "Branch change failed.";
+export const GIT_WORKTREE_IPC_FAILURE_MESSAGE = "Worktree change failed.";
 
 export function isBackdropDismissTarget(
   target: EventTarget | null,

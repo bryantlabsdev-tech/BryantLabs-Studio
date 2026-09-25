@@ -164,7 +164,7 @@ test.describe("Safe Git branch create/switch (mock provider)", () => {
     expect(afterSwitch.hashes.get("README.md")).toBe(before.hashes.get("README.md"));
 
     await fs.writeFile(path.join(repo, "dirty-e2e.txt"), "dirty\n", "utf8");
-    await page.getByRole("button", { name: "Refresh" }).click();
+    await page.getByTestId("git-refresh").click();
     await expect(page.locator(".git-view__dirty")).toContainText(/changes/, { timeout: 10_000 });
     await expect(page.getByTestId("git-branch-select")).toBeDisabled();
     await expect(page.getByTestId("git-branch-create-btn")).toBeDisabled();

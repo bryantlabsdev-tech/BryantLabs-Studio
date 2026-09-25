@@ -148,6 +148,15 @@ const api = {
     ipcRenderer.invoke("git:branchPreflight", payload),
   gitBranchExecute: (token: string) => ipcRenderer.invoke("git:branchExecute", token),
   gitBranchCancel: (token: string) => ipcRenderer.invoke("git:branchCancel", token),
+  gitListWorktrees: () => ipcRenderer.invoke("git:worktreeList"),
+  gitWorktreeCreatePreflight: (payload: { destinationBranch: string }) =>
+    ipcRenderer.invoke("git:worktreeCreatePreflight", payload),
+  gitWorktreeCreateExecute: (token: string) => ipcRenderer.invoke("git:worktreeCreateExecute", token),
+  gitWorktreeRemovePreflight: (payload: { id: string }) =>
+    ipcRenderer.invoke("git:worktreeRemovePreflight", payload),
+  gitWorktreeRemoveExecute: (token: string) => ipcRenderer.invoke("git:worktreeRemoveExecute", token),
+  gitWorktreeCancel: (token: string) => ipcRenderer.invoke("git:worktreeCancel", token),
+  gitWorktreeOpen: (payload: { id: string }) => ipcRenderer.invoke("git:worktreeOpen", payload),
   applyEdit: (
     filePath: string,
     expectedBefore: string,

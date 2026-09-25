@@ -70,6 +70,18 @@ import {
   prepareGitBranch,
   revokeGitBranchOwner,
 } from "./gitBranch.cjs";
+import {
+  cancelGitWorktreeToken,
+  clearGitWorktreeSession,
+  executeApprovedGitWorktreeCreate,
+  executeApprovedGitWorktreeRemove,
+  listStudioWorktrees,
+  prepareGitWorktreeCreate,
+  prepareGitWorktreeRemove,
+  resolveGitWorktreeOpen,
+  revokeGitWorktreeOwner,
+  worktreeFailureMessage,
+} from "./gitWorktree.cjs";
 import { createFsUndoIo, createLastEditStore, parseUndoBatchEntries } from "./lastEditBatch.cjs";
 import { runVerification, type VerificationResult } from "./verifier.cjs";
 import {
@@ -294,6 +306,7 @@ function createWindow(): void {
     mainWindow = null;
     clearGitPushSession();
     void clearGitBranchSession();
+    void clearGitWorktreeSession();
   });
 
   if (DEV_SERVER_URL) {
@@ -305,12 +318,13 @@ function createWindow(): void {
 
 /** Switch the open project — tears down PTYs, preview, and stale index work first. */
 async function switchProjectRoot(selected: string): Promise<void> {
+  clearGitPushSession();
+  await clearGitBranchSession();
+  await clearGitWorktreeSession();
   const approved = approveWorkspaceRoot(selected);
   await switchToProjectRoot(approved, async (root) => {
     projectRoot = root;
     lastEditStore.clear();
-    clearGitPushSession();
-    await clearGitBranchSession();
     hydrateProjectAfterSwitch(root);
     await activateProjectIndex(root, () => mainWindow);
   });
@@ -573,6 +587,99 @@ function registerIpcHandlers(): void {
   ipcMain.handle("git:branchCancel", async (event, token: unknown) => {
     if (typeof token === "string") cancelGitBranchToken(token, event.sender.id);
     return { ok: true as const };
+  });
+
+  const worktreeOwnersBound = new Set<number>();
+  const bindWorktreeOwner = (sender: Electron.WebContents): number => {
+    const ownerId = sender.id;
+    if (!worktreeOwnersBound.has(ownerId)) {
+      worktreeOwnersBound.add(ownerId);
+      sender.once("destroyed", () => {
+        worktreeOwnersBound.delete(ownerId);
+        revokeGitWorktreeOwner(ownerId);
+      });
+    }
+    return ownerId;
+  };
+
+  const stillOpenRoot = (canonical: string): boolean => {
+    if (!projectRoot) return false;
+    try {
+      return realpathSync(projectRoot) === canonical;
+    } catch {
+      return false;
+    }
+  };
+
+  ipcMain.handle("git:worktreeList", async () => {
+    if (!projectRoot) {
+      return { ok: false as const, code: "no_project" as const, message: worktreeFailureMessage("no_project") };
+    }
+    return listStudioWorktrees(projectRoot);
+  });
+
+  ipcMain.handle("git:worktreeCreatePreflight", async (event, payload: unknown) => {
+    if (!projectRoot) {
+      return { ok: false as const, code: "no_project" as const, message: worktreeFailureMessage("no_project") };
+    }
+    const ownerId = bindWorktreeOwner(event.sender);
+    const body =
+      payload && typeof payload === "object"
+        ? (payload as { destinationBranch?: unknown })
+        : {};
+    return prepareGitWorktreeCreate(projectRoot, { destinationBranch: body.destinationBranch }, { ownerId });
+  });
+
+  ipcMain.handle("git:worktreeCreateExecute", async (event, token: unknown) => {
+    if (!projectRoot) {
+      return { ok: false as const, code: "no_project" as const, message: worktreeFailureMessage("no_project") };
+    }
+    if (typeof token !== "string") {
+      return { ok: false as const, code: "token_invalid" as const, message: worktreeFailureMessage("token_invalid") };
+    }
+    const ownerId = bindWorktreeOwner(event.sender);
+    return executeApprovedGitWorktreeCreate(projectRoot, token, { ownerId, isStillOpenRoot: stillOpenRoot });
+  });
+
+  ipcMain.handle("git:worktreeRemovePreflight", async (event, payload: unknown) => {
+    if (!projectRoot) {
+      return { ok: false as const, code: "no_project" as const, message: worktreeFailureMessage("no_project") };
+    }
+    const ownerId = bindWorktreeOwner(event.sender);
+    const body = payload && typeof payload === "object" ? (payload as { id?: unknown }) : {};
+    return prepareGitWorktreeRemove(projectRoot, { id: body.id }, { ownerId });
+  });
+
+  ipcMain.handle("git:worktreeRemoveExecute", async (event, token: unknown) => {
+    if (!projectRoot) {
+      return { ok: false as const, code: "no_project" as const, message: worktreeFailureMessage("no_project") };
+    }
+    if (typeof token !== "string") {
+      return { ok: false as const, code: "token_invalid" as const, message: worktreeFailureMessage("token_invalid") };
+    }
+    const ownerId = bindWorktreeOwner(event.sender);
+    return executeApprovedGitWorktreeRemove(projectRoot, token, { ownerId, isStillOpenRoot: stillOpenRoot });
+  });
+
+  ipcMain.handle("git:worktreeCancel", async (event, token: unknown) => {
+    if (typeof token === "string") cancelGitWorktreeToken(token, event.sender.id);
+    return { ok: true as const };
+  });
+
+  ipcMain.handle("git:worktreeOpen", async (event, payload: unknown) => {
+    if (!projectRoot) {
+      return { ok: false as const, code: "no_project" as const, message: worktreeFailureMessage("no_project") };
+    }
+    bindWorktreeOwner(event.sender);
+    const body = payload && typeof payload === "object" ? (payload as { id?: unknown }) : {};
+    const epochBefore = projectRoot;
+    const resolved = await resolveGitWorktreeOpen(projectRoot, { id: body.id });
+    if (!resolved.ok) return resolved;
+    if (projectRoot !== epochBefore) {
+      return { ok: false as const, code: "stale_project" as const, message: worktreeFailureMessage("stale_project") };
+    }
+    await switchProjectRoot(resolved.path);
+    return { ok: true as const, project: { path: resolved.path, name: resolved.name } };
   });
 
   ipcMain.handle("project:memory:read", async (): Promise<ProjectMemoryRecord | null> => {

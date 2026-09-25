@@ -12,12 +12,14 @@ describe("agentCommandAllowlist", () => {
     assert.equal(validateAgentCommand("git push origin HEAD:main").ok, false);
   });
 
-  it("blocks git switch, checkout, and branch creation", () => {
+  it("blocks git switch, checkout, branch creation, and worktrees", () => {
     assert.equal(validateAgentCommand("git switch feature/x").ok, false);
     assert.equal(validateAgentCommand("git checkout feature/x").ok, false);
     assert.equal(validateAgentCommand("git branch").ok, false);
     assert.equal(validateAgentCommand("git branch -c feature/x").ok, false);
     assert.equal(validateAgentCommand("git switch -c feature/x").ok, false);
+    assert.equal(validateAgentCommand("git worktree add -b x /tmp/x").ok, false);
+    assert.equal(validateAgentCommand("git worktree list").ok, false);
   });
 
   it("allows git status", () => {

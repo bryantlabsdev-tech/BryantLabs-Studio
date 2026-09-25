@@ -1,0 +1,35 @@
+{
+  "safeNames": ["feature/safe-worktree", "hotfix-1.2", "main"],
+  "unsafeNames": ["-c", "--force", "HEAD", "foo;rm", "feat\nmaster", "origin/main", ""],
+  "addContains": [
+    "-c",
+    "core.hooksPath=/dev/null",
+    "alias.worktree=",
+    "worktree",
+    "add",
+    "--no-guess-remote",
+    "-b",
+    "feature/x",
+    "--end-of-options"
+  ],
+  "removeContains": [
+    "worktree",
+    "remove",
+    "--end-of-options"
+  ],
+  "forbiddenTokens": [
+    "--force",
+    "--detach",
+    "--guess-remote",
+    "-B",
+    "--overwrite-ignore",
+    "--lock",
+    "--unlock",
+    "prune",
+    "--move",
+    "--repair",
+    "--no-checkout",
+    "-d",
+    "--delete"
+  ]
+}
