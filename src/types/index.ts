@@ -580,6 +580,75 @@ export interface BryantLabsApi {
   getAgentExecutionDenials(): Promise<
     readonly import("@/core/agent/agentExecutionPolicy").AgentExecutionDenialRecord[]
   >;
+  getAgentExecutionApprovals(): Promise<
+    readonly import("@/core/agent/agentExecutionPolicy").AgentExecutionApprovalRecord[]
+  >;
+  prepareProjectCodeExecution(payload: {
+    readonly script: string;
+    readonly args?: readonly string[];
+  }): Promise<
+    | {
+        ok: true;
+        previewId: string;
+        executable: string;
+        arguments: readonly string[];
+        workingDirectory: string;
+        networkLimitation: string;
+        timeoutMs: number;
+        risk: string;
+      }
+    | {
+        ok: false;
+        error?: string;
+        code?: string;
+        exitCode: number | null;
+        stdout: string;
+        stderr: string;
+        durationMs: number;
+        timedOut: boolean;
+        truncated: boolean;
+      }
+  >;
+  approveProjectCodeExecution(previewId: string): Promise<{
+    ok: false;
+    error?: string;
+    code?: string;
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    durationMs: number;
+    timedOut: boolean;
+    truncated: boolean;
+  }>;
+  confirmProjectCodeExecution(previewId: string): Promise<
+    | { ok: true; held?: true; exitCode?: number | null; stdout?: string; stderr?: string; durationMs?: number; timedOut?: boolean; truncated?: boolean }
+    | {
+        ok: false;
+        error?: string;
+        code?: string;
+        exitCode: number | null;
+        stdout: string;
+        stderr: string;
+        durationMs: number;
+        timedOut: boolean;
+        truncated: boolean;
+      }
+  >;
+  executeApprovedProjectCode(payload: { readonly token: string }): Promise<{
+    ok: boolean;
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    durationMs: number;
+    timedOut: boolean;
+    truncated: boolean;
+    error?: string;
+    code?: string;
+  }>;
+  cancelProjectCodeExecution(payload: {
+    readonly previewId?: string;
+    readonly token?: string;
+  }): Promise<{ ok: true } | { ok: false; error?: string; code?: string }>;
   onTerminalData(handler: (payload: { id: string; data: string }) => void): () => void;
   onTerminalExit(handler: (payload: { id: string; exitCode: number }) => void): () => void;
 }

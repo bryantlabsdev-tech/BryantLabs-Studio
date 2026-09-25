@@ -489,6 +489,28 @@
   padding-left: 1.1rem;
 }
 
+.project-code-request,
+.project-code-approval {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border, #30363d);
+}
+
+.project-code-approval {
+  background: var(--panel, #161b22);
+}
+
+.project-code-approval dd,
+.project-code-request label {
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
+.project-code-approval__actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
 .agent-run-metrics {
   flex: 1 1 0;
   min-height: 0;
