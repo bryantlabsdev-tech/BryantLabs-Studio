@@ -72,3 +72,39 @@ jobs:
           CI: "1"
           BRYANTLABS_MOCK_PROVIDER: "1"
           PLAYWRIGHT_USE_DIST: "1"
+
+  windows-package-scripts:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck and policy lockstep
+        run: npm run typecheck
+
+      - name: Provenance register coverage
+        run: npm run provenance:check
+
+      - name: Provenance tests
+        run: node --experimental-strip-types --import ./scripts/test-alias-hook.mjs --test provenance/check-provenance.test.ts
+
+      - name: Package-script policy unit tests
+        run: node --experimental-strip-types --import ./scripts/test-alias-hook.mjs --test src/core/agent/agentExecutionPolicy.test.ts
+
+      - name: Compile Electron main
+        run: npm run build:electron
+
+      - name: Real Windows package-script discovery
+        run: node --test dist-electron/windowsPackageScript.integration.test.cjs
