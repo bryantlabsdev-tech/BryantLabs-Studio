@@ -42,9 +42,11 @@ export const PACKAGE_SCRIPT_APPROVAL_TTL_MS = 15_000;
 export const PACKAGE_SCRIPT_NAMES = ["build", "test", "typecheck", "lint"] as const;
 export const PACKAGE_SCRIPT_BODY_MAX_CHARS = 4_000;
 export const PACKAGE_SCRIPT_SHELL_WARNING =
-  "The exact script body shown here runs with shell semantics through /bin/sh -c. It may invoke local binaries from node_modules/.bin, nested npm or npx commands, network clients, subprocesses, and filesystem operations. Local binaries and downstream project files are not content-bound and can change independently of this approval. This confirmation is not an OS, filesystem, process, or network sandbox. Studio does not run npm, and it does not pass script arguments.";
+  "On macOS and Linux, the exact script body shown here runs with shell semantics through /bin/sh -c. It may invoke local binaries from node_modules/.bin, nested npm or npx commands, network clients, subprocesses, and filesystem operations. Local binaries and downstream project files are not content-bound and can change independently of this approval. This confirmation is not an OS, filesystem, process, or network sandbox. Studio does not run npm, and it does not pass script arguments.";
+export const PACKAGE_SCRIPT_SHELL_WARNING_WINDOWS =
+  "On Windows, the exact script body shown here runs with cmd.exe shell semantics through C:\\Windows\\System32\\cmd.exe or C:\\Windows\\Sysnative\\cmd.exe as cmd.exe /d /s /c. Studio discovers that shell only through C:\\Windows\\System32\\reg.exe, and only when HKLM SystemRoot canonicalizes to C:\\Windows. /d disables AutoRun. cmd.exe parses the approved body with Windows command-line rules. It may invoke local binaries from node_modules/.bin, nested npm or npx commands, network clients, subprocesses, and filesystem operations. Local binaries and downstream project files are not content-bound and can change independently of this approval. This confirmation is not an OS, filesystem, process, or network sandbox. Studio does not run npm, does not trust COMSPEC, PATH, SystemRoot, or WINDIR, and does not pass script arguments.";
 export const PACKAGE_SCRIPT_ENVIRONMENT_TEXT =
-  "The child receives the inspect environment allowlist. PATH is only the project's node_modules/.bin plus trusted system directories. Inherited PATH, NODE_OPTIONS, NPM_CONFIG_*, credentials, and proxy variables are not passed. A project .npmrc is rejected. Lifecycle hooks are not run.";
+  "The child receives the inspect environment allowlist. PATH is only the project's node_modules/.bin plus trusted system directories. On Windows those directories are C:\\Windows\\System32 and C:\\Windows, COMSPEC is the verified cmd.exe, and PATHEXT is fixed. Inherited PATH, COMSPEC, SystemRoot, WINDIR, NODE_OPTIONS, NPM_CONFIG_*, credentials, and proxy variables are not passed. A project .npmrc is rejected. Lifecycle hooks are not run.";
 
 export type AgentExecutionClass =
   | "agent_readonly_inspect"
@@ -193,9 +195,9 @@ export type PackageScriptName = (typeof PACKAGE_SCRIPT_NAMES)[number];
 export interface AgentPackageScriptPlan {
   readonly ok: true;
   readonly executionClass: "user_approved_package_script";
-  readonly executable: "/bin/sh";
+  readonly executable: "/bin/sh" | "cmd.exe";
   readonly scriptName: PackageScriptName;
-  readonly argv: readonly ["-c"];
+  readonly argv: readonly string[];
   readonly network: "not_isolated";
   readonly timeoutMs: number;
   readonly maxOutputChars: number;
@@ -466,7 +468,7 @@ export function buildAgentExecutionPolicySnapshot(): AgentExecutionPolicySnapsho
     approvedProjectCode:
       "Approved project-code execution is not network-isolated. A Node script runs only after a visible confirmation of the exact executable, arguments, working directory, network limitation, timeout, and script digest. Studio runs those approved bytes from a private copy; __filename, __dirname, and relative imports refer to that copy, not the project file. The working directory remains the project root. Project code can access files and the network. It is not available to autonomous agents.",
     approvedPackageScripts:
-      "Approved package scripts are not OS, filesystem, process, or network isolated. Only an existing package.json script named build, test, typecheck, or lint can run, and only after a visible confirmation of the exact script body. Studio runs that body with shell semantics through /bin/sh -c. It does not invoke npm and it does not pass script arguments. The body may invoke local binaries, nested npm or npx, network clients, subprocesses, and filesystem operations. npm install, publishing, lifecycle hooks, preview, dev, and server commands are not this approval. Autonomous agents cannot run them.",
+      "Approved package scripts are not OS, filesystem, process, or network isolated. Only an existing package.json script named build, test, typecheck, or lint can run, and only after a visible confirmation of the exact script body. On macOS and Linux, Studio runs that body with shell semantics through trusted /bin/sh -c. On Windows, Studio runs that body as cmd.exe /d /s /c through C:\\Windows\\System32\\cmd.exe or C:\\Windows\\Sysnative\\cmd.exe, discovered only through C:\\Windows\\System32\\reg.exe when HKLM SystemRoot canonicalizes to C:\\Windows. It does not trust COMSPEC, PATH, SystemRoot, or WINDIR. It does not invoke npm and it does not pass script arguments. The body may invoke local binaries, nested npm or npx, network clients, subprocesses, and filesystem operations. Local binaries and downstream project files are not content-bound. npm install, publishing, lifecycle hooks, preview, dev, and server commands are not this approval. Autonomous agents cannot run them.",
     filesystemScope:
       "Autonomous inspection accepts no arbitrary project code. Canonical cwd and operand validation protect Studio-owned inspect operands only; they do not confine executed project code. Safe filesystem transactions apply only to Studio-owned file operations. This is not filesystem isolation.",
     shellEnabled: false,
@@ -969,16 +971,31 @@ export function isAllowedPackageScriptName(value: string): value is PackageScrip
   return (PACKAGE_SCRIPT_NAMES as readonly string[]).includes(value);
 }
 
-/** Approval key for the captured body. Main fills the body digest, PATH, and shell path. */
+export const PACKAGE_SCRIPT_POSIX_ARGV = ["-c"] as const;
+export const PACKAGE_SCRIPT_WINDOWS_ARGV = ["/d", "/s", "/c"] as const;
+
+/** True only for C:\\Windows\\System32 or C:\\Windows\\Sysnative cmd.exe. */
+export function isTrustedWindowsSystemShellPath(candidate: string): boolean {
+  if (typeof candidate !== "string" || candidate.length === 0 || candidate.length > 260) return false;
+  const normalized = candidate.replace(/\//g, "\\");
+  return /^C:\\Windows\\(System32|Sysnative)\\cmd\.exe$/i.test(normalized);
+}
+
+export function packageScriptShellWarning(platform: "win32" | "posix"): string {
+  return platform === "win32" ? PACKAGE_SCRIPT_SHELL_WARNING_WINDOWS : PACKAGE_SCRIPT_SHELL_WARNING;
+}
+
+/** Approval key for the captured body. Main fills the body digest, PATH, shell path, and argv prefix. */
 export function packageScriptPlanKey(input: {
   readonly scriptName: string;
   readonly scriptBodySha256: string;
   readonly pathValue: string;
   readonly shellPath: string;
+  readonly argvPrefix: readonly string[];
 }): string {
   return JSON.stringify({
-    executable: "/bin/sh",
-    argv: ["-c"],
+    executable: input.argvPrefix[0] === "/d" ? "cmd.exe" : "/bin/sh",
+    argv: input.argvPrefix,
     scriptName: input.scriptName,
     scriptBodySha256: input.scriptBodySha256,
     arguments: "rejected",
@@ -1046,6 +1063,7 @@ export function planPackageScriptRequest(payload: unknown): AgentPackageScriptDe
       scriptBodySha256: "captured-by-main",
       pathValue: "project-node-modules-bin-plus-trusted-system-path",
       shellPath: "/bin/sh",
+      argvPrefix: PACKAGE_SCRIPT_POSIX_ARGV,
     }),
   };
 }
@@ -1105,6 +1123,9 @@ export function collectAgentExecutionPolicyParity(): Record<string, unknown> {
     packageScriptInstall: planPackageScriptRequest({ script: "install" }),
     packageScriptDev: planPackageScriptRequest({ script: "dev" }),
     packageScriptArguments: planPackageScriptRequest({ script: "test", args: ["ok"] }),
+    windowsCmdTrusted: isTrustedWindowsSystemShellPath("C:\\Windows\\System32\\cmd.exe"),
+    windowsCmdComspec: isTrustedWindowsSystemShellPath("C:\\evil\\cmd.exe"),
+    windowsArgv: [...PACKAGE_SCRIPT_WINDOWS_ARGV],
     messages: Object.fromEntries(
       AGENT_EXECUTION_FAILURE_CODES.map((code) => [code, agentExecutionFailureMessage(code)]),
     ),
