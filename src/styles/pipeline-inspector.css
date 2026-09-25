@@ -461,6 +461,34 @@
   padding: var(--space-2) 0 var(--space-4);
 }
 
+.agent-execution-policy {
+  padding: var(--space-3) var(--space-4) var(--space-5);
+  border-top: 1px solid var(--border, #30363d);
+}
+
+.agent-execution-policy__title {
+  margin: 0 0 var(--space-2);
+  font-size: 1rem;
+}
+
+.agent-execution-policy__lede,
+.agent-execution-policy__list dd {
+  color: var(--muted, #8b949e);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.agent-execution-policy__list dt {
+  margin-top: var(--space-2);
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.agent-execution-policy__list ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.1rem;
+}
+
 .agent-run-metrics {
   flex: 1 1 0;
   min-height: 0;

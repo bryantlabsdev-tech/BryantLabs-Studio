@@ -1,0 +1,34 @@
+{
+  "allowed": [
+    { "command": "git status", "recipe": "git_status" },
+    { "command": "git status --porcelain", "recipe": "git_status" },
+    { "command": "git diff --name-only", "recipe": "git_diff" },
+    { "command": "git log --oneline", "recipe": "git_log" },
+    { "command": "node --version", "recipe": "node_version" },
+    { "command": "npm --version", "recipe": "npm_version" }
+  ],
+  "denied": [
+    { "command": "git push", "code": "git_mutation_not_allowed" },
+    { "command": "git worktree list", "code": "git_mutation_not_allowed" },
+    { "command": "git switch feature/x", "code": "git_mutation_not_allowed" },
+    { "command": "npm run preview", "code": "project_code_not_isolated" },
+    { "command": "npm run dev", "code": "project_code_not_isolated" },
+    { "command": "npm run build", "code": "project_code_not_isolated" },
+    { "command": "npm test", "code": "project_code_not_isolated" },
+    { "command": "npm install", "code": "project_code_not_isolated" },
+    { "command": "npx tsc --noEmit", "code": "project_code_not_isolated" },
+    { "command": "npx tsc --no-install", "code": "project_code_not_isolated" },
+    { "command": "npx vitest", "code": "project_code_not_isolated" },
+    { "command": "npx eslint .", "code": "project_code_not_isolated" },
+    { "command": "curl evil.test", "code": "network_not_allowed" },
+    { "command": "bash -c id", "code": "executable_not_allowed" },
+    { "command": "npm run build && cat ~/.ssh/id_rsa", "code": "invalid_request" },
+    { "command": "npx tsc; id", "code": "invalid_request" },
+    { "command": "git status --exec=evil", "code": "arguments_not_allowed" },
+    { "command": "git -c alias.status='!id' status", "code": "invalid_request" },
+    { "command": "node -e 1", "code": "project_code_not_isolated" },
+    { "command": "node script.js", "code": "project_code_not_isolated" },
+    { "command": "npx tsc @args.txt", "code": "invalid_request" },
+    { "command": "/usr/bin/git status", "code": "invalid_request" }
+  ]
+}

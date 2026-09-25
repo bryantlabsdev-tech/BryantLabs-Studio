@@ -36,6 +36,7 @@ import { formatAgentFilePreview } from "@/core/agent/formatAgentFilePreview";
 import { resolvePlannerSemanticBoostPaths } from "@/core/context/plannerSemanticBoost";
 import { invokeMcpTool as invokeMcpToolClient } from "@/core/mcp/client";
 import type { AgentOrchestrationHost } from "@/app/orchestration/agentTypes";
+import { planAgentCommand } from "@/core/agent/agentExecutionPolicy";
 
 function buildAgentActCallbacks(
   host: AgentOrchestrationHost,
@@ -286,25 +287,29 @@ function buildAgentActCallbacks(
       };
     },
     runCommand: async (command) => {
-      if (!studioApi.terminalExec) {
+      if (!studioApi.executeAgentInspect) {
         return {
           ok: false,
           stdout: "",
           stderr: "",
           exitCode: null,
-          error: "Terminal exec requires the desktop app.",
+          error: "Agent inspection requires the desktop app.",
         };
       }
-      const res = await studioApi.terminalExec(projectRoot, command);
-      if ("error" in res) {
+      const planned = planAgentCommand(command);
+      if (!planned.ok) {
         return {
           ok: false,
           stdout: "",
           stderr: "",
           exitCode: null,
-          error: res.error,
+          error: planned.message,
         };
       }
+      const res = await studioApi.executeAgentInspect({
+        recipe: planned.recipe,
+        ...(Object.keys(planned.operands).length > 0 ? { operands: planned.operands } : {}),
+      });
       return {
         ok: res.ok,
         stdout: res.stdout,

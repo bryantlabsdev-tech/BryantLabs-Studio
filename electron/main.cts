@@ -129,7 +129,7 @@ import {
   destroyAllTerminals,
   registerTerminalIpc,
 } from "./terminal.cjs";
-import { registerTerminalExecIpc } from "./terminalExec.cjs";
+import { registerTerminalExecIpc, clearAgentExecutionSession } from "./agentExecution.cjs";
 import { registerProjectGrepIpc } from "./projectGrep.cjs";
 import { registerMcpIpc } from "./mcp/register.cjs";
 import {
@@ -307,6 +307,7 @@ function createWindow(): void {
     clearGitPushSession();
     void clearGitBranchSession();
     void clearGitWorktreeSession();
+    void clearAgentExecutionSession();
   });
 
   if (DEV_SERVER_URL) {
@@ -321,6 +322,7 @@ async function switchProjectRoot(selected: string): Promise<void> {
   clearGitPushSession();
   await clearGitBranchSession();
   await clearGitWorktreeSession();
+  await clearAgentExecutionSession();
   const approved = approveWorkspaceRoot(selected);
   await switchToProjectRoot(approved, async (root) => {
     projectRoot = root;
@@ -1418,7 +1420,12 @@ function registerIpcHandlers(): void {
     isExecutionPathWithinProject,
     () => projectRoot,
   );
-  registerTerminalExecIpc(ipcMain, isExecutionPathWithinProject, () => projectRoot);
+  registerTerminalExecIpc(
+    ipcMain,
+    isExecutionPathWithinProject,
+    () => projectRoot,
+    () => mainWindow,
+  );
 
   registerProjectGrepIpc(ipcMain, () => projectRoot);
 

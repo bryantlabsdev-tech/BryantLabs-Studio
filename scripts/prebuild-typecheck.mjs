@@ -17,6 +17,16 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const checkOnly = process.argv.includes("--check-only");
 const maxPasses = 12;
 
+const lockstep = spawnSync(process.execPath, [path.join(root, "scripts/check-agent-execution-policy-lockstep.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+});
+if ((lockstep.status ?? 1) !== 0) {
+  process.stderr.write(lockstep.stdout ?? "");
+  process.stderr.write(lockstep.stderr ?? "");
+  process.exit(lockstep.status ?? 1);
+}
+
 const projects = [
   { name: "renderer", config: "tsconfig.json" },
   { name: "electron", config: "electron/tsconfig.json" },

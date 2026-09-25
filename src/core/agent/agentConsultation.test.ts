@@ -20,7 +20,7 @@ const MUTATION_CAPABLE_API_METHODS = [
   "discardShadowRun",
   "verify",
   "invokeMcpTool",
-  "terminalExec",
+  "executeAgentInspect",
   "terminalWrite",
   "terminalCreate",
   "greenfieldWrite",

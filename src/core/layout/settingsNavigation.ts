@@ -5,6 +5,7 @@ export const SETTINGS_RAIL_TOOL = "providers" as const satisfies RailTool;
 
 export const SETTINGS_VIEW_TEST_ID = "settings-view";
 export const PROVIDER_ENABLEMENT_TEST_ID = "provider-enablement";
+export const AGENT_EXECUTION_POLICY_TEST_ID = "agent-execution-policy";
 
 export const OPEN_DETAILS_PANEL_EVENT = "bryantlabs:open-details-panel";
 
