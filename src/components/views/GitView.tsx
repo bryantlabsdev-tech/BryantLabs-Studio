@@ -737,6 +737,7 @@ export function GitView() {
           <button
             type="button"
             className="git-view__refresh"
+            data-testid="git-refresh"
             onClick={() => void refreshGitStatus()}
             disabled={gitLocked}
           >
