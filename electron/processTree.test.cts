@@ -129,6 +129,28 @@ describe("processTree", () => {
     }
   });
 
+  it("kills a grandchild that ignores SIGTERM", async () => {
+    const parent = spawnHang(`
+      const { spawn } = require('node:child_process');
+      const child = spawn(process.execPath, ['-e', ${JSON.stringify(`
+        try { process.on('SIGTERM', () => {}); } catch {}
+        setInterval(() => {}, 1e9);
+      `)}], { stdio: 'inherit' });
+      if (!child.pid) process.exit(1);
+      setInterval(() => {}, 1e9);
+    `);
+    try {
+      await new Promise((r) => setTimeout(r, 80));
+      const tree = collectProcessTree(parent.pid);
+      const childPid = tree.find((pid) => pid !== parent.pid);
+      assert.ok(childPid, `expected descendant, got ${tree.join(",")}`);
+      await terminateTrackedPids(tree, { termGraceMs: 50 });
+      assert.equal(isPidAlive(childPid), false, "SIGTERM-ignoring grandchild survived SIGKILL");
+    } finally {
+      parent.kill();
+    }
+  });
+
   it("is safe to terminate an already-exited tree more than once", async () => {
     const child = spawn(process.execPath, ["-e", "process.exit(0)"], {
       stdio: "ignore",

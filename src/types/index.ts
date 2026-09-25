@@ -562,21 +562,23 @@ export interface BryantLabsApi {
     rows: number,
   ): Promise<{ ok: boolean; reason?: string }>;
   terminalKill(id: string): Promise<{ ok: boolean }>;
-  terminalExec(
-    cwd: string,
-    command: string,
-  ): Promise<
-    | {
-        ok: boolean;
-        exitCode: number | null;
-        stdout: string;
-        stderr: string;
-        durationMs: number;
-        timedOut: boolean;
-        truncated: boolean;
-        error?: string;
-      }
-    | { error: string }
+  executeAgentInspect(payload: {
+    readonly recipe: import("@/core/agent/agentExecutionPolicy").AgentInspectRecipeId;
+    readonly operands?: import("@/core/agent/agentExecutionPolicy").AgentInspectOperands;
+  }): Promise<{
+    ok: boolean;
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    durationMs: number;
+    timedOut: boolean;
+    truncated: boolean;
+    error?: string;
+    code?: string;
+  }>;
+  getAgentExecutionPolicy(): Promise<import("@/core/agent/agentExecutionPolicy").AgentExecutionPolicySnapshot>;
+  getAgentExecutionDenials(): Promise<
+    readonly import("@/core/agent/agentExecutionPolicy").AgentExecutionDenialRecord[]
   >;
   onTerminalData(handler: (payload: { id: string; data: string }) => void): () => void;
   onTerminalExit(handler: (payload: { id: string; exitCode: number }) => void): () => void;

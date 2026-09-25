@@ -294,8 +294,9 @@ const api = {
   terminalResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.invoke("terminal:resize", id, cols, rows),
   terminalKill: (id: string) => ipcRenderer.invoke("terminal:kill", id),
-  terminalExec: (cwd: string, command: string) =>
-    ipcRenderer.invoke("terminal:exec", cwd, command),
+  executeAgentInspect: (payload: unknown) => ipcRenderer.invoke("agent:inspect", payload),
+  getAgentExecutionPolicy: () => ipcRenderer.invoke("agent:executionPolicy"),
+  getAgentExecutionDenials: () => ipcRenderer.invoke("agent:executionDenials"),
   onTerminalData: (handler: (payload: { id: string; data: string }) => void) => {
     const listener = (_event: IpcRendererEvent, payload: { id: string; data: string }) => {
       handler(payload);

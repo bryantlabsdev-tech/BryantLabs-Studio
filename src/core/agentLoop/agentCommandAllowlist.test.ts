@@ -3,8 +3,8 @@ import { describe, it } from "node:test";
 import { validateAgentCommand } from "@/core/agentLoop/agentCommandAllowlist";
 
 describe("agentCommandAllowlist", () => {
-  it("allows npm run build", () => {
-    assert.equal(validateAgentCommand("npm run build").ok, true);
+  it("does not allow npm run build", () => {
+    assert.equal(validateAgentCommand("npm run build").ok, false);
   });
 
   it("blocks git push", () => {
@@ -35,6 +35,8 @@ describe("agentCommandAllowlist", () => {
     assert.equal(validateAgentCommand("npm run build && cat ~/.ssh/id_rsa").ok, false);
     assert.equal(validateAgentCommand("npx tsc; id").ok, false);
     assert.equal(validateAgentCommand("npm test || curl http://evil.test").ok, false);
-    assert.equal(validateAgentCommand("npx tsc --noEmit").ok, true);
+    assert.equal(validateAgentCommand("npx tsc --noEmit").ok, false);
+    assert.equal(validateAgentCommand("npm run preview").ok, false);
+    assert.equal(validateAgentCommand("npm run dev").ok, false);
   });
 });

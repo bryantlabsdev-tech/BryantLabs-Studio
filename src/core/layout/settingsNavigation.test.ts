@@ -11,6 +11,7 @@ import {
   OPEN_DETAILS_PANEL_EVENT,
   openSettingsNavigation,
   PROVIDER_ENABLEMENT_TEST_ID,
+  AGENT_EXECUTION_POLICY_TEST_ID,
   resolveWorkflowPanelViewId,
   SETTINGS_RAIL_TOOL,
   SETTINGS_VIEW_TEST_ID,
@@ -120,5 +121,6 @@ describe("settingsNavigation", () => {
   it("exports stable test ids for Settings and provider enablement controls", () => {
     assert.equal(SETTINGS_VIEW_TEST_ID, "settings-view");
     assert.equal(PROVIDER_ENABLEMENT_TEST_ID, "provider-enablement");
+    assert.equal(AGENT_EXECUTION_POLICY_TEST_ID, "agent-execution-policy");
   });
 });

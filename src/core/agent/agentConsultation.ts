@@ -216,9 +216,12 @@ export async function runAgentCommandIntent(
   }
 
   try {
-    const result = await input.api.terminalExec(input.projectPath, command);
-    if ("error" in result) {
-      return { ok: false, text: "", error: result.error };
+    const result = await input.api.executeAgentInspect({
+      recipe: allowed.recipe,
+      ...(Object.keys(allowed.operands).length > 0 ? { operands: allowed.operands } : {}),
+    });
+    if (!result.ok) {
+      return { ok: false, text: "", error: result.error ?? "Inspect command failed." };
     }
     const stdout = result.stdout?.trim() ?? "";
     const stderr = result.stderr?.trim() ?? "";
