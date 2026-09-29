@@ -49,6 +49,7 @@ async function makeRepo(): Promise<string> {
 
 describe("real Windows package-script discovery", { skip: onWindows ? false : "requires the canonical C:\\Windows cmd.exe path" }, () => {
   it("runs the approved body through C:\\Windows cmd.exe and ignores poisoned shell env", async () => {
+    const repo = await makeRepo();
     const previous = {
       COMSPEC: process.env.COMSPEC,
       PATH: process.env.PATH,
@@ -64,7 +65,6 @@ describe("real Windows package-script discovery", { skip: onWindows ? false : "r
     resetAgentExecutionRuntimeForTests();
     setAgentExecutionRuntimeForTests({ trustedDecision: async () => "approve" });
     try {
-      const repo = await makeRepo();
       const prepared = await preparePackageScriptApproval({
         payload: { script: "test" },
         projectRoot: repo,
