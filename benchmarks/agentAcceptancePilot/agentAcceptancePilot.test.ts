@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -202,6 +202,68 @@ export function History({ entries }: { entries: string[] }) {
       await writeFile(join(projectDir, "src", "components", "Timer.tsx"), `export function Timer() { return <h2>Timer</h2>; }\n`, "utf8");
       assert.equal((await evaluateTrial(trialRoot, { runVerify: false })).passed, false);
     });
+  });
+
+  it("D1 copies the checkout TypeScript compiler into the project and other tasks do not", async () => {
+    const d1 = await createPilotTrial({ taskId: "D1", product: "studio" });
+    const g1 = await createPilotTrial({ taskId: "G1", product: "studio" });
+    try {
+      const project = d1.manifest.projectDir;
+      const nm = await lstat(join(project, "node_modules"));
+      assert.equal(nm.isSymbolicLink(), false);
+      assert.equal(nm.isDirectory(), true);
+      const tscPath = join(project, "node_modules", "typescript", "lib", "tsc.js");
+      const tscReal = await realpath(tscPath);
+      const projectReal = await realpath(project);
+      assert.equal(tscReal.startsWith(`${projectReal}/`), true);
+      const repoCompiler = await realpath(join(REPO_ROOT, "node_modules", "typescript", "lib", "tsc.js"));
+      const copied = await readFile(tscReal);
+      const source = await readFile(repoCompiler);
+      assert.equal(Buffer.isBuffer(copied) && Buffer.isBuffer(source) && copied.equals(source), true);
+      assert.equal(existsSync(join(g1.manifest.projectDir, "node_modules")), false);
+
+      const planted = spawnSync(
+        process.execPath,
+        [tscReal, "--noEmit", "--pretty", "false", "-p", project],
+        { cwd: project, encoding: "utf8", env: { CI: "1" } },
+      );
+      assert.equal(planted.status, 2);
+      assert.match(`${planted.stdout ?? ""}\n${planted.stderr ?? ""}`, /error TS2322/);
+
+      const mathPath = join(project, "src", "math.ts");
+      const math = await readFile(mathPath, "utf8");
+      await writeFile(
+        mathPath,
+        math.replace(
+          'export const PLANTED_ERROR: number = "not-a-number";',
+          'export const PLANTED_ERROR: string = "not-a-number";',
+        ),
+        "utf8",
+      );
+      const fixed = spawnSync(
+        process.execPath,
+        [tscReal, "--noEmit", "--pretty", "false", "-p", project],
+        { cwd: project, encoding: "utf8", env: { CI: "1" } },
+      );
+      assert.equal(fixed.status, 0, `${fixed.stdout ?? ""}\n${fixed.stderr ?? ""}`);
+      const packageBuild = spawnSync("npm", ["run", "build"], {
+        cwd: project,
+        encoding: "utf8",
+        env: { ...process.env, CI: "1" },
+      });
+      assert.equal(packageBuild.status, 0, `${packageBuild.stdout ?? ""}\n${packageBuild.stderr ?? ""}`);
+      const evaluation = await evaluateTrial(d1.manifest.trialRoot);
+      assert.equal(
+        evaluation.passed,
+        true,
+        evaluation.checks.filter((check) => !check.passed).map((check) => `${check.id}:${check.actual}`).join(", "),
+      );
+      assert.equal(evaluation.typecheck?.ok, true);
+      assert.equal(evaluation.build?.ok, true);
+    } finally {
+      await cleanupTrial(d1.manifest.trialRoot).catch(() => undefined);
+      await cleanupTrial(g1.manifest.trialRoot).catch(() => undefined);
+    }
   });
 
   it("F1 fails on any outside snapshot divergence and unlinks rather than following cleanup symlinks", async () => {

@@ -32,6 +32,25 @@ function isGameplayPrompt(promptLower: string): boolean {
 
 const MOCK_TIMER_MARKER = "// mock: timer enhancement";
 
+/**
+ * Exact D1 acceptance prompt. This is not a general TypeScript repair:
+ * only this sentence, together with the planted declaration below, is repaired.
+ */
+const D1_ACCEPTANCE_PROMPT =
+  "Fix the TypeScript error(s) in this project. Preserve runtime behavior. Do not add unrelated files or features.";
+
+const D1_PLANTED_DECLARATION = 'export const PLANTED_ERROR: number = "not-a-number";';
+const D1_REPAIRED_DECLARATION = 'export const PLANTED_ERROR: string = "not-a-number";';
+
+function isCanonicalD1AcceptancePrompt(prompt: string): boolean {
+  return prompt.trim() === D1_ACCEPTANCE_PROMPT;
+}
+
+function repairCanonicalD1Math(content: string): string {
+  if (!content.includes(D1_PLANTED_DECLARATION)) return content;
+  return content.replaceAll(D1_PLANTED_DECLARATION, D1_REPAIRED_DECLARATION);
+}
+
 /** Ordinary "Add a timer" follow-ups, including wrapped apply-plan prompts. */
 function isTimerFollowUpPrompt(promptLower: string): boolean {
   if (isGameplayPrompt(promptLower)) return false;
@@ -46,6 +65,9 @@ function applyTimerAppPatch(content: string): string {
 }
 
 function planFilesForPrompt(userPrompt: string): AIPlan["files"] {
+  if (isCanonicalD1AcceptancePrompt(userPrompt)) {
+    return [{ path: "src/math.ts", reason: "Planted TypeScript error in the acceptance fixture" }];
+  }
   const lower = userPrompt.toLowerCase();
   if (isGameplayPrompt(lower)) {
     return [
@@ -246,8 +268,13 @@ function patchIndexCss(content: string, promptLower: string): string {
 function patchFileContent(
   relPath: string,
   content: string,
-  promptLower: string,
+  prompt: string,
 ): string {
+  if (isCanonicalD1AcceptancePrompt(prompt)) {
+    if (normalizeApplyPlanPath(relPath) === "src/math.ts") return repairCanonicalD1Math(content);
+    return content;
+  }
+  const promptLower = prompt.toLowerCase();
   const norm = normalizeApplyPlanPath(relPath);
   if (norm === "src/App.tsx") return patchAppTsx(content, promptLower);
   if (norm === "src/index.css") return patchIndexCss(content, promptLower);
@@ -285,9 +312,11 @@ export function mockApplyPlanBatchPatch(
   const out: Record<string, string> = {};
   for (const file of files) {
     const path = normalizeApplyPlanPath(file.path);
-    out[path] = patchFileContent(path, file.content, promptLower);
+    out[path] = patchFileContent(path, file.content, userPrompt);
   }
-  const patchKind = isGameplayPrompt(promptLower)
+  const patchKind = isCanonicalD1AcceptancePrompt(userPrompt)
+    ? "d1"
+    : isGameplayPrompt(promptLower)
     ? "gameplay"
     : isTimerFollowUpPrompt(promptLower)
       ? "timer"

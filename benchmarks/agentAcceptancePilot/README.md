@@ -28,7 +28,7 @@ npm run bench:acceptance -- summarize --dir "$RESULTS_DIR"
 npm run bench:acceptance -- cleanup --trial "$TRIAL"
 ```
 
-Typecheck and build use this checkout's `node_modules` (linked into the trial), not a globally installed `tsc` or `vite`. Omit token/call flags when unknown; they are stored as `unavailable`, never as `0`.
+D1 trials copy this checkout's TypeScript compiler into the trial project as real files, so Studio can typecheck offline without `npx` or a compiler outside the project. Supporting libraries are symlinks into this checkout's `node_modules`. The evaluator still runs this checkout's `tsc` and Vite. Other tasks link `node_modules` only when the evaluator runs. Omit token/call flags when unknown; they are stored as `unavailable`, never as `0`.
 
 ## Operator procedure
 

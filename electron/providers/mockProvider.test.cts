@@ -106,6 +106,90 @@ describe("mock provider", () => {
     assert.match(result.files?.["src/components/History.tsx"] ?? "", /export function History/);
   });
 
+  it("repairs only the planted D1 math.ts error for the canonical prompt", () => {
+    const prompt =
+      "Fix the TypeScript error(s) in this project. Preserve runtime behavior. Do not add unrelated files or features.";
+    const math = readFileSync(
+      path.join(process.cwd(), "benchmarks/agentAcceptancePilot/fixtures/d1/src/math.ts"),
+      "utf8",
+    );
+    const app = readFileSync(
+      path.join(process.cwd(), "benchmarks/agentAcceptancePilot/fixtures/shared/src/App.tsx"),
+      "utf8",
+    );
+    const plan = mockRunPlan("anthropic", prompt, {
+      framework: "vite",
+      language: "typescript",
+      packageManager: "npm",
+      totalFiles: 5,
+      totalFolders: 2,
+      entryPoints: [],
+      files: [],
+      symbols: [],
+    });
+    assert.deepEqual(plan.plan?.files.map((file: { path: string }) => file.path), ["src/math.ts"]);
+
+    const result = mockApplyPlanBatchPatch(
+      "anthropic",
+      prompt,
+      [
+        { path: "src/math.ts", content: math },
+        { path: "src/App.tsx", content: app },
+      ],
+      {
+        planSummary: "D1",
+        targetPaths: ["src/math.ts", "src/App.tsx"],
+        slimContext: false,
+        directRewrite: false,
+        repair: false,
+      },
+    );
+    const repaired = result.files?.["src/math.ts"] ?? "";
+    assert.equal(result.ok, true);
+    assert.equal(repaired.includes('PLANTED_ERROR: number = "not-a-number"'), false);
+    assert.match(repaired, /export const PLANTED_ERROR: string = "not-a-number"/);
+    assert.match(repaired, /export function add/);
+    assert.match(repaired, /export function compute/);
+    assert.equal(repaired.includes("/* mock patch */"), false);
+    assert.equal(repaired.includes("// mock"), false);
+    assert.equal(result.files?.["src/App.tsx"], app);
+    assert.equal((result.raw as { patchKind?: string }).patchKind, "d1");
+  });
+
+  it("does not treat a nearby TypeScript-fix prompt as the D1 fixture repair", () => {
+    const math = readFileSync(
+      path.join(process.cwd(), "benchmarks/agentAcceptancePilot/fixtures/d1/src/math.ts"),
+      "utf8",
+    );
+    const prompt = "Fix the TypeScript error(s) in this project.";
+    const plan = mockRunPlan("anthropic", prompt, {
+      framework: "vite",
+      language: "typescript",
+      packageManager: "npm",
+      totalFiles: 5,
+      totalFolders: 2,
+      entryPoints: [],
+      files: [],
+      symbols: [],
+    });
+    assert.deepEqual(plan.plan?.files.map((file: { path: string }) => file.path), ["src/App.tsx"]);
+    const result = mockApplyPlanBatchPatch(
+      "anthropic",
+      prompt,
+      [{ path: "src/math.ts", content: math }],
+      {
+        planSummary: "generic",
+        targetPaths: ["src/math.ts"],
+        slimContext: false,
+        directRewrite: false,
+        repair: false,
+      },
+    );
+    const patched = result.files?.["src/math.ts"] ?? "";
+    assert.match(patched, /PLANTED_ERROR: number = "not-a-number"/);
+    assert.match(patched, /\/\* mock patch \*\//);
+  });
+
   it("mockGreenfieldGenerate returns seven scaffold files", () => {
     const result = mockGreenfieldGenerate("anthropic", "Build a calculator");
     assert.equal(result.ok, true);

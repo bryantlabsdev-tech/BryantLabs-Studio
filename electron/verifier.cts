@@ -4,16 +4,17 @@ import {
   resolveSpawnCwdSync,
   spawnProcessEnv,
 } from "./processSpawn.cjs";
+import { runProjectTypecheck } from "./typecheckCompiler.cjs";
 
 /**
  * Build & verification runner (Phase 6).
  *
- * Runs exactly two fixed, well-known commands in the active project root:
- *   - `npx tsc --noEmit`  (type-check)
- *   - `npm run build`     (build)
- * It captures stdout/stderr, the exit code, and the duration. It performs NO
- * auto-fixing and NO AI. The command strings are constants — only the working
- * directory varies — so there is no arbitrary command execution.
+ * Runs exactly two fixed checks in the active project root:
+ *   - a trusted project-local TypeScript compiler (`tsc --noEmit`)
+ *   - `npm run build`
+ * Typecheck never calls npx. When no trusted compiler exists, the result is
+ * an unavailable-tool failure. It performs NO auto-fixing and NO AI. Only the
+ * working directory varies, so there is no arbitrary command execution.
  */
 
 const OUTPUT_CAP = 200_000; // chars retained per stream
@@ -31,6 +32,8 @@ export interface CommandResult {
   warningCount: number;
   timedOut: boolean;
   truncated: boolean;
+  /** Set when typecheck cannot find a trusted project-local compiler. */
+  unavailableTool?: boolean;
 }
 
 export interface VerificationResult {
@@ -117,7 +120,7 @@ function runCommand(
 
 /** Type-check only — used by the live Problems panel (no build). */
 export async function runTypecheckOnly(root: string): Promise<CommandResult> {
-  return runCommand("npx tsc --noEmit", root, TYPECHECK_TIMEOUT_MS);
+  return runProjectTypecheck(root, TYPECHECK_TIMEOUT_MS);
 }
 
 export async function runVerification(root: string): Promise<VerificationResult> {

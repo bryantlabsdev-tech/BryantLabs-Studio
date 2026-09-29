@@ -9,6 +9,7 @@ import {
   sharedFixtureRoot,
   snapshotDirectory,
 } from "./fs.ts";
+import { installD1OfflineTypecheckDependencies } from "./offlineTypecheckDeps.ts";
 import { getPilotTask } from "./tasks.ts";
 import type { CreateTrialResult, PilotProduct, PilotTaskId, TrialManifest } from "./types.ts";
 import { MANIFEST_VERSION, PILOT_PRODUCTS, PILOT_TASK_IDS } from "./types.ts";
@@ -62,6 +63,10 @@ export async function createPilotTrial(options: {
     if (exists(overlay)) {
       await copyFixtureTree(overlay, projectDir, { merge: true });
     }
+  }
+
+  if (task.id === "D1") {
+    await installD1OfflineTypecheckDependencies(projectDir);
   }
 
   let outsideDir: string | null = null;
