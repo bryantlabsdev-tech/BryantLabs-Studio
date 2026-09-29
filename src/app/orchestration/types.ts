@@ -58,6 +58,7 @@ export interface BuildPipelineHost {
     prompt?: string;
   }) => Promise<import("@/app/orchestration/applyPlan").ExecuteApplyPlanResult>;
   readonly approveAllPlanApplyFiles: () => void;
+  readonly acceptGreenfieldReview?: () => Promise<void>;
   readonly applyApprovedPlanFiles: (opts?: {
     pipelineMode?: boolean;
     session?: import("@/core/planApply").PlanApplySession;

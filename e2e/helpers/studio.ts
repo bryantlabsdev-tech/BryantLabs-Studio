@@ -595,11 +595,58 @@ export async function waitForGreenfieldRunStarted(page: Page): Promise<void> {
   );
 }
 
+export async function acceptAgentReviewIfPresent(page: Page): Promise<boolean> {
+  const accept = page.getByRole("button", { name: /^Accept all$/ }).first();
+  if (await accept.isVisible().catch(() => false)) {
+    await accept.click();
+    return true;
+  }
+  const open = page
+    .getByTestId("agent-review-chip")
+    .getByRole("button", { name: /Review changes/i });
+  if (!(await open.isVisible().catch(() => false))) return false;
+  await open.click();
+  try {
+    await accept.waitFor({ state: "visible", timeout: 5_000 });
+  } catch {
+    return false;
+  }
+  await accept.click();
+  return true;
+}
+
+function greenfieldRunIsTerminal(): boolean {
+  const run = window.__studioTestHooks?.getReadinessState?.()?.greenfieldRun;
+  if (!run) return false;
+  return (
+    run.runResult === "success" ||
+    run.runResult === "failed" ||
+    run.runResult === "cancelled" ||
+    run.runResult === "aborted" ||
+    run.runResult === "interrupted"
+  );
+}
+
 export async function waitForGreenfieldRunTerminal(
   page: Page,
+  opts?: { acceptReview?: boolean },
 ): Promise<"success" | "failed" | "cancelled" | "aborted" | "interrupted"> {
   // Prefer the app's structured readiness state over console markers.
   try {
+    if (opts?.acceptReview) {
+      const started = Date.now();
+      let settled = false;
+      let accepted = false;
+      while (Date.now() - started < GREENFIELD_TERMINAL_TIMEOUT_MS) {
+        if (!accepted) {
+          accepted = await acceptAgentReviewIfPresent(page).catch(() => false);
+        }
+        settled = await page.evaluate(greenfieldRunIsTerminal).catch(() => false);
+        if (settled) break;
+        await page.waitForTimeout(300);
+      }
+      if (!settled) throw new Error("greenfield terminal timeout");
+    } else {
     await page.waitForFunction(
       () => {
         const run = window.__studioTestHooks?.getReadinessState?.()?.greenfieldRun;
@@ -615,6 +662,7 @@ export async function waitForGreenfieldRunTerminal(
       undefined,
       { timeout: GREENFIELD_TERMINAL_TIMEOUT_MS },
     );
+    }
   } catch (err) {
     const debug = await page.evaluate(() => {
       const state = window.__studioTestHooks?.getReadinessState?.();
@@ -637,10 +685,11 @@ export async function waitForGreenfieldRunTerminal(
         },
       };
     });
+    const cause = err instanceof Error ? err.message : String(err);
     throw new Error(
       `Greenfield run did not reach a terminal state within ${
         GREENFIELD_TERMINAL_TIMEOUT_MS / 1000
-      }s. Debug=${JSON.stringify(debug)}`,
+      }s. Debug=${JSON.stringify(debug)} Cause=${cause}`,
     );
   }
 

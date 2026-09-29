@@ -1,3 +1,4 @@
+import { isGreenfieldReviewSession } from "@/core/agent/greenfieldReviewGate";
 import { isUiAuditFixPrompt } from "@/core/agent/uiAuditAdvisoryUx";
 import { hasReviewablePlanApplyFiles } from "@/core/planApply/decisions";
 import type { PlanApplySession } from "@/core/planApply/types";
@@ -33,18 +34,21 @@ function notifyFollowUpReviewFirstChanged(): void {
   }
 }
 
-/** When true, follow-up runs pause for review before applying patches. */
-export function readFollowUpReviewFirst(): boolean {
+/** Stored review-first value, without applying the follow-up auto-apply kill switch. */
+export function readStoredReviewFirstRaw(): string | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw !== null) return interpretFollowUpReviewFirst(raw);
+    if (raw !== null) return raw;
   } catch {
     /* fall through to the in-session write, then default */
   }
-  if (sessionReviewFirst !== undefined) {
-    return interpretFollowUpReviewFirst(sessionReviewFirst ? "1" : "0");
-  }
-  return interpretFollowUpReviewFirst(null);
+  if (sessionReviewFirst !== undefined) return sessionReviewFirst ? "1" : "0";
+  return null;
+}
+
+/** When true, follow-up runs pause for review before applying patches. */
+export function readFollowUpReviewFirst(): boolean {
+  return interpretFollowUpReviewFirst(readStoredReviewFirstRaw());
 }
 
 export function writeFollowUpReviewFirst(reviewFirst: boolean): void {
@@ -79,15 +83,17 @@ export function resolveFollowUpAutoContinue(prompt: string): boolean {
 }
 
 /**
- * Promote waiting review sessions only while the emergency auto-apply
- * kill switch is on. Simulated e2e sessions are excluded.
+ * Promote waiting follow-up review sessions only while the emergency
+ * auto-apply kill switch is on. Greenfield review sessions stay gated
+ * even when that switch is on. Simulated e2e sessions are excluded.
  */
 export function shouldAutoPromoteFollowUpReview(
   session: PlanApplySession | null | undefined,
   autoApply = AUTO_APPLY_FOLLOW_UP_PATCHES,
 ): boolean {
-  if (!autoApply) return false;
   if (!session) return false;
+  if (isGreenfieldReviewSession(session)) return false;
+  if (!autoApply) return false;
   if (session.phase !== "waiting_for_review" && session.phase !== "review") return false;
   if (!hasReviewablePlanApplyFiles(session)) return false;
   if (

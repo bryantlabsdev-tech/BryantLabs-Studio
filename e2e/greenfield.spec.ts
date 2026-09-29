@@ -1,8 +1,10 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { test, expect } from "@playwright/test";
 import type { ElectronApplication, Page } from "playwright";
 import {
   closeStudioApp,
-  emptyProjectFixturePath,
   getMainWindow,
   launchStudioApp,
   openFixtureProject,
@@ -11,24 +13,28 @@ import {
   sendAgentPrompt,
   waitForComposerReady,
   waitForGreenfieldRunTerminal,
-  resetEmptyProjectFixture,
 } from "./helpers/studio";
 
 let app: ElectronApplication | undefined;
 let page: Page;
+let projectDir = "";
 
 test.describe("Greenfield create (mock provider)", () => {
   test.beforeAll(async () => {
-    await resetEmptyProjectFixture();
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "bl-greenfield-"));
+    await fs.writeFile(path.join(projectDir, ".gitkeep"), "\n");
     app = await launchStudioApp({ e2eProject: null });
     page = await getMainWindow(app);
     await dismissBlockingDialogs(page);
-    await openFixtureProject(page, emptyProjectFixturePath);
+    await openFixtureProject(page, projectDir);
     await waitForComposerReady(page);
   });
 
   test.afterAll(async () => {
     await closeStudioApp(app);
+    if (projectDir) {
+      await fs.rm(projectDir, { recursive: true, force: true }).catch(() => undefined);
+    }
   });
 
   test("mock greenfield completes without typecheck script failure", async () => {
@@ -40,7 +46,7 @@ test.describe("Greenfield create (mock provider)", () => {
     await sendAgentPrompt(page);
     await dismissBlockingDialogs(page);
 
-    const outcome = await waitForGreenfieldRunTerminal(page);
+    const outcome = await waitForGreenfieldRunTerminal(page, { acceptReview: true });
     expect(outcome).toBe("success");
 
     const failureReason = await page.evaluate(

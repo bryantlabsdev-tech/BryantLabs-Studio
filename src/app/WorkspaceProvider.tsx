@@ -30,6 +30,7 @@ import {
   loadRunCheckpointAsync,
   setRunCheckpointStorePort,
 } from "@/core/runPersistence";
+import { isGreenfieldReviewSession } from "@/core/agent/greenfieldReviewGate";
 import { resolveEffectiveProjectScan } from "@/core/agent/resolveEffectiveProjectScan";
 import {
   createFinalizationWorkKey,
@@ -1755,6 +1756,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
         agentControlRef,
         agentLastExecRef,
         applyPlanActiveRunIdRef,
+        greenfieldRunControlRef,
         activeEditorContextRef,
       },
       setters: {
@@ -1849,6 +1851,17 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
         runAgentFollowUp: startAgent,
       },
     }),
+  );
+
+  const holdGreenfieldReview = useCallback(
+    (session: import("@/core/planApply").PlanApplySession | null) => {
+      setPlanApplySession((prev) => {
+        if (session) return session;
+        if (prev && isGreenfieldReviewSession(prev)) return null;
+        return prev;
+      });
+    },
+    [setPlanApplySession],
   );
 
   const planApplyReviewing =
@@ -1987,6 +2000,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
     stopAgent,
     approveAgentAction,
     planApplySession,
+    holdGreenfieldReview,
     planApplyReviewing,
     planApplyError,
     startApplyPlan,

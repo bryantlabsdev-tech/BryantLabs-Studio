@@ -8,6 +8,7 @@ import {
   rollbackPartialApply,
   buildUndoBatchFromApprovedFiles,
 } from "@/core/build/followUpCheckpoint";
+import { isGreenfieldReviewSession } from "@/core/agent/greenfieldReviewGate";
 import { commandResultLine } from "@/core/greenfield/runLog";
 import { finalizeOrchestrationAfterApplyPlan } from "@/app/orchestration/applyPlanFinalize";
 import {
@@ -82,6 +83,14 @@ export async function applyApprovedPlanFilesOrchestration(
   opts?: ApplyApprovedPlanOptions,
 ): Promise<ApplyApprovedPlanResult> {
   const sourceSession = opts?.session ?? host?.planApplySession ?? null;
+  if (isGreenfieldReviewSession(sourceSession)) {
+    return {
+      ok: false,
+      verification: null,
+      applied: [],
+      error: "Generated files are waiting for review acceptance.",
+    };
+  }
   if (!host?.api || !sourceSession || !host.project) {
     return { ok: false, verification: null, applied: [], error: "No apply session" };
   }

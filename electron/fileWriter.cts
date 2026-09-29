@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import * as path from "node:path";
 import * as fsSync from "node:fs";
 import { promises as fs } from "node:fs";
@@ -430,11 +431,50 @@ async function readExistingText(
   return { ok: true, text: buffer.toString("utf8") };
 }
 
+export type ReadWrittenText = (filePath: string) => Promise<string | null>;
+
+export function sha256Utf8(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+/** Second read is the reported actual. A missing second read is `actual missing`. */
+export function describeWriteRereadMismatch(
+  expected: string,
+  actual: string | null,
+): string {
+  const expectedPart = `expected length=${expected.length} sha256=${sha256Utf8(expected)}`;
+  const actualPart =
+    actual === null
+      ? "actual missing"
+      : `actual length=${actual.length} sha256=${sha256Utf8(actual)}`;
+  return `Write verification failed (re-read did not match). ${expectedPart}; ${actualPart}.`;
+}
+
+/**
+ * Read once. When that read differs, read one more time. Fail closed with
+ * length and SHA-256 of the expected text and the second read.
+ */
+export async function confirmWrittenContent(
+  expected: string,
+  read: () => Promise<string | null>,
+): Promise<{ ok: true; content: string } | { ok: false; reason: string }> {
+  const first = await read();
+  if (first === expected) return { ok: true, content: first };
+  const second = await read();
+  if (second === expected) return { ok: true, content: second };
+  return { ok: false, reason: describeWriteRereadMismatch(expected, second) };
+}
+
+async function readWrittenText(filePath: string): Promise<string | null> {
+  return fs.readFile(filePath, "utf8").catch(() => null);
+}
+
 /** Write `content` and confirm by re-reading. Validates path + content first. */
 export async function writeVerified(
   root: string | null,
   filePath: string,
   content: string,
+  readFile: ReadWrittenText = readWrittenText,
 ): Promise<WriteResult> {
   const pathCheck = validateWritePath(root, filePath, "write");
   if (!pathCheck.ok) return fail(pathCheck.reason!);
@@ -451,12 +491,9 @@ export async function writeVerified(
     return fail("Failed to write the file.");
   }
 
-  // Re-read to verify the write actually landed.
-  const reread = await fs.readFile(filePath, "utf8").catch(() => null);
-  if (reread === null || reread !== content) {
-    return fail("Write verification failed (re-read did not match).");
-  }
-  return { ok: true, content: reread };
+  const confirmed = await confirmWrittenContent(content, () => readFile(filePath));
+  if (!confirmed.ok) return fail(confirmed.reason);
+  return { ok: true, content: confirmed.content };
 }
 
 /**
