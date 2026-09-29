@@ -152,12 +152,14 @@ describe("provenance checker", () => {
     assert.equal(posixPrefixMatch("benchmarks\\fixtures\\stress\\legacy\\a.txt", "benchmarks\\fixtures\\"), true);
     assert.equal(posixPrefixMatch("src\\App.tsx", "benchmarks\\fixtures\\"), false);
 
-    const diskRegister = await readFile(new URL("../PROVENANCE.md", import.meta.url), "utf8");
-    const diskInventory = await readFile(new URL("./SOURCE_INVENTORY.md", import.meta.url), "utf8");
-    const liveRegister = toCrlf(diskRegister);
-    const liveInventory = toCrlf(diskInventory);
-    assert.equal(toCrlf(diskRegister.replace(/\n/g, "\r\n")), liveRegister);
-    assert.equal(toCrlf(diskInventory.replace(/\n/g, "\r\n")), liveInventory);
+    const diskRegister = await readFile(new URL("../PROVENANCE.md", import.meta.url));
+    const diskInventory = await readFile(new URL("./SOURCE_INVENTORY.md", import.meta.url));
+    const liveRegisterBytes = Buffer.from(toCrlf(diskRegister.toString("utf8")), "utf8");
+    const liveInventoryBytes = Buffer.from(toCrlf(diskInventory.toString("utf8")), "utf8");
+    assert.equal(liveRegisterBytes.equals(Buffer.from(toCrlf(liveRegisterBytes.toString("utf8")), "utf8")), true);
+    assert.equal(liveInventoryBytes.equals(Buffer.from(toCrlf(liveInventoryBytes.toString("utf8")), "utf8")), true);
+    const liveRegister = liveRegisterBytes.toString("utf8");
+    const liveInventory = liveInventoryBytes.toString("utf8");
     assertExactCrlf(liveRegister);
     assertExactCrlf(liveInventory);
     const live = await verifyProvenance({
