@@ -24,6 +24,7 @@ import {
   PROVIDER_USER_CANCEL_MESSAGE,
 } from "../providers/providerRequestRegistry.cjs";
 import { collectProcessTree, terminateTrackedPids } from "../processTree.cjs";
+import { runProjectTypecheck } from "../typecheckCompiler.cjs";
 
 /**
  * Post-generation setup (Phase 10): npm install, then typecheck + build.
@@ -46,6 +47,8 @@ export interface CommandResult {
   warningCount: number;
   timedOut: boolean;
   truncated: boolean;
+  /** Set when typecheck cannot find a trusted project-local compiler. */
+  unavailableTool?: boolean;
 }
 
 export interface GreenfieldSetupResult {
@@ -337,7 +340,7 @@ export async function runGreenfieldSetup(
 }
 
 export async function runGreenfieldTypecheck(root: string): Promise<CommandResult> {
-  return runGreenfieldCommand("npx tsc --noEmit", root, TYPECHECK_TIMEOUT_MS);
+  return runProjectTypecheck(root, TYPECHECK_TIMEOUT_MS);
 }
 
 export async function runGreenfieldBuild(root: string): Promise<CommandResult> {

@@ -5,8 +5,8 @@ import { EmptyState } from "@/components/EmptyState";
 import { deriveVerificationProblems } from "@/core/diagnostics/verificationProblems";
 
 /**
- * Bottom dock "Verification" tab (Phase 6). Runs `npx tsc --noEmit` and
- * `npm run build` in the open project and renders their status, diagnostics,
+ * Bottom dock "Verification" tab (Phase 6). Runs a project-local `tsc --noEmit`
+ * and `npm run build` in the open project and renders their status, diagnostics,
  * timing, and raw output. Read-only: no auto-fix, no AI.
  */
 export function VerificationView() {

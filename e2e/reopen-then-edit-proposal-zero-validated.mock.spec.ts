@@ -19,6 +19,7 @@ import {
   waitForPatchApplied,
   assertNoRenderLoopConsoleErrors,
 } from "./helpers/studio";
+import { installTrustedOfflineProjectDependencies } from "./helpers/offlineProjectCompiler.ts";
 
 const TASK_MANAGER_APP = `export default function App() {
   return (
@@ -54,11 +55,9 @@ async function seedDisposableTaskManager(): Promise<string> {
     await fs.copyFile(from, to);
   }
   await fs.writeFile(path.join(dest, "src/App.tsx"), TASK_MANAGER_APP, "utf8");
-  await fs.symlink(
-    path.join(projectRoot, "node_modules"),
-    path.join(dest, "node_modules"),
-    "dir",
-  );
+  // A node_modules symlink leaves the TypeScript package outside the project.
+  // Studio then refuses that compiler. Copy it into this disposable project.
+  await installTrustedOfflineProjectDependencies(dest, projectRoot);
   return dest;
 }
 

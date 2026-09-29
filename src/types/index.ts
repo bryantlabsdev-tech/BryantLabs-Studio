@@ -173,6 +173,8 @@ export interface CommandResult {
   readonly warningCount: number;
   readonly timedOut: boolean;
   readonly truncated: boolean;
+  /** True when typecheck found no trusted project-local compiler. */
+  readonly unavailableTool?: boolean;
 }
 
 export interface VerificationResult {
