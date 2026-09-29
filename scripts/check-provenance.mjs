@@ -95,7 +95,7 @@ export function parseProvenanceRegister(markdown) {
 
 export function parseInventoryRecords(markdown) {
   const records = [];
-  const fence = /```provenance-record\n([\s\S]*?)```/g;
+  const fence = /```provenance-record\r?\n([\s\S]*?)```/g;
   let match;
   while ((match = fence.exec(markdown))) {
     records.push(parseRecordBlock(match[1]));

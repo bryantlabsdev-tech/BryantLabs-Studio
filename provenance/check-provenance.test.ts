@@ -59,6 +59,17 @@ function block(overrides = {}, paths = ["src/"], exclusions = []) {
   return `\`\`\`provenance-record\n${lines.join("\n")}\npaths:\n${pathLines}\nexclusions:\n${exLines}\n\`\`\`\n`;
 }
 
+/** LF, CRLF, or a doubled CRCRLF all become exactly one CRLF per line. */
+function toCrlf(text: string): string {
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n/g, "\r\n");
+}
+
+function assertExactCrlf(text: string): void {
+  assert.ok(text.includes("\r\n"));
+  assert.equal(text.includes("\r\r"), false);
+  assert.equal(text.replace(/\r\n/g, "").includes("\n"), false);
+}
+
 function fullInventory(extraBlocks = "") {
   return [
     block({ id: "initial-application-source", material: APP_MATERIAL }),
@@ -107,6 +118,57 @@ describe("provenance checker", () => {
     assert.equal(result.ok, true, result.failures.join("; "));
     assert.equal(result.unverifiedCount, 3);
     assert.equal(result.registerCount, 5);
+  });
+
+  it("matches CRLF inventory and keeps Windows path separators inside the same scopes", async () => {
+    const registerCrlf = toCrlf(LIVE_REGISTER);
+    const inventoryCrlf = toCrlf(fullInventory());
+    assertExactCrlf(registerCrlf);
+    assertExactCrlf(inventoryCrlf);
+    const result = verifyProvenance({
+      registerMarkdown: registerCrlf,
+      inventoryMarkdown: inventoryCrlf,
+    });
+    assert.equal(result.ok, true, result.failures.join("; "));
+    assert.equal(result.registerCount, 5);
+    assert.equal(result.recordCount, 5);
+
+    const dropped = verifyProvenance({
+      registerMarkdown: registerCrlf,
+      inventoryMarkdown: toCrlf(fullInventory()).replace(
+        "material: npm dependencies",
+        "material: renamed dependencies",
+      ),
+    });
+    assert.equal(dropped.ok, false);
+    assert.match(dropped.failures.join("\n"), /no inventory record: npm dependencies/);
+    assert.match(dropped.failures.join("\n"), /Orphan inventory record npm-dependencies/);
+
+    const exclusions = ["benchmarks/fixtures/", "e2e/fixtures/", "package-lock.json"];
+    assert.equal(pathInEntireTreeScope("benchmarks\\fixtures\\stress\\legacy\\a.txt", exclusions), false);
+    assert.equal(pathInEntireTreeScope("e2e\\fixtures\\sudoku-vite\\src\\App.tsx", exclusions), false);
+    assert.equal(pathInEntireTreeScope("package-lock.json", exclusions), false);
+    assert.equal(pathInEntireTreeScope("src\\App.tsx", exclusions), true);
+    assert.equal(posixPrefixMatch("benchmarks\\fixtures\\stress\\legacy\\a.txt", "benchmarks\\fixtures\\"), true);
+    assert.equal(posixPrefixMatch("src\\App.tsx", "benchmarks\\fixtures\\"), false);
+
+    const diskRegister = await readFile(new URL("../PROVENANCE.md", import.meta.url));
+    const diskInventory = await readFile(new URL("./SOURCE_INVENTORY.md", import.meta.url));
+    const liveRegisterBytes = Buffer.from(toCrlf(diskRegister.toString("utf8")), "utf8");
+    const liveInventoryBytes = Buffer.from(toCrlf(diskInventory.toString("utf8")), "utf8");
+    assert.equal(liveRegisterBytes.equals(Buffer.from(toCrlf(liveRegisterBytes.toString("utf8")), "utf8")), true);
+    assert.equal(liveInventoryBytes.equals(Buffer.from(toCrlf(liveInventoryBytes.toString("utf8")), "utf8")), true);
+    const liveRegister = liveRegisterBytes.toString("utf8");
+    const liveInventory = liveInventoryBytes.toString("utf8");
+    assertExactCrlf(liveRegister);
+    assertExactCrlf(liveInventory);
+    const live = await verifyProvenance({
+      registerMarkdown: liveRegister,
+      inventoryMarkdown: liveInventory,
+    });
+    assert.equal(live.ok, true, live.failures.join("; "));
+    assert.equal(live.registerCount, 5);
+    assert.equal(live.recordCount, 5);
   });
 
   it("fails when a register row has no inventory record", () => {
