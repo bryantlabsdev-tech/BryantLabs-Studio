@@ -109,6 +109,42 @@ describe("provenance checker", () => {
     assert.equal(result.registerCount, 5);
   });
 
+  it("matches CRLF inventory and keeps Windows path separators inside the same scopes", async () => {
+    const result = verifyProvenance({
+      registerMarkdown: LIVE_REGISTER.replace(/\n/g, "\r\n"),
+      inventoryMarkdown: fullInventory().replace(/\n/g, "\r\n"),
+    });
+    assert.equal(result.ok, true, result.failures.join("; "));
+    assert.equal(result.registerCount, 5);
+    assert.equal(result.recordCount, 5);
+
+    const dropped = verifyProvenance({
+      registerMarkdown: LIVE_REGISTER.replace(/\n/g, "\r\n"),
+      inventoryMarkdown: fullInventory()
+        .replace(/\n/g, "\r\n")
+        .replace("material: npm dependencies", "material: renamed dependencies"),
+    });
+    assert.equal(dropped.ok, false);
+    assert.match(dropped.failures.join("\n"), /no inventory record: npm dependencies/);
+    assert.match(dropped.failures.join("\n"), /Orphan inventory record npm-dependencies/);
+
+    const exclusions = ["benchmarks/fixtures/", "e2e/fixtures/", "package-lock.json"];
+    assert.equal(pathInEntireTreeScope("benchmarks\\fixtures\\stress\\legacy\\a.txt", exclusions), false);
+    assert.equal(pathInEntireTreeScope("e2e\\fixtures\\sudoku-vite\\src\\App.tsx", exclusions), false);
+    assert.equal(pathInEntireTreeScope("package-lock.json", exclusions), false);
+    assert.equal(pathInEntireTreeScope("src\\App.tsx", exclusions), true);
+    assert.equal(posixPrefixMatch("benchmarks\\fixtures\\stress\\legacy\\a.txt", "benchmarks\\fixtures\\"), true);
+    assert.equal(posixPrefixMatch("src\\App.tsx", "benchmarks\\fixtures\\"), false);
+
+    const live = await verifyProvenance({
+      registerMarkdown: (await readFile(new URL("../PROVENANCE.md", import.meta.url), "utf8")).replace(/\n/g, "\r\n"),
+      inventoryMarkdown: (await readFile(new URL("./SOURCE_INVENTORY.md", import.meta.url), "utf8")).replace(/\n/g, "\r\n"),
+    });
+    assert.equal(live.ok, true, live.failures.join("; "));
+    assert.equal(live.registerCount, 5);
+    assert.equal(live.recordCount, 5);
+  });
+
   it("fails when a register row has no inventory record", () => {
     const result = verifyProvenance({
       registerMarkdown: LIVE_REGISTER,
