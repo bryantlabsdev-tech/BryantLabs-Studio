@@ -8,6 +8,17 @@ import {
   patchModelForProvider,
 } from "@/core/providers";
 import { resolveGreenfieldAutoWriteDecision } from "@/core/agent/greenfieldAutoWrite";
+import {
+  buildGreenfieldReviewSession,
+  createGreenfieldReviewProposal,
+  greenfieldFileFingerprint,
+  resolveApprovedGreenfieldWrite,
+  resolveGreenfieldReviewAction,
+  resolveOneAgentGreenfieldAfterParse,
+  isGreenfieldReviewSession,
+  type GreenfieldReviewProposal,
+} from "@/core/agent/greenfieldReviewGate";
+import { readStoredReviewFirstRaw } from "@/core/build/followUpPrefs";
 import { GREENFIELD_FILE_PATHS, greenfieldReviewFilePathList, greenfieldReviewFiles } from "@/core/greenfield";
 import type {
   GeneratedFile,
@@ -158,6 +169,8 @@ export function NewAppView({
     invokeRepairCall,
     recordAgentActivityMessage,
     registerGreenfieldRunControl,
+    holdGreenfieldReview,
+    planApplySession,
     rescan,
   } = useWorkspace();
 
@@ -188,11 +201,26 @@ export function NewAppView({
   const writeAndSetupRef = useRef<
     (
       targetFolder?: { path: string; name: string },
-      opts?: { autoApproved?: boolean; setupOnly?: boolean },
+      opts?: {
+        autoApproved?: boolean;
+        setupOnly?: boolean;
+        approvedFiles?: readonly { path: string; content: string }[];
+        proposalFingerprint?: string;
+      },
     ) => Promise<void>
   >(async () => {});
   const autoStartedRef = useRef(false);
   const autoPipelineTriggeredRef = useRef(false);
+  const heldProposalRef = useRef<GreenfieldReviewProposal | null>(null);
+  const reviewVisibleRef = useRef(false);
+  const acceptingReviewRef = useRef(false);
+  const writesCompletedRef = useRef(0);
+  const acceptReviewRef = useRef<() => Promise<void>>(async () => {});
+  const reviewContextRef = useRef({
+    projectPath: null as string | null,
+    generationId: null as string | null,
+    prompt: "",
+  });
   const recoveryStartedRef = useRef(false);
   const lastGreenfieldActivityRef = useRef<string | null>(null);
   const cancelledRef = useRef(false);
@@ -213,13 +241,17 @@ export function NewAppView({
         setWriteStatus("idle");
         setSetupStatus("idle");
         setRepairing(false);
+        heldProposalRef.current = null;
+        reviewVisibleRef.current = false;
+        holdGreenfieldReview(null);
       },
+      acceptReview: () => acceptReviewRef.current(),
       runRepair: async () => {
         await runGreenfieldRepairRef.current?.();
       },
     });
     return () => registerGreenfieldRunControl(null);
-  }, [agentOnly, registerGreenfieldRunControl]);
+  }, [agentOnly, holdGreenfieldReview, registerGreenfieldRunControl]);
 
   const typecheckDetails = useMemo(
     () => (setupResult ? resolveTypecheckDetails(setupResult) : undefined),
@@ -1006,7 +1038,12 @@ export function NewAppView({
 
   const writeAndSetup = async (
     targetFolder?: { path: string; name: string },
-    opts?: { autoApproved?: boolean; setupOnly?: boolean },
+    opts?: {
+      autoApproved?: boolean;
+      setupOnly?: boolean;
+      approvedFiles?: readonly { path: string; content: string }[];
+      proposalFingerprint?: string;
+    },
   ) => {
     const writeTarget = targetFolder ?? folder;
     if (!writeTarget) return;
@@ -1052,7 +1089,15 @@ export function NewAppView({
           ? greenfieldRun.filesWritten
           : [...GREENFIELD_FILE_PATHS];
     } else {
-    if (!files || (!approved && !opts?.autoApproved)) return;
+    const approvedPayload = opts?.approvedFiles;
+    const writePayload =
+      approvedPayload != null
+        ? opts?.proposalFingerprint &&
+          greenfieldFileFingerprint(approvedPayload) === opts.proposalFingerprint
+          ? approvedPayload
+          : null
+        : files;
+    if (!writePayload || (!approved && !opts?.autoApproved)) return;
     if (agentStreamlined && !agentOnly && opts?.autoApproved) {
       recordAgentActivityMessage("Writing files and running setup…");
     }
@@ -1088,7 +1133,7 @@ export function NewAppView({
     if (cancelledRef.current || !isThisRun()) return;
     const writeRes = await api.greenfieldWrite(
       writeTarget.path,
-      files as GeneratedFile[],
+      writePayload as GeneratedFile[],
       runId,
     );
     if (cancelledRef.current || !isThisRun()) return;
@@ -1128,7 +1173,7 @@ export function NewAppView({
         updateThisRun({
           writeStatus: "blocked",
           writeError: writeRes.error,
-          generatedFiles: files as GeneratedFile[],
+          generatedFiles: writePayload as GeneratedFile[],
           genStatus: "done",
           setupStatus: "idle",
           setupResult: null,
@@ -1572,6 +1617,102 @@ export function NewAppView({
   };
   writeAndSetupRef.current = writeAndSetup;
 
+  reviewContextRef.current = {
+    projectPath: folder?.path ?? project?.path ?? greenfieldRun.targetFolder ?? "",
+    generationId: greenfieldRun.generationId ?? generationIdRef.current ?? "greenfield",
+    prompt,
+    ...(files ? { files } : {}),
+  };
+
+  acceptReviewRef.current = async () => {
+    const proposal = heldProposalRef.current;
+    const shownFiles =
+      planApplySession && isGreenfieldReviewSession(planApplySession)
+        ? planApplySession.files.map((file) => ({
+            path: file.relPath,
+            content: file.proposal?.newContent ?? "",
+          }))
+        : undefined;
+    const action = resolveGreenfieldReviewAction({
+      proposal,
+      current: reviewContextRef.current,
+      decision: "accept",
+      writesCompleted: writesCompletedRef.current,
+    });
+    const approved =
+      action.write && proposal && files && shownFiles
+        ? resolveApprovedGreenfieldWrite({
+            proposal,
+            liveFiles: files,
+            shownFiles,
+          })
+        : null;
+    if (!action.write || !proposal || !approved?.ok) {
+      if (action.clearProposal || proposal) {
+        heldProposalRef.current = null;
+        reviewVisibleRef.current = false;
+        holdGreenfieldReview(null);
+      }
+      return;
+    }
+    acceptingReviewRef.current = true;
+    writesCompletedRef.current += 1;
+    heldProposalRef.current = null;
+    reviewVisibleRef.current = false;
+    holdGreenfieldReview(null);
+    setApproved(true);
+    appendGreenfieldRunLog("approve", "success", "Review accepted");
+    emitGreenfieldConsoleEvent("greenfield:review_approved", {
+      projectPath: folder?.path ?? greenfieldRun.targetFolder ?? null,
+      provider: greenfieldRun.provider,
+      model: greenfieldRun.model,
+      message: "Review accepted",
+    });
+    try {
+      await writeAndSetupRef.current(undefined, {
+        autoApproved: true,
+        approvedFiles: approved.files,
+        proposalFingerprint: proposal.fileFingerprint,
+      });
+    } finally {
+      acceptingReviewRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    const proposal = heldProposalRef.current;
+    if (!proposal || acceptingReviewRef.current) return;
+    const pending = resolveGreenfieldReviewAction({
+      proposal,
+      current: reviewContextRef.current,
+      decision: "pending",
+      writesCompleted: writesCompletedRef.current,
+    });
+    if (pending.reason === "invalidated") {
+      heldProposalRef.current = null;
+      reviewVisibleRef.current = false;
+      holdGreenfieldReview(null);
+      return;
+    }
+    if (planApplySession && isGreenfieldReviewSession(planApplySession)) {
+      reviewVisibleRef.current = true;
+      return;
+    }
+    if (reviewVisibleRef.current) {
+      reviewVisibleRef.current = false;
+      heldProposalRef.current = null;
+    }
+  }, [
+    planApplySession,
+    project?.path,
+    folder?.path,
+    greenfieldRun.generationId,
+    greenfieldRun.targetFolder,
+    prompt,
+    files,
+    holdGreenfieldReview,
+  ]);
+
   useEffect(() => {
     if (!agentStreamlined || !files) return;
     if (cancelledRef.current) return;
@@ -1603,6 +1744,25 @@ export function NewAppView({
           : prev,
       );
     }
+    const postParse = resolveOneAgentGreenfieldAfterParse({
+      agentStreamlined: true,
+      reviewFirstRaw: readStoredReviewFirstRaw(),
+      decisionReady: true,
+    });
+    if (postParse.action === "pause") {
+      writesCompletedRef.current = 0;
+      const proposal = createGreenfieldReviewProposal({
+        projectPath: reviewContextRef.current.projectPath ?? "",
+        generationId: reviewContextRef.current.generationId ?? "greenfield",
+        prompt: reviewContextRef.current.prompt,
+        files: decision.files,
+      });
+      heldProposalRef.current = proposal;
+      reviewVisibleRef.current = false;
+      holdGreenfieldReview(buildGreenfieldReviewSession(proposal));
+      appendGreenfieldRunLog("review", "running", "Review changes");
+      return;
+    }
     setApproved(true);
     const approveLabel = agentOnly
       ? "Auto-approved (One Agent)"
@@ -1622,6 +1782,8 @@ export function NewAppView({
     agentStreamlined,
     agentOnly,
     folder?.path,
+    project?.path,
+    greenfieldRun.generationId,
     greenfieldRun.targetFolder,
     greenfieldRun.provider,
     greenfieldRun.model,
@@ -1632,6 +1794,7 @@ export function NewAppView({
     setupStatus,
     prompt,
     appendGreenfieldRunLog,
+    holdGreenfieldReview,
     recordAgentActivityMessage,
     onSubmissionError,
   ]);

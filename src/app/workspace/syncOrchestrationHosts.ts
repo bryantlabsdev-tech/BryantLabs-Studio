@@ -21,6 +21,7 @@ import type { AIPatchOrchestrationHost } from "@/app/orchestration/aiPatchTypes"
 import type { AgentLoopSession } from "@/core/agentLoop";
 import type { BuilderSession } from "@/core/builder";
 import type { ExecutionSession } from "@/core/execution";
+import type { GreenfieldRunControl } from "@/core/agent/greenfieldReviewGate";
 import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
 import type { MemoryRetrievalResult } from "@/core/memory";
 import type { AIPatchSession } from "@/core/planner/aiTypes";
@@ -59,6 +60,7 @@ export interface SyncOrchestrationHostsInput {
   readonly aiPlanStatus: BuildPipelineHost["aiPlanStatus"];
   readonly autoFixSession: AutoFixSession | null;
   readonly greenfieldRun: GreenfieldRunSnapshot;
+  readonly greenfieldRunControlRef: MutableRefObject<GreenfieldRunControl | null>;
   readonly buildRunning: boolean;
   readonly pipelineRunning: boolean;
   readonly agentGreenfieldPanelActive: boolean;
@@ -356,6 +358,8 @@ export function syncOrchestrationHosts(
     clearRunContextForNewSubmit: input.clearRunContextForNewSubmit,
     startApplyPlan: input.startApplyPlan,
     approveAllPlanApplyFiles: input.approveAllPlanApplyFiles,
+    acceptGreenfieldReview: () =>
+      input.greenfieldRunControlRef.current?.acceptReview?.() ?? Promise.resolve(),
     applyApprovedPlanFiles: input.applyApprovedPlanFiles,
     cancelApplyPlan: input.cancelApplyPlan,
     executeApplyPlan: input.executeApplyPlan,

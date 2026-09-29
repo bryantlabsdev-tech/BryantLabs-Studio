@@ -282,6 +282,30 @@ describe("writeGreenfieldFiles", () => {
     await assert.rejects(fs.access(path.join(root, "src/App.tsx")));
   });
 
+  it("a re-read mismatch rolls back every committed file", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "bl-gf-reread-rollback-"));
+    const io: GreenfieldWriteIo = {
+      writeVerified: async (projRoot, filePath, content) => {
+        if (relFrom(root, filePath) === "src/App.tsx") {
+          return writeVerified(projRoot, filePath, content, async () => `${content}\n`);
+        }
+        return writeVerified(projRoot, filePath, content);
+      },
+      deleteProjectFile,
+    };
+    const result = await writeGreenfieldFiles(root, sampleFiles(), {
+      mode: "workspace",
+      io,
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.written, []);
+    assert.ok(result.errors.some((e) => /expected length=/.test(e) && /sha256=/.test(e)));
+    assert.ok(result.errors.some((e) => /Rolled back \d+ file/.test(e)));
+    await assert.rejects(fs.access(path.join(root, "package.json")));
+    await assert.rejects(fs.access(path.join(root, "src/App.tsx")));
+    await assert.rejects(fs.access(path.join(root, "src/main.tsx")));
+  });
+
   it("a later forced write failure restores package.json and deletes created src files", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "bl-gf-fail-later-"));
     const previous = '{"name":"keep-pkg"}\n';

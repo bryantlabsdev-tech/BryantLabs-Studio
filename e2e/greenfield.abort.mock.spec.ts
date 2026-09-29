@@ -12,6 +12,7 @@ import {
   openFixtureProject,
   sendAgentPrompt,
   waitForComposerReady,
+  acceptAgentReviewIfPresent,
   waitForGreenfieldRunStarted,
   waitForGreenfieldRunTerminal,
   assertNoRenderLoopConsoleErrors,
@@ -105,6 +106,9 @@ test.describe("Greenfield Stop aborts mock FieldFlow generation", () => {
     await sendAgentPrompt(page);
     await dismissBlockingDialogs(page);
     await waitForGreenfieldRunStarted(page);
+    await expect
+      .poll(async () => acceptAgentReviewIfPresent(page), { timeout: 120_000 })
+      .toBe(true);
 
     await expect
       .poll(
@@ -200,7 +204,7 @@ test.describe("Greenfield Stop aborts mock FieldFlow generation", () => {
     }
     await waitForGreenfieldRunStarted(page);
 
-    const outcome = await waitForGreenfieldRunTerminal(page);
+    const outcome = await waitForGreenfieldRunTerminal(page, { acceptReview: true });
     expect(outcome).toBe("success");
 
     const run = await page.evaluate(() => {

@@ -6,6 +6,8 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import {
+  confirmWrittenContent,
+  describeWriteRereadMismatch,
   validateWritePath,
   writeVerified,
   createProjectFile,
@@ -84,6 +86,70 @@ describe("fileWriter safety", () => {
     const result = await writeVerified(root, filePath, "hello");
     assert.equal(result.ok, true);
     assert.equal(await fs.readFile(filePath, "utf8"), "hello");
+  });
+
+  it("does not re-read after the first read matches", async () => {
+    let reads = 0;
+    const result = await confirmWrittenContent("abc", async () => {
+      reads += 1;
+      return "abc";
+    });
+    assert.equal(result.ok, true);
+    assert.equal(reads, 1);
+  });
+
+  it("retries a mismatched re-read once and accepts the second match", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "bl-writer-retry-"));
+    const filePath = path.join(root, "note.txt");
+    const content = "hello";
+    let reads = 0;
+    const result = await writeVerified(root, filePath, content, async () => {
+      reads += 1;
+      return reads === 1 ? "HELLO" : content;
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.content, content);
+    assert.equal(reads, 2);
+  });
+
+  it("accepts a second read when the first read is missing", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "bl-writer-missing-then-match-"));
+    const filePath = path.join(root, "note.txt");
+    const content = "hello";
+    let reads = 0;
+    const result = await writeVerified(root, filePath, content, async () => {
+      reads += 1;
+      return reads === 1 ? null : content;
+    });
+    assert.equal(result.ok, true);
+    assert.equal(reads, 2);
+  });
+
+  it("reports expected versus actual length and sha256 when both re-reads differ", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "bl-writer-mismatch-"));
+    const filePath = path.join(root, "note.txt");
+    const content = "hello";
+    const actual = "nope";
+    let reads = 0;
+    const result = await writeVerified(root, filePath, content, async () => {
+      reads += 1;
+      return reads === 1 ? `${actual}-first` : actual;
+    });
+    assert.equal(result.ok, false);
+    assert.equal(reads, 2);
+    assert.equal(result.reason, describeWriteRereadMismatch(content, actual));
+    assert.match(result.reason!, /Write verification failed \(re-read did not match\)/);
+    assert.match(result.reason!, /expected length=5 sha256=[0-9a-f]{64}/);
+    assert.match(result.reason!, /actual length=4 sha256=[0-9a-f]{64}/);
+  });
+
+  it("reports a missing file when the retry read is absent", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "bl-writer-missing-"));
+    const filePath = path.join(root, "note.txt");
+    const result = await writeVerified(root, filePath, "hello", async () => null);
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, describeWriteRereadMismatch("hello", null));
+    assert.match(result.reason!, /actual missing/);
   });
 
   it("treats deleting a missing file as success", async () => {

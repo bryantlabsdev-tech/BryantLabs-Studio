@@ -60,6 +60,7 @@ export type OrchestrationSyncRefs = Pick<
   | "agentControlRef"
   | "agentLastExecRef"
   | "applyPlanActiveRunIdRef"
+  | "greenfieldRunControlRef"
 >;
 
 export type OrchestrationSyncSetters = Pick<

@@ -11,6 +11,7 @@ import { buildPreferredFixPrompt } from "@/core/projectIntelligence/recommendati
 import type { MemoryRecommendation } from "@/core/projectIntelligence/types";
 import type { RailTool } from "@/core/layout/types";
 import { dispatchOpenDetailsPanel } from "@/core/layout/settingsNavigation";
+import type { GreenfieldRunControl } from "@/core/agent/greenfieldReviewGate";
 import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
 import type { Plan } from "@/core/planner";
 import type { AIPlanResult } from "@/core/planner/aiTypes";
@@ -47,10 +48,7 @@ export function useWorkspaceAgentRunGates(input: {
   readonly setRailToolState: React.Dispatch<React.SetStateAction<RailTool>>;
   readonly setGreenfieldRun: React.Dispatch<React.SetStateAction<GreenfieldRunSnapshot>>;
   readonly setAgentGreenfieldPanelActive: React.Dispatch<React.SetStateAction<boolean>>;
-  readonly greenfieldRunControlRef: React.MutableRefObject<{
-    cancel: () => void;
-    runRepair?: () => Promise<void>;
-  } | null>;
+  readonly greenfieldRunControlRef: React.MutableRefObject<GreenfieldRunControl | null>;
   readonly startAgent: (prompt: string) => Promise<void>;
   readonly recordAgentUserMessage: (prompt: string) => void;
   readonly recordAgentActivityMessage: (text: string) => void;

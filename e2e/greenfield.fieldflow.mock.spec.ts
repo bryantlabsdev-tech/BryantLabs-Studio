@@ -136,7 +136,7 @@ test.describe("FieldFlow greenfield (mock provider)", () => {
     await sendAgentPrompt(page);
     await dismissBlockingDialogs(page);
 
-    const outcome = await waitForGreenfieldRunTerminal(page);
+    const outcome = await waitForGreenfieldRunTerminal(page, { acceptReview: true });
     expect(outcome).toBe("success");
 
     const run = await page.evaluate(() => {

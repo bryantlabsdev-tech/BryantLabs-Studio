@@ -8,6 +8,7 @@ import type { ExecutionLogState } from "@/core/console/executionLogService";
 import type { ContextSnapshot } from "@/core/contextInspector";
 import type { EditKind, EditParams, Patch } from "@/core/editor";
 import type { ExecutionSession } from "@/core/execution";
+import type { GreenfieldRunControl } from "@/core/agent/greenfieldReviewGate";
 import type { GreenfieldRunSnapshot } from "@/core/greenfield/runState";
 import type { GreenfieldRunLogEntry } from "@/core/greenfield/runLog";
 import type {
@@ -231,6 +232,7 @@ export interface WorkspaceState {
   approveAgentAction(): Promise<void>;
   // ---- Plan apply (multi-file patch from plan) ----
   readonly planApplySession: PlanApplySession | null;
+  holdGreenfieldReview(session: PlanApplySession | null): void;
   readonly planApplyReviewing: boolean;
   readonly planApplyError: string | null;
   /** Propose patches for each plan file and open diff review. */
@@ -367,9 +369,7 @@ export interface WorkspaceState {
   setAgentGreenfieldPanelActive(active: boolean): void;
   cancelGreenfieldRun(): void;
   triggerGreenfieldRepair(): Promise<void>;
-  registerGreenfieldRunControl(
-    control: { cancel: () => void; runRepair?: () => Promise<void> } | null,
-  ): void;
+  registerGreenfieldRunControl(control: GreenfieldRunControl | null): void;
   // ---- Autonomous fix loop (Phase 13) ----
   readonly autoFixSession: AutoFixSession | null;
   approveAutoFixRepair(): Promise<void>;

@@ -22,6 +22,7 @@ import {
   reconcileStaleGreenfieldRun,
 } from "@/core/agent/greenfieldRunLifecycle";
 import { emitGreenfieldConsoleEvent } from "@/core/console/greenfieldConsoleEvents";
+import type { GreenfieldRunControl } from "@/core/agent/greenfieldReviewGate";
 import type { CenterTab } from "@/core/layout/types";
 import type { OrchestrationHostRefs } from "@/app/workspace/useOrchestrationHostRefs";
 import type { BryantLabsApi } from "@/types";
@@ -34,10 +35,7 @@ export function useWorkspaceGreenfieldRunHelpers(input: {
   readonly setGreenfieldRun: React.Dispatch<React.SetStateAction<GreenfieldRunSnapshot>>;
   readonly setCenterTab: React.Dispatch<React.SetStateAction<CenterTab>>;
   readonly setAgentGreenfieldPanelActive: React.Dispatch<React.SetStateAction<boolean>>;
-  readonly greenfieldRunControlRef: React.MutableRefObject<{
-    cancel: () => void;
-    runRepair?: () => Promise<void>;
-  } | null>;
+  readonly greenfieldRunControlRef: React.MutableRefObject<GreenfieldRunControl | null>;
   readonly providerInvokeHostRef: OrchestrationHostRefs["providerInvokeHostRef"];
   readonly updateGreenfieldRun: (patch: Partial<GreenfieldRunSnapshot>) => void;
   readonly persistAnalyticsRecord: (
@@ -159,7 +157,7 @@ export function useWorkspaceGreenfieldRunHelpers(input: {
   ]);
 
   const registerGreenfieldRunControl = useCallback(
-    (control: { cancel: () => void; runRepair?: () => Promise<void> } | null) => {
+    (control: GreenfieldRunControl | null) => {
       input.greenfieldRunControlRef.current = control;
     },
     [input.greenfieldRunControlRef],

@@ -4,6 +4,7 @@ import {
   resolveFollowUpAutoContinue,
   shouldAutoPromoteFollowUpReview,
 } from "@/core/build/followUpPrefs";
+import { isGreenfieldReviewSession } from "@/core/agent/greenfieldReviewGate";
 import type { BuildLoopMode, BuildLoopStatus } from "@/core/build";
 import { PipelineReviewGates } from "@/app/orchestration/pipelineGates";
 import {
@@ -141,6 +142,10 @@ export function useBuildPipelineOrchestration(
   const continueBuildAfterReview = useCallback(async () => {
     const host = hostRef.current;
     if (!host) return;
+    if (isGreenfieldReviewSession(host.planApplySession)) {
+      await host.acceptGreenfieldReview?.();
+      return;
+    }
     if (buildMode === "pipeline") {
       continueMultiAgentPipeline();
       return;
@@ -187,6 +192,7 @@ export function useBuildPipelineOrchestration(
   const retryApplyPlanReview = useCallback(async () => {
     const host = hostRef.current;
     if (!host?.executeApplyPlan) return;
+    if (isGreenfieldReviewSession(host.planApplySession)) return;
     const prompt = host.planApplySession?.prompt ?? host.lastPlanPrompt ?? "";
     setBuildRunning(true);
     setBuildError(null);

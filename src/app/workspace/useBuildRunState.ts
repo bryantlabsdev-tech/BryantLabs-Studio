@@ -7,15 +7,13 @@ import {
   greenfieldRunSnapshotsEqual,
   type GreenfieldRunSnapshot,
 } from "@/core/greenfield/runState";
+import type { GreenfieldRunControl } from "@/core/agent/greenfieldReviewGate";
 import type { GreenfieldRunLogEntry } from "@/core/greenfield/runLog";
 
 export interface BuildRunWorkspaceState {
   readonly greenfieldRun: GreenfieldRunSnapshot;
   readonly setGreenfieldRun: React.Dispatch<React.SetStateAction<GreenfieldRunSnapshot>>;
-  readonly greenfieldRunControlRef: React.MutableRefObject<{
-    cancel: () => void;
-    runRepair?: () => Promise<void>;
-  } | null>;
+  readonly greenfieldRunControlRef: React.MutableRefObject<GreenfieldRunControl | null>;
   readonly updateGreenfieldRun: (
     patch:
       | Partial<GreenfieldRunSnapshot>
@@ -33,10 +31,7 @@ export interface BuildRunWorkspaceState {
 /** Greenfield run snapshot and control refs. */
 export function useBuildRunWorkspaceState(): BuildRunWorkspaceState {
   const [greenfieldRun, setGreenfieldRunState] = useState(emptyGreenfieldRun());
-  const greenfieldRunControlRef = useRef<{
-    cancel: () => void;
-    runRepair?: () => Promise<void>;
-  } | null>(null);
+  const greenfieldRunControlRef = useRef<GreenfieldRunControl | null>(null);
 
   const setGreenfieldRun = useCallback<React.Dispatch<React.SetStateAction<GreenfieldRunSnapshot>>>(
     (action) => {

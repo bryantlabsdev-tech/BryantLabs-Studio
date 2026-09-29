@@ -57,7 +57,7 @@ test.describe("Create then edit (mock provider)", () => {
     await sendAgentPrompt(page);
     await dismissBlockingDialogs(page);
 
-    const createOutcome = await waitForGreenfieldRunTerminal(page);
+    const createOutcome = await waitForGreenfieldRunTerminal(page, { acceptReview: true });
     expect(createOutcome).toBe("success");
 
     const afterCreate = await page.evaluate(() => {
